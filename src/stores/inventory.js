@@ -2,12 +2,20 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { inventoryApi } from '../utils/api'
 import { readStoredJson, writeStoredJson } from '../utils/storage'
+import { DEMO_INVENTORY } from '../utils/sampleData'
 
 export const useInventoryStore = defineStore('inventory', () => {
   const items = ref([])
 
   function init() {
-    items.value = readStoredJson('tcm_inventory', []) || []
+    const saved = readStoredJson('tcm_inventory', []) || []
+    if (saved.length > 0) {
+      items.value = saved
+    } else {
+      // 首次启动时加载演示库存数据
+      items.value = DEMO_INVENTORY.map(i => ({ ...i }))
+      saveState()
+    }
   }
 
   function saveState() {

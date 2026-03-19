@@ -251,15 +251,57 @@ function handlePrintRx(idx) {
 }
 
 function addRxItem() {
-  rxForm.value.items.push({ name: '', dosage: 0, unit: 'g', category: '', guijing: '', nature: '', taste: '', pricePerUnit: 0 })
+  rxForm.value.items.push({
+    name: '', dosage: 0, unit: 'g', category: '', guijing: '', nature: '', taste: '', pricePerUnit: 0,
+    convertedQty: null, convertedUnit: '', supplierName: '', supplierId: null,
+    inventoryId: null, inventoryStock: 0, stockSufficient: false, allCandidates: [],
+  })
 }
 
 function removeRxItem(idx) {
   rxForm.value.items.splice(idx, 1)
 }
 
+// 单味药的克数/名称变更时重新匹配库存并换算
+function recalcSingleItem(idx) {
+  const prescType = rxForm.value.prescriptionType || 'raw_herbs'
+  const qty = rxForm.value.quantity || 7
+  if (prescType === 'none') return
+  const item = rxForm.value.items[idx]
+  if (!item || !item.name) return
+
+  const result = calculatePrescription(
+    [{ herbName: item.name, dosage: item.dosage, unit: item.unit || 'g' }],
+    qty, prescType, inventoryStore.items, null,
+  )
+  if (result.items[0]) {
+    const r = result.items[0]
+    item.convertedQty = r.convertedQty
+    item.convertedUnit = r.convertedUnit
+    item.gramsPerPacket = r.gramsPerPacket
+    item.supplierId = r.supplierId
+    item.supplierName = r.supplierName
+    item.inventoryId = r.inventoryId
+    item.inventoryStock = r.inventoryStock
+    item.stockSufficient = r.stockSufficient
+    item.allCandidates = r.allCandidates
+    item.pricePerUnit = r.pricePerUnit
+  }
+}
+
+// 药材名称输入失焦时触发库存匹配
+function onHerbNameBlur(idx) {
+  recalcSingleItem(idx)
+}
+
 const rxSubtotal = computed(() =>
-  rxForm.value.items.reduce((s, i) => s + (i.dosage || 0) * (i.pricePerUnit || 0) * (rxForm.value.quantity || 1), 0)
+  rxForm.value.items.reduce((s, i) => {
+    // 优先使用 prescriptionCalc 换算后的 subtotal（粉剂 g→包 已正确计算）
+    if (i.convertedQty != null && i.pricePerUnit) {
+      return s + (i.convertedQty * i.pricePerUnit)
+    }
+    return s + (i.dosage || 0) * (i.pricePerUnit || 0) * (rxForm.value.quantity || 1)
+  }, 0)
 )
 
 // 在处方对话框中搜索方剂 — 集成换算引擎
@@ -1462,7 +1504,7 @@ function handleSendReport() {
     <!-- ═══════════════════════════════════
          处方管理抽屉（Phase 1/5 改为 el-drawer）
     ═══════════════════════════════════ -->
-    <el-drawer v-model="showRxDialog" title="New Prescription（新建处方）" size="860px" direction="rtl" :close-on-press-escape="true" :destroy-on-close="false">
+    <el-drawer v-model="showRxDialog" title="New Prescription（新建处方）" size="960px" direction="rtl" :close-on-press-escape="true" :destroy-on-close="false">
       <div class="rx-dialog-body">
         <el-form :model="rxForm" label-width="160px" size="small" style="margin-bottom:12px">
           <el-row :gutter="16">
@@ -1524,13 +1566,13 @@ function handleSendReport() {
         </div>
         <el-table :data="rxForm.items" size="small" max-height="360" style="margin-bottom:8px">
           <el-table-column label="药材 Herb" min-width="110">
-            <template #default="{ row }">
-              <el-input v-model="row.name" size="small" :placeholder="t('consultation.herbNamePlaceholder')" />
+            <template #default="{ row, $index }">
+              <el-input v-model="row.name" size="small" :placeholder="t('consultation.herbNamePlaceholder')" @blur="onHerbNameBlur($index)" />
             </template>
           </el-table-column>
           <el-table-column label="原方(g)" width="80">
-            <template #default="{ row }">
-              <el-input-number v-model="row.dosage" :min="0" :step="1" size="small" style="width:70px" />
+            <template #default="{ row, $index }">
+              <el-input-number v-model="row.dosage" :min="0" :step="1" size="small" style="width:70px" @change="recalcSingleItem($index)" />
             </template>
           </el-table-column>
           <el-table-column label="换算量" width="100" v-if="rxForm.prescriptionType !== 'none'">
@@ -1541,24 +1583,24 @@ function handleSendReport() {
               <span v-else style="color:#aaa">-</span>
             </template>
           </el-table-column>
-          <el-table-column label="供应商" width="110" v-if="rxForm.prescriptionType !== 'none'">
+          <el-table-column label="供应商" width="160" v-if="rxForm.prescriptionType !== 'none'">
             <template #default="{ row, $index }">
               <el-select
                 v-if="row.allCandidates && row.allCandidates.length > 0"
                 :model-value="row.inventoryId"
                 size="small"
-                style="width:100px"
+                style="width:150px"
                 @change="(val) => { const inv = row.allCandidates.find(c => c.id === val); if (inv) switchSupplier($index, inv) }"
               >
                 <el-option
                   v-for="c in row.allCandidates"
                   :key="c.id"
-                  :label="(c.supplier || '默认') + ' (' + c.quantity + (c.category === 'powder' ? '包' : c.unit || 'g') + ')'"
+                  :label="(c.supplier || '默认') + (c.gramsPerPacket ? ' ' + c.gramsPerPacket + 'g/包' : '') + ' (' + c.quantity + (c.category === 'powder' ? '包' : c.unit || 'g') + ')'"
                   :value="c.id"
                 />
               </el-select>
               <span v-else-if="row.supplierName" style="font-size:12px; color:#888">{{ row.supplierName }}</span>
-              <span v-else style="color:#ccc; font-size:12px">-</span>
+              <span v-else style="color:#ccc; font-size:12px">无库存</span>
             </template>
           </el-table-column>
           <el-table-column label="库存" width="70" v-if="rxForm.prescriptionType !== 'none'">

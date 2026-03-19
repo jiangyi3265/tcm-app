@@ -2,12 +2,20 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { suppliersApi } from '../utils/api'
 import { readStoredJson, writeStoredJson } from '../utils/storage'
+import { DEMO_SUPPLIERS } from '../utils/sampleData'
 
 export const useSuppliersStore = defineStore('suppliers', () => {
   const suppliers = ref([])
 
   function init() {
-    suppliers.value = readStoredJson('tcm_suppliers', []) || []
+    const saved = readStoredJson('tcm_suppliers', []) || []
+    if (saved.length > 0) {
+      suppliers.value = saved
+    } else {
+      // 首次启动时加载演示供应商数据
+      suppliers.value = DEMO_SUPPLIERS.map(s => ({ ...s }))
+      saveState()
+    }
   }
 
   function saveState() {

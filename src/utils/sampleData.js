@@ -383,24 +383,56 @@ export const DEMO_APPOINTMENTS = [
   },
 ]
 
-// 演示库存数据
+// 演示库存数据（supplierId 与后端 v3 SQL 保持一致: supplier-1=同仁堂, supplier-2=康仁堂, supplier-3=本草药材, supplier-4=华佗）
 export const DEMO_INVENTORY = [
   // 粉剂
-  { id: 'inv-1', name: '逍遥散', category: 'powder', unit: '包', quantity: 50, pricePerUnit: 35, supplier: '同仁堂', gramsPerPacket: 6, minStockLevel: 10, isActive: true },
-  { id: 'inv-2', name: '六味地黄丸（浓缩粉）', category: 'powder', unit: '包', quantity: 8, pricePerUnit: 40, supplier: '同仁堂', gramsPerPacket: 6, minStockLevel: 10, isActive: true },
-  { id: 'inv-3', name: '补中益气汤', category: 'powder', unit: '包', quantity: 30, pricePerUnit: 38, supplier: '康仁堂', gramsPerPacket: 5, minStockLevel: 10, isActive: true },
+  { id: 'inv-1', name: '逍遥散', category: 'powder', unit: '包', quantity: 50, pricePerUnit: 35, supplier: '同仁堂', supplierId: 'supplier-1', gramsPerPacket: 6, minStockLevel: 10, isActive: true },
+  { id: 'inv-2', name: '六味地黄丸（浓缩粉）', category: 'powder', unit: '包', quantity: 8, pricePerUnit: 40, supplier: '同仁堂', supplierId: 'supplier-1', gramsPerPacket: 6, minStockLevel: 10, isActive: true },
+  { id: 'inv-3', name: '补中益气汤', category: 'powder', unit: '包', quantity: 30, pricePerUnit: 38, supplier: '康仁堂', supplierId: 'supplier-2', gramsPerPacket: 5, minStockLevel: 10, isActive: true },
   // 草药
-  { id: 'inv-4', name: '黄芪', category: 'raw_herbs', unit: 'g', quantity: 2000, pricePerUnit: 0.08, supplier: '本草药材', gramsPerPacket: null, minStockLevel: 500, isActive: true },
-  { id: 'inv-5', name: '党参', category: 'raw_herbs', unit: 'g', quantity: 1500, pricePerUnit: 0.12, supplier: '本草药材', gramsPerPacket: null, minStockLevel: 300, isActive: true },
-  { id: 'inv-6', name: '白术', category: 'raw_herbs', unit: 'g', quantity: 800, pricePerUnit: 0.10, supplier: '本草药材', gramsPerPacket: null, minStockLevel: 200, isActive: true },
-  { id: 'inv-7', name: '茯苓', category: 'raw_herbs', unit: 'g', quantity: 1200, pricePerUnit: 0.09, supplier: '本草药材', gramsPerPacket: null, minStockLevel: 300, isActive: true },
-  { id: 'inv-8', name: '柴胡', category: 'raw_herbs', unit: 'g', quantity: 150, pricePerUnit: 0.15, supplier: '本草药材', gramsPerPacket: null, minStockLevel: 200, isActive: true },
-  { id: 'inv-9', name: '当归', category: 'raw_herbs', unit: 'g', quantity: 900, pricePerUnit: 0.20, supplier: '本草药材', gramsPerPacket: null, minStockLevel: 200, isActive: true },
-  { id: 'inv-10', name: '甘草', category: 'raw_herbs', unit: 'g', quantity: 1800, pricePerUnit: 0.06, supplier: '本草药材', gramsPerPacket: null, minStockLevel: 300, isActive: true },
+  { id: 'inv-4', name: '黄芪', category: 'raw_herbs', unit: 'g', quantity: 2000, pricePerUnit: 0.08, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 500, isActive: true },
+  { id: 'inv-5', name: '党参', category: 'raw_herbs', unit: 'g', quantity: 1500, pricePerUnit: 0.12, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 300, isActive: true },
+  { id: 'inv-6', name: '白术', category: 'raw_herbs', unit: 'g', quantity: 800, pricePerUnit: 0.10, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 200, isActive: true },
+  { id: 'inv-7', name: '茯苓', category: 'raw_herbs', unit: 'g', quantity: 1200, pricePerUnit: 0.09, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 300, isActive: true },
+  { id: 'inv-8', name: '柴胡', category: 'raw_herbs', unit: 'g', quantity: 150, pricePerUnit: 0.15, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 200, isActive: true },
+  { id: 'inv-9', name: '当归', category: 'raw_herbs', unit: 'g', quantity: 900, pricePerUnit: 0.20, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 200, isActive: true },
+  { id: 'inv-10', name: '甘草', category: 'raw_herbs', unit: 'g', quantity: 1800, pricePerUnit: 0.06, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 300, isActive: true },
+  // 草药 - 人参（多供应商）
+  { id: 'inv-14', name: '人参', category: 'raw_herbs', unit: 'g', quantity: 500, pricePerUnit: 0.80, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 100, isActive: true },
+  { id: 'inv-15', name: '人参', category: 'raw_herbs', unit: 'g', quantity: 300, pricePerUnit: 1.20, supplier: '同仁堂', supplierId: 'supplier-1', gramsPerPacket: null, minStockLevel: 100, isActive: true },
+  // 草药 - 麦冬（多供应商）
+  { id: 'inv-16', name: '麦冬', category: 'raw_herbs', unit: 'g', quantity: 1200, pricePerUnit: 0.15, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 200, isActive: true },
+  { id: 'inv-17', name: '麦冬', category: 'raw_herbs', unit: 'g', quantity: 600, pricePerUnit: 0.18, supplier: '康仁堂', supplierId: 'supplier-2', gramsPerPacket: null, minStockLevel: 200, isActive: true },
+  // 草药 - 五味子（多供应商）
+  { id: 'inv-18', name: '五味子', category: 'raw_herbs', unit: 'g', quantity: 800, pricePerUnit: 0.25, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 150, isActive: true },
+  { id: 'inv-19', name: '五味子', category: 'raw_herbs', unit: 'g', quantity: 400, pricePerUnit: 0.30, supplier: '华佗', supplierId: 'supplier-4', gramsPerPacket: null, minStockLevel: 100, isActive: true },
+  // 草药 - 其他常用药
+  { id: 'inv-20', name: '白芍', category: 'raw_herbs', unit: 'g', quantity: 1000, pricePerUnit: 0.12, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 200, isActive: true },
+  { id: 'inv-21', name: '熟地黄', category: 'raw_herbs', unit: 'g', quantity: 600, pricePerUnit: 0.14, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 200, isActive: true },
+  { id: 'inv-22', name: '黄芩', category: 'raw_herbs', unit: 'g', quantity: 700, pricePerUnit: 0.10, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 150, isActive: true },
+  { id: 'inv-23', name: '山药', category: 'raw_herbs', unit: 'g', quantity: 900, pricePerUnit: 0.08, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 200, isActive: true },
+  { id: 'inv-24', name: '陈皮', category: 'raw_herbs', unit: 'g', quantity: 500, pricePerUnit: 0.05, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 100, isActive: true },
+  { id: 'inv-25', name: '川芎', category: 'raw_herbs', unit: 'g', quantity: 400, pricePerUnit: 0.18, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 100, isActive: true },
+  { id: 'inv-26', name: '桂枝', category: 'raw_herbs', unit: 'g', quantity: 600, pricePerUnit: 0.10, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 100, isActive: true },
+  { id: 'inv-27', name: '生姜', category: 'raw_herbs', unit: 'g', quantity: 2000, pricePerUnit: 0.03, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 300, isActive: true },
+  { id: 'inv-28', name: '大枣', category: 'raw_herbs', unit: 'g', quantity: 1500, pricePerUnit: 0.04, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 200, isActive: true },
+  { id: 'inv-29', name: '薄荷', category: 'raw_herbs', unit: 'g', quantity: 300, pricePerUnit: 0.06, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 80, isActive: true },
+  { id: 'inv-30', name: '法半夏', category: 'raw_herbs', unit: 'g', quantity: 400, pricePerUnit: 0.22, supplier: '本草药材', supplierId: 'supplier-3', gramsPerPacket: null, minStockLevel: 100, isActive: true },
+  // 粉剂 - 人参（多供应商，不同gramsPerPacket）
+  { id: 'inv-31', name: '人参', category: 'powder', unit: '包', quantity: 200, pricePerUnit: 5.00, supplier: '同仁堂', supplierId: 'supplier-1', gramsPerPacket: 2, minStockLevel: 30, isActive: true },
+  { id: 'inv-32', name: '人参', category: 'powder', unit: '包', quantity: 150, pricePerUnit: 3.50, supplier: '康仁堂', supplierId: 'supplier-2', gramsPerPacket: 5, minStockLevel: 30, isActive: true },
+  // 粉剂 - 麦冬
+  { id: 'inv-33', name: '麦冬', category: 'powder', unit: '包', quantity: 300, pricePerUnit: 2.00, supplier: '同仁堂', supplierId: 'supplier-1', gramsPerPacket: 3, minStockLevel: 40, isActive: true },
+  { id: 'inv-34', name: '麦冬', category: 'powder', unit: '包', quantity: 180, pricePerUnit: 1.80, supplier: '康仁堂', supplierId: 'supplier-2', gramsPerPacket: 5, minStockLevel: 30, isActive: true },
+  // 粉剂 - 五味子
+  { id: 'inv-35', name: '五味子', category: 'powder', unit: '包', quantity: 250, pricePerUnit: 2.50, supplier: '同仁堂', supplierId: 'supplier-1', gramsPerPacket: 2, minStockLevel: 30, isActive: true },
+  { id: 'inv-36', name: '五味子', category: 'powder', unit: '包', quantity: 100, pricePerUnit: 2.20, supplier: '华佗', supplierId: 'supplier-4', gramsPerPacket: 3, minStockLevel: 20, isActive: true },
+  // 粉剂 - 生脉散 (成方粉剂)
+  { id: 'inv-37', name: '生脉散', category: 'powder', unit: '包', quantity: 60, pricePerUnit: 8.00, supplier: '同仁堂', supplierId: 'supplier-1', gramsPerPacket: 6, minStockLevel: 10, isActive: true },
   // 成药
-  { id: 'inv-11', name: '六味地黄丸', category: 'pills', unit: '盒', quantity: 25, pricePerUnit: 28, supplier: '同仁堂', gramsPerPacket: null, minStockLevel: 5, isActive: true },
-  { id: 'inv-12', name: '逍遥丸', category: 'pills', unit: '盒', quantity: 3, pricePerUnit: 22, supplier: '同仁堂', gramsPerPacket: null, minStockLevel: 5, isActive: true },
-  { id: 'inv-13', name: '金匮肾气丸', category: 'pills', unit: '瓶', quantity: 15, pricePerUnit: 35, supplier: '华佗', gramsPerPacket: null, minStockLevel: 5, isActive: true },
+  { id: 'inv-11', name: '六味地黄丸', category: 'pills', unit: '盒', quantity: 25, pricePerUnit: 28, supplier: '同仁堂', supplierId: 'supplier-1', gramsPerPacket: null, minStockLevel: 5, isActive: true },
+  { id: 'inv-12', name: '逍遥丸', category: 'pills', unit: '盒', quantity: 3, pricePerUnit: 22, supplier: '同仁堂', supplierId: 'supplier-1', gramsPerPacket: null, minStockLevel: 5, isActive: true },
+  { id: 'inv-13', name: '金匮肾气丸', category: 'pills', unit: '瓶', quantity: 15, pricePerUnit: 35, supplier: '华佗', supplierId: 'supplier-4', gramsPerPacket: null, minStockLevel: 5, isActive: true },
 ]
 
 // 常用方剂库
@@ -499,6 +531,42 @@ export const FORMULA_DATABASE = [
       { name: '桂枝', dosage: 3 },
     ],
   },
+  {
+    name: '生脉散',
+    herbs: [
+      { name: '人参', dosage: 10 },
+      { name: '麦冬', dosage: 30 },
+      { name: '五味子', dosage: 6 },
+    ],
+  },
+  {
+    name: '归脾汤',
+    herbs: [
+      { name: '黄芪', dosage: 15 },
+      { name: '党参', dosage: 15 },
+      { name: '白术', dosage: 10 },
+      { name: '茯苓', dosage: 15 },
+      { name: '当归', dosage: 10 },
+      { name: '甘草', dosage: 6 },
+    ],
+  },
+  {
+    name: '四物汤',
+    herbs: [
+      { name: '当归', dosage: 10 },
+      { name: '白芍', dosage: 10 },
+      { name: '川芎', dosage: 8 },
+      { name: '熟地黄', dosage: 15 },
+    ],
+  },
+]
+
+// 演示供应商数据（与后端 tcm_upgrade_v3 保持一致）
+export const DEMO_SUPPLIERS = [
+  { id: 'supplier-1', name: '同仁堂', contact: '张经理', phone: '010-65135566', email: 'tongren@example.com', address: '北京市东城区东兴隆街52号', notes: '百年老字号', isActive: true },
+  { id: 'supplier-2', name: '康仁堂', contact: '李经理', phone: '010-82863366', email: 'kangren@example.com', address: '北京市昌平区科技园区', notes: '中药配方颗粒供应商', isActive: true },
+  { id: 'supplier-3', name: '本草药材', contact: '王经理', phone: '010-67891234', email: 'bencao@example.com', address: '北京市丰台区南苑路', notes: '散装草药供应商', isActive: true },
+  { id: 'supplier-4', name: '华佗', contact: '赵经理', phone: '020-88881234', email: 'huatuo@example.com', address: '广东省广州市天河区', notes: '成药供应商', isActive: true },
 ]
 
 // 演示房间数据

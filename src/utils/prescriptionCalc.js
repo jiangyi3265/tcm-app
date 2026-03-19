@@ -36,12 +36,19 @@ export function findInventoryMatches(herbName, category, inventoryItems) {
 }
 
 /**
- * 按供应商偏好排序候选库存项
+ * 按供应商偏好排序候选库存项（含智能选型算法 §2.3）
+ *
+ * 排序优先级:
+ *   1. 指定供应商优先
+ *   2. 粉剂: 精确匹配(D mod S = 0) > 最小浪费(W最小) > 库存量降序
+ *   3. 非粉剂: 库存量降序
+ *
  * @param {Array} candidates - 候选库存项
  * @param {string|null} preferredSupplierId - 优先供应商ID
+ * @param {number} targetGrams - 目标克数（粉剂换算用）
  * @returns {Array} 排序后的候选项
  */
-export function sortBySupplierPreference(candidates, preferredSupplierId) {
+export function sortBySupplierPreference(candidates, preferredSupplierId, targetGrams = 0) {
   return [...candidates].sort((a, b) => {
     // 优先选指定供应商
     if (preferredSupplierId) {
@@ -56,6 +63,18 @@ export function sortBySupplierPreference(candidates, preferredSupplierId) {
       )
         return 1
     }
+
+    // 粉剂智能选型：按浪费量排序
+    if (targetGrams > 0 && a.gramsPerPacket && b.gramsPerPacket) {
+      const wasteA = (Math.ceil(targetGrams / a.gramsPerPacket) * a.gramsPerPacket) - targetGrams
+      const wasteB = (Math.ceil(targetGrams / b.gramsPerPacket) * b.gramsPerPacket) - targetGrams
+      // 精确匹配优先（waste = 0）
+      if (wasteA === 0 && wasteB !== 0) return -1
+      if (wasteB === 0 && wasteA !== 0) return 1
+      // 浪费少的优先
+      if (wasteA !== wasteB) return wasteA - wasteB
+    }
+
     // 然后按库存量降序
     return (b.quantity || 0) - (a.quantity || 0)
   })
@@ -91,7 +110,12 @@ export function convertSingleHerb(
     category,
     inventoryItems,
   )
-  const sorted = sortBySupplierPreference(candidates, preferredSupplierId)
+  // 粉剂模式传入目标克数，启用智能选型
+  const sorted = sortBySupplierPreference(
+    candidates,
+    preferredSupplierId,
+    prescriptionType === 'powder' ? totalGrams : 0,
+  )
   const matched = sorted[0] || null
 
   let convertedQty, convertedUnit, pricePerUnit, subtotal
@@ -113,10 +137,10 @@ export function convertSingleHerb(
       break
     }
     case 'pills': {
-      convertedQty = item.dosage || 0
+      convertedQty = (item.dosage || 0) * quantity
       convertedUnit = '盒'
       pricePerUnit = matched?.pricePerUnit || 0
-      subtotal = convertedQty * pricePerUnit * quantity
+      subtotal = convertedQty * pricePerUnit
       break
     }
     default: {
@@ -220,10 +244,10 @@ export function recalcWithSupplier(
       break
     }
     case 'pills': {
-      convertedQty = currentItem.originalDosage || currentItem.dosage || 0
+      convertedQty = (currentItem.originalDosage || currentItem.dosage || 0) * quantity
       convertedUnit = '盒'
       pricePerUnit = newInventoryItem.pricePerUnit || 0
-      subtotal = convertedQty * pricePerUnit * quantity
+      subtotal = convertedQty * pricePerUnit
       break
     }
     default: {
