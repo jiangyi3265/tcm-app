@@ -723,7 +723,7 @@ async function deleteTemplate(tmpl) {
               <span v-else style="color:#bbb">-</span>
             </template>
           </el-table-column>
-          <el-table-column label="预约间隔(min)" width="130">
+          <el-table-column :label="t('admin.appointmentInterval')" width="130">
             <template #default="{ row }">
               <div v-if="editingUserId === row.id && (row.role === 'practitioner' || (row.roles || []).includes('practitioner'))">
                 <el-input-number v-model="editUserForm.appointmentInterval" size="small" :min="5" :max="120" :step="5" style="width:100px" />
@@ -1409,7 +1409,7 @@ async function deleteTemplate(tmpl) {
         <el-table :data="meridiansStore.activeMeridians" stripe>
           <el-table-column :label="t('admin.meridianName')" width="130"><template #default="{ row }"><span style="font-weight:600">{{ row.name }}</span></template></el-table-column>
           <el-table-column :label="t('admin.meridianAbbr')" width="60" prop="abbr" />
-          <el-table-column :label="t('admin.meridianCategory')" width="70"><template #default="{ row }"><el-tag :type="row.category === '奇经' ? 'warning' : ''" size="small">{{ row.category }}</el-tag></template></el-table-column>
+          <el-table-column :label="t('admin.meridianCategory')" width="70"><template #default="{ row }"><el-tag :type="row.category === '奇经' ? 'warning' : ''" size="small">{{ row.category === '奇经' ? t('admin.meridianExtra') : t('admin.meridianRegular') }}</el-tag></template></el-table-column>
           <el-table-column :label="t('admin.meridianOrgan')" width="80" prop="organ" />
           <el-table-column :label="t('admin.meridianAcupointCount')" width="70"><template #default="{ row }">{{ row.acupointCount }}</template></el-table-column>
           <el-table-column :label="t('admin.meridianIndication')" min-width="200"><template #default="{ row }"><span style="font-size:12px; color:#555">{{ row.indication || '-' }}</span></template></el-table-column>

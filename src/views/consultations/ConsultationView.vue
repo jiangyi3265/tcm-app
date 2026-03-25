@@ -19,10 +19,11 @@ import { printConsultationReport, printPrescription } from '../../utils/pdfExpor
 import { useEmailSimulator } from '../../utils/emailSimulator'
 import { filesApi, consultationsApi } from '../../utils/api'
 import { calculatePrescription, recalcWithSupplier } from '../../utils/prescriptionCalc'
+import { localizeMixedText } from '../../utils/localizeMixedText'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ConsultationComparePanel from './ConsultationComparePanel.vue'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const branchesStore = useBranchesStore()
 const { showEmailDialog, emailData, openEmailPreview, sendEmail, buildConsultationReportEmail } = useEmailSimulator()
@@ -56,6 +57,30 @@ const canDeleteConsultation = computed(() => hasPermission(roles.value, 'consult
 const lastConsultation = computed(() =>
   isNew ? consultStore.getLastConsultation(patientId) : null,
 )
+
+const differentiationNameSuggestions = computed(() => {
+  const names = new Set()
+  for (const consult of consultStore.consultations) {
+    const conclusions = Array.isArray(consult?.diff?.conclusions) ? consult.diff.conclusions : []
+    for (const item of conclusions) {
+      const name = String(item?.name || '').trim()
+      if (name) names.add(name)
+    }
+  }
+  return [...names]
+})
+
+const differentiationTreatmentSuggestions = computed(() => {
+  const treatments = new Set()
+  for (const consult of consultStore.consultations) {
+    const conclusions = Array.isArray(consult?.diff?.conclusions) ? consult.diff.conclusions : []
+    for (const item of conclusions) {
+      const treatment = String(item?.treatment || '').trim()
+      if (treatment) treatments.add(treatment)
+    }
+  }
+  return [...treatments]
+})
 
 // ============ Form Defaults ============
 const defaultForm = () => ({
@@ -110,6 +135,18 @@ const consultation = ref(null)
 const activeTab = ref('summary')
 const saving = ref(false)
 const showCompare = ref(false)
+
+function localizeMixedLabel(text = '') {
+  return localizeMixedText(text, locale.value)
+}
+
+function formatPerDoseSummary(row, quantity) {
+  const unit = row.unit || 'g'
+  if (locale.value === 'zh-CN') {
+    return `单剂 ${row.dosage}${unit} ×${quantity}`
+  }
+  return `Per dose ${row.dosage}${unit} ×${quantity}`
+}
 
 // ============ History and Medication ============
 const historyMedExpanded = ref(true)
@@ -192,7 +229,7 @@ async function saveHistoryMed() {
       historySourceConsultId: patient.value?.historySourceConsultId || consultId || form.value.id || null,
       historySourceConsultDate: patient.value?.historySourceConsultDate || firstConsultDate.value || form.value.date || '',
     })
-    ElMessage.success('History and medication updated')
+    ElMessage.success(t('consultation.historyMedicationUpdated'))
   }
   editingHistoryMed.value = false
 }
@@ -216,6 +253,48 @@ function onUpdateField(data) {
   }
 }
 
+function buildIntakeNarrative(intake) {
+  const lines = []
+  const fields = [
+    ['Allergies', intake.allergies],
+    ['Current medications', intake.currentMedications],
+    ['Past medical history', intake.pastMedicalHistory || intake.medicalHistory],
+    ['Family history', intake.familyHistory],
+    ['Lifestyle', intake.lifestyle],
+    ['Additional notes', intake.additionalNotes],
+  ]
+  for (const [label, value] of fields) {
+    const text = Array.isArray(value) ? value.join(', ') : String(value || '').trim()
+    if (text) lines.push(`${label}: ${text}`)
+  }
+  return lines.join('\n')
+}
+
+function applyIntakePrefill(intake, appointmentId = null) {
+  if (!intake || typeof intake !== 'object') return
+
+  if (intake.chiefComplaint) form.value.chiefComplaint = intake.chiefComplaint
+  if (intake.chiefComplaintDuration) form.value.chiefComplaintDuration = intake.chiefComplaintDuration
+  if (intake.chiefComplaintDescription) form.value.chiefComplaintDescription = intake.chiefComplaintDescription
+  if (intake.progressOfDisease) form.value.progressOfDisease = intake.progressOfDisease
+  if (intake.diff) {
+    form.value.diff = normalizeDiff({ ...form.value.diff, ...intake.diff })
+  }
+
+  const narrative = buildIntakeNarrative(intake)
+  if (narrative) {
+    if (form.value.progressOfDisease && !form.value.progressOfDisease.includes(narrative)) {
+      form.value.progressOfDisease = `${form.value.progressOfDisease}\n${narrative}`.trim()
+    } else if (!form.value.progressOfDisease) {
+      form.value.progressOfDisease = narrative
+    }
+  }
+
+  if (appointmentId) {
+    form.value.appointmentId = appointmentId
+  }
+}
+
 async function refreshTongueImagePreview() {
   const resource = form.value.diff?.tongueImageResource || form.value.diff?.tongueImage
   if (!resource) return
@@ -235,7 +314,7 @@ async function saveHistoryMedStrict() {
         historyAndMedication: nextText,
       })
     }
-    ElMessage.success('History and medication updated')
+    ElMessage.success(t('consultation.historyMedicationUpdated'))
     editingHistoryMed.value = false
     return
   }
@@ -264,7 +343,7 @@ async function saveHistoryMedStrict() {
     })
   }
 
-  ElMessage.success('History and medication synchronized')
+  ElMessage.success(t('consultation.historyMedicationSynchronized'))
   editingHistoryMed.value = false
 }
 
@@ -311,24 +390,23 @@ onMounted(() => {
     }
 
     const patientAppts = appointmentsStore.getPatientAppointments(patientId)
-    const latestAppt = patientAppts.find((appointment) => appointment.intakeFormData && (
-      appointment.intakeFormData.chiefComplaint
-      || appointment.intakeFormData.allergies
-      || appointment.intakeFormData.currentMedications
-      || appointment.intakeFormData.medicalHistory
-    ))
-    if (latestAppt?.intakeFormData) {
-      const intake = latestAppt.intakeFormData
-      if (intake.chiefComplaint) form.value.chiefComplaint = intake.chiefComplaint
-      if (intake.medicalHistory) form.value.progressOfDisease = intake.medicalHistory
-      if (intake.allergies || intake.currentMedications) {
-        form.value.chiefComplaintDescription =
-          (intake.allergies ? `Allergies: ${intake.allergies}\n` : '')
-          + (intake.currentMedications ? `Current medications: ${intake.currentMedications}` : '')
-      }
-      if (latestAppt.id && latestAppt.status !== 'completed' && latestAppt.status !== 'cancelled') {
-        form.value.appointmentId = latestAppt.id
-      }
+    const latestAppt = patientAppts.find((appointment) => {
+      const intake = appointment.intakeFormData
+      if (!intake || typeof intake !== 'object') return false
+      return Object.values(intake).some((value) => {
+        if (Array.isArray(value)) return value.length > 0
+        if (value && typeof value === 'object') return Object.keys(value).length > 0
+        return String(value || '').trim() !== ''
+      })
+    })
+    const appointmentIdForPrefill = latestAppt?.id && latestAppt.status !== 'completed' && latestAppt.status !== 'cancelled'
+      ? latestAppt.id
+      : null
+
+    if (patient.value?.latestIntakeFormData) {
+      applyIntakePrefill(patient.value.latestIntakeFormData, appointmentIdForPrefill)
+    } else if (latestAppt?.intakeFormData) {
+      applyIntakePrefill(latestAppt.intakeFormData, appointmentIdForPrefill)
     }
   }
 
@@ -466,10 +544,10 @@ async function deleteRx(idx) {
           herbals.map(i => ({ inventoryId: i.inventoryId, supplierId: i.supplierId, quantity: i.convertedQty, name: i.name })),
           rx.prescriptionType
         )
-        ElMessage.info(t('consultation.stockRestored') || 'Stock restored')
+        ElMessage.info(t('consultation.stockRestored'))
       } catch (e) {
         console.warn('Failed to restore inventory after deleting prescription', e)
-        ElMessage.warning('Failed to restore inventory')
+        ElMessage.warning(t('consultation.stockRestoreFailed'))
       }
     }
   }
@@ -1059,76 +1137,76 @@ function handleSendReport() {
 
           <!-- Section: Exterior & Head 表&头部 -->
           <el-card class="diff-card">
-            <template #header><span class="diff-header">Exterior &amp; Head 表&amp;头部</span></template>
+            <template #header><span class="diff-header">{{ localizeMixedLabel('Exterior & Head 表头部') }}</span></template>
             <el-row :gutter="24">
               <el-col :span="12">
                 <el-form label-width="200px" label-position="left" size="small">
-                  <el-form-item label="Cold/Heat 寒热">
+                  <el-form-item :label="localizeMixedLabel('Cold/Heat 寒热')">
                     <el-select v-model="form.diff.coldHeat" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.coldHeat" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.coldHeat" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Sweat 汗出">
+                  <el-form-item :label="localizeMixedLabel('Sweat 汗出')">
                     <el-select v-model="form.diff.sweat" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.sweat" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.sweat" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Head Discomfort 头部不适">
+                  <el-form-item :label="localizeMixedLabel('Head Discomfort 头部不适')">
                     <el-select v-model="form.diff.headDiscomfort" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.headDiscomfort" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.headDiscomfort" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Head Position 位置">
+                  <el-form-item :label="localizeMixedLabel('Head Position 位置')">
                     <el-select v-model="form.diff.headPosition" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.headPosition" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.headPosition" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Eye 眼睛">
+                  <el-form-item :label="localizeMixedLabel('Eye 眼睛')">
                     <el-select v-model="form.diff.eye" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.eye" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.eye" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Ears 耳朵">
+                  <el-form-item :label="localizeMixedLabel('Ears 耳朵')">
                     <el-select v-model="form.diff.ear" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.ear" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.ear" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Noses 鼻子">
+                  <el-form-item :label="localizeMixedLabel('Noses 鼻子')">
                     <el-select v-model="form.diff.nose" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.nose" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.nose" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Mouth 口">
+                  <el-form-item :label="localizeMixedLabel('Mouth 口')">
                     <el-select v-model="form.diff.mouth" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.mouth" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.mouth" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Taste 味道">
+                  <el-form-item :label="localizeMixedLabel('Taste 味道')">
                     <el-select v-model="form.diff.taste" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.taste" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.taste" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
                 </el-form>
               </el-col>
               <el-col :span="12">
                 <el-form label-width="220px" label-position="left" size="small">
-                  <el-form-item label="Body Discomforts 身体不适">
+                  <el-form-item :label="localizeMixedLabel('Body Discomforts 身体不适')">
                     <el-select v-model="form.diff.bodyDiscomforts" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.bodyDiscomforts" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.bodyDiscomforts" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Body Discomforts Location 位置">
+                  <el-form-item :label="localizeMixedLabel('Body Discomforts Location 位置')">
                     <el-select v-model="form.diff.bodyDiscomfortsLocation" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.bodyDiscomfortsLocation" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.bodyDiscomfortsLocation" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Skin Issues 皮肤">
+                  <el-form-item :label="localizeMixedLabel('Skin Issues 皮肤')">
                     <el-select v-model="form.diff.skinIssues" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.skinIssues" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.skinIssues" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
                 </el-form>
-                <div class="diff-right-label">Other Exterior Symptom 其它表证</div>
+                <div class="diff-right-label">{{ localizeMixedLabel('Other Exterior Symptom 其它表证') }}</div>
                 <el-input v-model="form.diff.otherExterior" type="textarea" :rows="6" :readonly="isReadOnly" placeholder="---" />
               </el-col>
             </el-row>
@@ -1136,32 +1214,32 @@ function handleSendReport() {
 
           <!-- Section: Chest 心胸 -->
           <el-card class="diff-card">
-            <template #header><span class="diff-header">Chest 心胸</span></template>
+            <template #header><span class="diff-header">{{ localizeMixedLabel('Chest 心胸') }}</span></template>
             <el-row :gutter="24">
               <el-col :span="12">
                 <el-form label-width="200px" label-position="left" size="small">
-                  <el-form-item label="Chest 心胸">
+                  <el-form-item :label="localizeMixedLabel('Chest 心胸')">
                     <el-select v-model="form.diff.chest" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.chest" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.chest" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Hypochondriac 两胁">
+                  <el-form-item :label="localizeMixedLabel('Hypochondriac 两胁')">
                     <el-select v-model="form.diff.hypochondriac" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.hypochondriac" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.hypochondriac" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Sleep 睡觉">
+                  <el-form-item :label="localizeMixedLabel('Sleep 睡觉')">
                     <el-select v-model="form.diff.sleep" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.sleep" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.sleep" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Anxiety/Stress 心烦/压力 (1-10)">
+                  <el-form-item :label="localizeMixedLabel('Anxiety/Stress 心烦/压力 (1-10)')">
                     <el-input-number v-model="form.diff.anxietyStress" :min="1" :max="10" :disabled="isReadOnly" style="width:120px" />
                   </el-form-item>
                 </el-form>
               </el-col>
               <el-col :span="12">
-                <div class="diff-right-label">Other Chest Syndrome 其它心胸症状</div>
+                <div class="diff-right-label">{{ localizeMixedLabel('Other Chest Syndrome 其它心胸症状') }}</div>
                 <el-input v-model="form.diff.otherChest" type="textarea" :rows="8" :readonly="isReadOnly" placeholder="---" />
               </el-col>
             </el-row>
@@ -1169,29 +1247,29 @@ function handleSendReport() {
 
           <!-- Section: Abdomen 腹部 -->
           <el-card class="diff-card">
-            <template #header><span class="diff-header">Abdomen 腹部</span></template>
+            <template #header><span class="diff-header">{{ localizeMixedLabel('Abdomen 腹部') }}</span></template>
             <el-row :gutter="24">
               <el-col :span="12">
                 <el-form label-width="200px" label-position="left" size="small">
-                  <el-form-item label="Appetite 胃口">
+                  <el-form-item :label="localizeMixedLabel('Appetite 胃口')">
                     <el-select v-model="form.diff.appetite" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.appetite" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.appetite" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Thirst 口渴">
+                  <el-form-item :label="localizeMixedLabel('Thirst 口渴')">
                     <el-select v-model="form.diff.thirst" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.thirst" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.thirst" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Abdomen 腹部">
+                  <el-form-item :label="localizeMixedLabel('Abdomen 腹部')">
                     <el-select v-model="form.diff.abdomen" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.abdomen" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.abdomen" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
                 </el-form>
               </el-col>
               <el-col :span="12">
-                <div class="diff-right-label">Other Abdominal Symptoms 其它腹部症状</div>
+                <div class="diff-right-label">{{ localizeMixedLabel('Other Abdominal Symptoms 其它腹部症状') }}</div>
                 <el-input v-model="form.diff.otherAbdomen" type="textarea" :rows="6" :readonly="isReadOnly" placeholder="---" />
               </el-col>
             </el-row>
@@ -1199,24 +1277,24 @@ function handleSendReport() {
 
           <!-- Section: Lower Abdomen 下腹 -->
           <el-card class="diff-card">
-            <template #header><span class="diff-header">Lower Abdomen 下腹</span></template>
+            <template #header><span class="diff-header">{{ localizeMixedLabel('Lower Abdomen 下腹') }}</span></template>
             <el-row :gutter="24">
               <el-col :span="12">
                 <el-form label-width="200px" label-position="left" size="small">
-                  <el-form-item label="Bowel Movement 大便">
+                  <el-form-item :label="localizeMixedLabel('Bowel Movement 大便')">
                     <el-select v-model="form.diff.bowelMovement" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.bowelMovement" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.bowelMovement" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Urine 小便">
+                  <el-form-item :label="localizeMixedLabel('Urine 小便')">
                     <el-select v-model="form.diff.urine" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.urine" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.urine" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
                 </el-form>
               </el-col>
               <el-col :span="12">
-                <div class="diff-right-label">Other Lower Abdomen Symptoms 其它下腹症状</div>
+                <div class="diff-right-label">{{ localizeMixedLabel('Other Lower Abdomen Symptoms 其它下腹症状') }}</div>
                 <el-input v-model="form.diff.otherLowerAbdomen" type="textarea" :rows="5" :readonly="isReadOnly" placeholder="---" />
               </el-col>
             </el-row>
@@ -1224,30 +1302,30 @@ function handleSendReport() {
 
           <!-- Section: Female 妇科 -->
           <el-card class="diff-card">
-            <template #header><span class="diff-header">FEMALE 妇科</span></template>
+            <template #header><span class="diff-header">{{ localizeMixedLabel('Female 妇科') }}</span></template>
             <el-row :gutter="24">
               <el-col :span="12">
                 <el-form label-width="220px" label-position="left" size="small">
-                  <el-form-item label="Period Cycle 经期长 (days)">
+                  <el-form-item :label="localizeMixedLabel('Period Cycle 经期长 (days)')">
                     <el-input-number v-model="form.diff.periodCircle" :min="0" :disabled="isReadOnly" style="width:120px" />
                   </el-form-item>
-                  <el-form-item label="Period Duration 每期持续 (days)">
+                  <el-form-item :label="localizeMixedLabel('Period Duration 每期持续 (days)')">
                     <el-input-number v-model="form.diff.periodDuration" :min="0" :disabled="isReadOnly" style="width:120px" />
                   </el-form-item>
-                  <el-form-item label="Blood Quality 经血情况">
+                  <el-form-item :label="localizeMixedLabel('Blood Quality 经血情况')">
                     <el-select v-model="form.diff.bloodQuality" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.bloodQuality" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.bloodQuality" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="PMS 经期相关症状">
+                  <el-form-item :label="localizeMixedLabel('PMS 经期相关症状')">
                     <el-select v-model="form.diff.pms" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.pms" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.pms" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
                 </el-form>
               </el-col>
               <el-col :span="12">
-                <div class="diff-right-label">Other Female Symptoms 其它妇科症状</div>
+                <div class="diff-right-label">{{ localizeMixedLabel('Other Female Symptoms 其它妇科症状') }}</div>
                 <el-input v-model="form.diff.otherFemale" type="textarea" :rows="6" :readonly="isReadOnly" placeholder="---" />
               </el-col>
             </el-row>
@@ -1255,53 +1333,53 @@ function handleSendReport() {
 
           <!-- Section: Pulse 脉 -->
           <el-card class="diff-card">
-            <template #header><span class="diff-header">Pulse 脉</span></template>
+            <template #header><span class="diff-header">{{ localizeMixedLabel('Pulse 脉') }}</span></template>
             <el-row :gutter="24">
               <el-col :span="12">
                 <el-form label-width="220px" label-position="left" size="small">
-                  <el-form-item label="All Position 六部">
+                  <el-form-item :label="localizeMixedLabel('All Position 六部')">
                     <el-select v-model="form.diff.pulse" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Right Hand 单右手脉">
+                  <el-form-item :label="localizeMixedLabel('Right Hand 单右手脉')">
                     <el-select v-model="form.diff.pulseRightHand" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Left Hand 单左手脉">
+                  <el-form-item :label="localizeMixedLabel('Left Hand 单左手脉')">
                     <el-select v-model="form.diff.pulseLeftHand" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Both Cun 双寸脉">
+                  <el-form-item :label="localizeMixedLabel('Both Cun 双寸脉')">
                     <el-select v-model="form.diff.pulseBothCun" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Both Guan 双关脉">
+                  <el-form-item :label="localizeMixedLabel('Both Guan 双关脉')">
                     <el-select v-model="form.diff.pulseBothGuan" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Both Chi 双尺脉">
+                  <el-form-item :label="localizeMixedLabel('Both Chi 双尺脉')">
                     <el-select v-model="form.diff.pulseBothChi" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Single Position 单部脉补充信息">
+                  <el-form-item :label="localizeMixedLabel('Single Position 单部脉补充信息')">
                     <el-input v-model="form.diff.detailedPulse" type="textarea" :rows="3" :readonly="isReadOnly" placeholder="---" />
                   </el-form-item>
                 </el-form>
               </el-col>
               <el-col :span="12">
                 <el-form label-width="220px" label-position="left" size="small">
-                  <el-form-item label="Pathological Channel 病变经络">
+                  <el-form-item :label="localizeMixedLabel('Pathological Channel 病变经络')">
                     <el-select v-model="form.diff.pathologicalChannel" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.pathologicalChannel" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.pathologicalChannel" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Pathological Changes 病变详情">
+                  <el-form-item :label="localizeMixedLabel('Pathological Changes 病变详情')">
                     <el-input v-model="form.diff.pathologicalChanges" type="textarea" :rows="4" :readonly="isReadOnly" placeholder="---" />
                   </el-form-item>
                 </el-form>
@@ -1311,26 +1389,26 @@ function handleSendReport() {
 
           <!-- Section: Tongue 舌 -->
           <el-card class="diff-card">
-            <template #header><span class="diff-header">Tongue 舌</span></template>
+            <template #header><span class="diff-header">{{ localizeMixedLabel('Tongue 舌') }}</span></template>
             <el-row :gutter="24">
               <el-col :span="12">
                 <el-form label-width="200px" label-position="left" size="small">
-                  <el-form-item label="Tongue Color 舌色">
+                  <el-form-item :label="localizeMixedLabel('Tongue Color 舌色')">
                     <el-select v-model="form.diff.tongueColor" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.tongueColor" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.tongueColor" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Tongue Body/Shape 舌体/形">
+                  <el-form-item :label="localizeMixedLabel('Tongue Body/Shape 舌体/形')">
                     <el-select v-model="form.diff.tongueBody" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.tongueBody" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.tongueBody" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Tongue Coating 舌苔">
+                  <el-form-item :label="localizeMixedLabel('Tongue Coating 舌苔')">
                     <el-select v-model="form.diff.tongueCoating" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.tongueCoating" :key="o" :label="o" :value="o" />
+                      <el-option v-for="o in TCM_OPTIONS.tongueCoating" :key="o" :label="localizeMixedLabel(o)" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Other Tongue Details 其它舌头信息">
+                  <el-form-item :label="localizeMixedLabel('Other Tongue Details 其它舌头信息')">
                     <el-input v-model="form.diff.otherTongue" type="textarea" :rows="3" :readonly="isReadOnly" placeholder="---" />
                   </el-form-item>
                 </el-form>
@@ -1372,13 +1450,47 @@ function handleSendReport() {
             <el-table :data="form.diff.conclusions" size="small" empty-text="We didn't find anything to show here">
               <el-table-column label="Differentiation Name" min-width="180">
                 <template #default="{ row }">
-                  <el-input v-if="!isReadOnly" v-model="row.name" :placeholder="t('consultation.diffName')" size="small" />
+                  <el-select
+                    v-if="!isReadOnly"
+                    v-model="row.name"
+                    filterable
+                    allow-create
+                    default-first-option
+                    clearable
+                    :placeholder="t('consultation.diffName')"
+                    size="small"
+                    style="width:100%"
+                  >
+                    <el-option
+                      v-for="option in differentiationNameSuggestions"
+                      :key="option"
+                      :label="option"
+                      :value="option"
+                    />
+                  </el-select>
                   <span v-else>{{ row.name }}</span>
                 </template>
               </el-table-column>
               <el-table-column label="Treatment" min-width="180">
                 <template #default="{ row }">
-                  <el-input v-if="!isReadOnly" v-model="row.treatment" :placeholder="t('consultation.treatmentMethod')" size="small" />
+                  <el-select
+                    v-if="!isReadOnly"
+                    v-model="row.treatment"
+                    filterable
+                    allow-create
+                    default-first-option
+                    clearable
+                    :placeholder="t('consultation.treatmentMethod')"
+                    size="small"
+                    style="width:100%"
+                  >
+                    <el-option
+                      v-for="option in differentiationTreatmentSuggestions"
+                      :key="option"
+                      :label="option"
+                      :value="option"
+                    />
+                  </el-select>
                   <span v-else>{{ row.treatment }}</span>
                 </template>
               </el-table-column>
@@ -1617,10 +1729,10 @@ function handleSendReport() {
                   <el-input-number v-if="form.discountType !== 'none' && !isReadOnly"
                     v-model="form.discountValue" :min="0" size="small" style="width:120px; margin-left:8px" />
                 </el-form-item>
-                <el-form-item label="Tax Rate 税率">
+                <el-form-item :label="localizeMixedLabel('Tax Rate 税率')">
                   <el-radio-group v-model="form.overrideTaxRate" :disabled="isReadOnly" size="small">
                     <el-radio-button :value="null">Default ({{ (settingsStore.taxRate * 100).toFixed(0) }}%)</el-radio-button>
-                    <el-radio-button :value="0">0% 免税</el-radio-button>
+                    <el-radio-button :value="0">{{ localizeMixedLabel('0% 免税') }}</el-radio-button>
                     <el-radio-button :value="0.13">13%</el-radio-button>
                   </el-radio-group>
                 </el-form-item>
@@ -1649,7 +1761,7 @@ function handleSendReport() {
                   <span class="price-lock">{{ cs }}{{ totalService.toFixed(2) }} <el-icon><Lock /></el-icon></span>
                 </div>
                 <div class="price-row" v-if="form.includeRxAmount && form.prescriptions.length">
-                  <span>Prescription Amount 处方金额</span>
+                  <span>{{ localizeMixedLabel('Prescription Amount 处方金额') }}</span>
                   <span class="price-lock">{{ cs }}{{ totalRxAmount.toFixed(2) }} <el-icon><Lock /></el-icon></span>
                 </div>
                 <div class="price-row" v-if="form.discountType !== 'none'">
@@ -1929,19 +2041,19 @@ function handleSendReport() {
               />
             </template>
           </el-table-column>
-          <el-table-column label="Dosage(g) 剂量" width="110">
+          <el-table-column :label="localizeMixedLabel('Dosage(g) 剂量')" width="110">
             <template #default="{ row }">
               <el-input-number v-model="row.dosage" :min="0" :step="1" size="small" style="width:95px" @change="recalcRxItems" />
             </template>
           </el-table-column>
-          <el-table-column label="Converted 转换" width="140" v-if="rxForm.prescriptionType !== 'none'">
+          <el-table-column :label="localizeMixedLabel('Converted 转换')" width="140" v-if="rxForm.prescriptionType !== 'none'">
             <template #default="{ row }">
               <span v-if="row.outOfStock" style="color: #e63946; font-weight: 700">
                 0{{ row.convertedUnit || '-' }} <span style="font-size:11px">(Out of stock)</span>
               </span>
               <span v-else-if="row.convertedQty != null" :style="{ color: row.stockSufficient === false ? '#e63946' : '#2d6a4f', fontWeight: 600 }">
                 {{ row.convertedQty }}{{ row.convertedUnit }}
-                <span style="font-size:11px; color:#888; display:block">单剂 {{ row.dosage }}{{ row.unit || 'g' }} &times;{{ rxForm.quantity }}</span>
+                <span style="font-size:11px; color:#888; display:block">{{ formatPerDoseSummary(row, rxForm.quantity) }}</span>
               </span>
               <span v-else style="color:#aaa">-</span>
             </template>
@@ -1975,7 +2087,7 @@ function handleSendReport() {
               <el-tag v-else type="info" size="small">N/A</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="Price 价格" width="110">
+          <el-table-column :label="localizeMixedLabel('Price 价格')" width="110">
             <template #default="{ row }">
               <span style="font-size:13px; color:#555">{{ cs }}{{ (row.pricePerUnit || 0).toFixed(2) }}</span>
             </template>

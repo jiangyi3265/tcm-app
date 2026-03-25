@@ -122,6 +122,9 @@ export const patientsApi = {
   sendConsentEmail(id, data = {}) {
     return request(`/api/patients/${id}/consent/send`, { method: 'POST', body: data })
   },
+  sendIntakeEmail(id, data = {}) {
+    return request(`/api/patients/${id}/intake/send`, { method: 'POST', body: data })
+  },
 }
 
 export const appointmentsApi = {

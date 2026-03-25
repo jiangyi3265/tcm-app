@@ -15,6 +15,36 @@ const suppliersStore = useSuppliersStore()
 const searchQuery = ref('')
 const filterCategory = ref('')
 
+const FORMULA_CATEGORIES = [
+  { value: '调和剂', key: 'harmonizing' },
+  { value: '清热剂', key: 'heatClearing' },
+  { value: '温里剂', key: 'warmingInterior' },
+  { value: '补益剂', key: 'tonifying' },
+  { value: '理气剂', key: 'qiRegulating' },
+  { value: '理血剂', key: 'bloodRegulating' },
+  { value: '祛湿剂', key: 'dampnessDispelling' },
+  { value: '祛风剂', key: 'windDispelling' },
+  { value: '固涩剂', key: 'astringent' },
+  { value: '安神剂', key: 'calmingSpirit' },
+  { value: '解表剂', key: 'exteriorReleasing' },
+  { value: '消食剂', key: 'digestive' },
+  { value: '其他', key: 'other' },
+]
+
+function getFormulaCategoryLabel(value) {
+  if (!value) return t('formulaView.uncategorized')
+  const match = FORMULA_CATEGORIES.find((item) => item.value === value)
+  return match ? t(`formulaView.categories.${match.key}`) : value
+}
+
+const formulaCategoryOptions = computed(() => [
+  { value: '', label: t('formulaView.allCategories') },
+  ...FORMULA_CATEGORIES.map((item) => ({
+    value: item.value,
+    label: t(`formulaView.categories.${item.key}`),
+  })),
+])
+
 // ── 过滤 ──
 const filteredFormulas = computed(() => {
   let list = formulasStore.activeFormulas
@@ -32,24 +62,6 @@ const filteredFormulas = computed(() => {
   }
   return list
 })
-
-// ── 分类选项 ──
-const FORMULA_CATEGORIES = [
-  { value: '', label: '全部分类' },
-  { value: '调和剂', label: '调和剂' },
-  { value: '清热剂', label: '清热剂' },
-  { value: '温里剂', label: '温里剂' },
-  { value: '补益剂', label: '补益剂' },
-  { value: '理气剂', label: '理气剂' },
-  { value: '理血剂', label: '理血剂' },
-  { value: '祛湿剂', label: '祛湿剂' },
-  { value: '祛风剂', label: '祛风剂' },
-  { value: '固涩剂', label: '固涩剂' },
-  { value: '安神剂', label: '安神剂' },
-  { value: '解表剂', label: '解表剂' },
-  { value: '消食剂', label: '消食剂' },
-  { value: '其他', label: '其他' },
-]
 
 // ── 展开面板 ──
 const expandedId = ref(null)
@@ -102,7 +114,7 @@ function cancelEdit() {
 }
 
 function addEditHerb() {
-  if (!editHerb.value.herbName) return ElMessage.warning('请输入药材名')
+  if (!editHerb.value.herbName) return ElMessage.warning(t('admin.fillFormulaHerbName'))
   editForm.value.items.push({
     ...editHerb.value,
     sortOrder: editForm.value.items.length + 1,
@@ -115,13 +127,13 @@ function removeEditHerb(idx) {
 }
 
 async function saveEdit() {
-  if (!editForm.value.name) return ElMessage.warning('请输入方剂名称')
+  if (!editForm.value.name) return ElMessage.warning(t('admin.fillFormulaName'))
   try {
     await formulasStore.updateFormula(expandedId.value, editForm.value)
-    ElMessage.success('方剂已保存')
+    ElMessage.success(t('admin.formulaUpdated'))
     editing.value = false
   } catch (e) {
-    ElMessage.error(e.message || '保存失败')
+    ElMessage.error(e.message || t('formulaView.saveFailed'))
   }
 }
 
@@ -133,7 +145,7 @@ const newFormula = ref({
 const newHerb = ref({ herbName: '', dosage: 0, unit: 'g', notes: '' })
 
 function addNewHerb() {
-  if (!newHerb.value.herbName) return ElMessage.warning('请输入药材名')
+  if (!newHerb.value.herbName) return ElMessage.warning(t('admin.fillFormulaHerbName'))
   newFormula.value.items.push({
     ...newHerb.value,
     sortOrder: newFormula.value.items.length + 1,
@@ -146,38 +158,46 @@ function removeNewHerb(idx) {
 }
 
 async function handleAddFormula() {
-  if (!newFormula.value.name) return ElMessage.warning('请输入方剂名称')
+  if (!newFormula.value.name) return ElMessage.warning(t('admin.fillFormulaName'))
   try {
     await formulasStore.addFormula({ ...newFormula.value })
-    ElMessage.success('方剂已创建')
+    ElMessage.success(t('admin.formulaCreated'))
     showAddPanel.value = false
     newFormula.value = { name: '', category: '', source: '', description: '', items: [] }
   } catch (e) {
-    ElMessage.error(e.message || '创建失败')
+    ElMessage.error(e.message || t('formulaView.createFailed'))
   }
 }
 
 // ── 删除 ──
 async function deleteFormula(formula) {
   try {
-    await ElMessageBox.confirm(`确定删除方剂「${formula.name}」？`, '确认删除', { type: 'warning' })
+    await ElMessageBox.confirm(
+      t('admin.confirmDeleteFormula', { name: formula.name }),
+      t('admin.confirmDeleteTitle'),
+      { type: 'warning' },
+    )
     await formulasStore.deleteFormula(formula.id)
     if (expandedId.value === formula.id) expandedId.value = null
-    ElMessage.success('方剂已删除')
+    ElMessage.success(t('admin.formulaDeleted'))
   } catch (e) {
-    if (e !== 'cancel') ElMessage.error(e.message || '删除失败')
+    if (e !== 'cancel') ElMessage.error(e.message || t('formulaView.deleteFailed'))
   }
 }
 
 // ── 统计 ──
 const totalCount = computed(() => formulasStore.activeFormulas.length)
-const categoryCount = computed(() => {
+const categoryCountEntries = computed(() => {
   const map = {}
   formulasStore.activeFormulas.forEach(f => {
-    const c = f.category || '未分类'
+    const c = f.category || ''
     map[c] = (map[c] || 0) + 1
   })
-  return map
+  return Object.entries(map).map(([value, count]) => ({
+    value,
+    count,
+    label: getFormulaCategoryLabel(value),
+  }))
 })
 </script>
 
@@ -187,11 +207,11 @@ const categoryCount = computed(() => {
     <div class="fv-stats">
       <div class="fv-stat-card main">
         <div class="fv-stat-num">{{ totalCount }}</div>
-        <div class="fv-stat-label">方剂总数</div>
+        <div class="fv-stat-label">{{ t('formulaView.totalCount') }}</div>
       </div>
-      <div v-for="(count, cat) in categoryCount" :key="cat" class="fv-stat-card">
-        <div class="fv-stat-num">{{ count }}</div>
-        <div class="fv-stat-label">{{ cat }}</div>
+      <div v-for="entry in categoryCountEntries" :key="entry.value || 'uncategorized'" class="fv-stat-card">
+        <div class="fv-stat-num">{{ entry.count }}</div>
+        <div class="fv-stat-label">{{ entry.label }}</div>
       </div>
     </div>
 
@@ -201,17 +221,17 @@ const categoryCount = computed(() => {
         <el-input
           v-model="searchQuery"
           clearable
-          placeholder="搜索方剂名、功效、药材..."
+          :placeholder="t('formulaView.searchPlaceholder')"
           :prefix-icon="'Search'"
           style="width:300px"
         />
-        <el-select v-model="filterCategory" placeholder="分类" style="width:130px; margin-left:8px" clearable>
-          <el-option v-for="c in FORMULA_CATEGORIES" :key="c.value" :label="c.label" :value="c.value" />
+        <el-select v-model="filterCategory" :placeholder="t('formulaView.categoryPlaceholder')" style="width:130px; margin-left:8px" clearable>
+          <el-option v-for="c in formulaCategoryOptions" :key="c.value || 'all'" :label="c.label" :value="c.value" />
         </el-select>
       </div>
       <el-button type="primary" @click="showAddPanel = !showAddPanel">
         <el-icon><Plus /></el-icon>
-        {{ showAddPanel ? '收起' : '新建方剂' }}
+        {{ showAddPanel ? t('formulaView.collapse') : t('admin.addFormula') }}
       </el-button>
     </div>
 
@@ -220,53 +240,53 @@ const categoryCount = computed(() => {
       <el-card v-if="showAddPanel" class="fv-add-panel" shadow="always">
         <template #header>
           <div class="fv-panel-header">
-            <span class="fv-panel-title">📋 新建方剂模板</span>
-            <el-tag type="info" size="small">方剂 = 固定模板，不可直接用于开方</el-tag>
+            <span class="fv-panel-title">{{ t('formulaView.newTemplateTitle') }}</span>
+            <el-tag type="info" size="small">{{ t('formulaView.templateHint') }}</el-tag>
           </div>
         </template>
         <el-form :model="newFormula" label-width="80px" size="small">
           <el-row :gutter="16">
             <el-col :span="8">
-              <el-form-item label="方剂名" required>
-                <el-input v-model="newFormula.name" placeholder="如：小柴胡汤" />
+              <el-form-item :label="t('admin.formulaName')" required>
+                <el-input v-model="newFormula.name" :placeholder="t('formulaView.namePlaceholder')" />
               </el-form-item>
             </el-col>
             <el-col :span="8">
-              <el-form-item label="分类">
-                <el-select v-model="newFormula.category" placeholder="选择分类" filterable allow-create style="width:100%">
-                  <el-option v-for="c in FORMULA_CATEGORIES.slice(1)" :key="c.value" :label="c.label" :value="c.value" />
+              <el-form-item :label="t('admin.formulaCategory')">
+                <el-select v-model="newFormula.category" :placeholder="t('formulaView.categoryPlaceholder')" filterable allow-create style="width:100%">
+                  <el-option v-for="c in formulaCategoryOptions.slice(1)" :key="c.value" :label="c.label" :value="c.value" />
                 </el-select>
               </el-form-item>
             </el-col>
             <el-col :span="8">
-              <el-form-item label="出处">
-                <el-input v-model="newFormula.source" placeholder="如：《伤寒论》" />
+              <el-form-item :label="t('admin.formulaSource')">
+                <el-input v-model="newFormula.source" :placeholder="t('formulaView.sourcePlaceholder')" />
               </el-form-item>
             </el-col>
             <el-col :span="24">
-              <el-form-item label="功效">
-                <el-input v-model="newFormula.description" type="textarea" :rows="2" placeholder="功效与主治..." />
+              <el-form-item :label="t('admin.formulaEfficacy')">
+                <el-input v-model="newFormula.description" type="textarea" :rows="2" :placeholder="t('formulaView.efficacyPlaceholder')" />
               </el-form-item>
             </el-col>
           </el-row>
-          <el-divider>药材组成</el-divider>
+          <el-divider>{{ t('admin.formulaHerbs') }}</el-divider>
           <el-row :gutter="8" style="margin-bottom:8px">
-            <el-col :span="8"><el-input v-model="newHerb.herbName" placeholder="药材名" size="small" /></el-col>
+            <el-col :span="8"><el-input v-model="newHerb.herbName" :placeholder="t('admin.formulaHerbNamePh')" size="small" /></el-col>
             <el-col :span="5"><el-input-number v-model="newHerb.dosage" :min="0" :step="1" size="small" style="width:100%" /></el-col>
-            <el-col :span="4"><el-input v-model="newHerb.unit" placeholder="单位" size="small" /></el-col>
-            <el-col :span="4"><el-input v-model="newHerb.notes" placeholder="备注" size="small" /></el-col>
-            <el-col :span="3"><el-button size="small" type="primary" @click="addNewHerb">添加</el-button></el-col>
+            <el-col :span="4"><el-input v-model="newHerb.unit" :placeholder="t('admin.formulaUnit')" size="small" /></el-col>
+            <el-col :span="4"><el-input v-model="newHerb.notes" :placeholder="t('admin.formulaHerbNotes')" size="small" /></el-col>
+            <el-col :span="3"><el-button size="small" type="primary" @click="addNewHerb">{{ t('consultation.addHerb') }}</el-button></el-col>
           </el-row>
-          <el-table :data="newFormula.items" size="small" max-height="200" empty-text="请添加药材">
-            <el-table-column prop="herbName" label="药材" min-width="100" />
-            <el-table-column label="剂量" width="80"><template #default="{ row }">{{ row.dosage }}{{ row.unit }}</template></el-table-column>
-            <el-table-column prop="notes" label="备注" width="100" />
-            <el-table-column width="60"><template #default="{ $index }"><el-button size="small" text type="danger" @click="removeNewHerb($index)">删除</el-button></template></el-table-column>
+          <el-table :data="newFormula.items" size="small" max-height="200" :empty-text="t('admin.formulaNoHerbsAdd')">
+            <el-table-column prop="herbName" :label="t('admin.formulaHerbName')" min-width="100" />
+            <el-table-column :label="t('admin.formulaDosage')" width="80"><template #default="{ row }">{{ row.dosage }}{{ row.unit }}</template></el-table-column>
+            <el-table-column prop="notes" :label="t('admin.formulaHerbNotes')" width="100" />
+            <el-table-column width="60"><template #default="{ $index }"><el-button size="small" text type="danger" @click="removeNewHerb($index)">{{ t('common.delete') }}</el-button></template></el-table-column>
           </el-table>
         </el-form>
         <div class="fv-panel-actions">
-          <el-button @click="showAddPanel = false">取消</el-button>
-          <el-button type="primary" @click="handleAddFormula">创建方剂</el-button>
+          <el-button @click="showAddPanel = false">{{ t('common.cancel') }}</el-button>
+          <el-button type="primary" @click="handleAddFormula">{{ t('admin.addFormula') }}</el-button>
         </div>
       </el-card>
     </transition>
@@ -278,11 +298,11 @@ const categoryCount = computed(() => {
         <div class="fv-card-header" @click="toggleExpand(formula)">
           <div class="fv-card-left">
             <span class="fv-card-name">{{ formula.name }}</span>
-            <el-tag v-if="formula.category" size="small" type="info" style="margin-left:8px">{{ formula.category }}</el-tag>
+            <el-tag v-if="formula.category" size="small" type="info" style="margin-left:8px">{{ getFormulaCategoryLabel(formula.category) }}</el-tag>
             <span class="fv-card-source" v-if="formula.source">{{ formula.source }}</span>
           </div>
           <div class="fv-card-right">
-            <span class="fv-herb-count">{{ (formula.items || []).length }} 味</span>
+            <span class="fv-herb-count">{{ t('formulaView.herbCount', { count: (formula.items || []).length }) }}</span>
             <div class="fv-herb-tags">
               <el-tag v-for="(item, idx) in (formula.items || []).slice(0, 5)" :key="idx" size="small" effect="plain" style="margin: 1px 2px">
                 {{ item.herbName }} {{ item.dosage }}{{ item.unit }}
@@ -301,17 +321,17 @@ const categoryCount = computed(() => {
               <div class="fv-detail-grid">
                 <div class="fv-detail-left">
                   <div class="fv-section-title">
-                    <span>📌 方剂信息</span>
-                    <el-tag size="small" type="warning" effect="light">方剂 = 固定模板</el-tag>
+                    <span>{{ t('formulaView.infoTitle') }}</span>
+                    <el-tag size="small" type="warning" effect="light">{{ t('formulaView.fixedTemplate') }}</el-tag>
                   </div>
                   <div v-if="formula.description" class="fv-desc">{{ formula.description }}</div>
-                  <div v-if="formula.source" class="fv-meta">出处：{{ formula.source }}</div>
+                  <div v-if="formula.source" class="fv-meta">{{ t('formulaView.sourcePrefix') }}{{ formula.source }}</div>
 
-                  <div class="fv-section-title" style="margin-top:16px">🌿 药材组成</div>
+                  <div class="fv-section-title" style="margin-top:16px">{{ t('admin.formulaHerbs') }}</div>
                   <el-table :data="formula.items || []" size="small" stripe>
-                    <el-table-column prop="herbName" label="药材" min-width="100" />
-                    <el-table-column label="剂量" width="90"><template #default="{ row }">{{ row.dosage }}{{ row.unit }}</template></el-table-column>
-                    <el-table-column prop="notes" label="备注" min-width="100">
+                    <el-table-column prop="herbName" :label="t('admin.formulaHerbName')" min-width="100" />
+                    <el-table-column :label="t('admin.formulaDosage')" width="90"><template #default="{ row }">{{ row.dosage }}{{ row.unit }}</template></el-table-column>
+                    <el-table-column prop="notes" :label="t('admin.formulaHerbNotes')" min-width="100">
                       <template #default="{ row }"><span style="color:#888">{{ row.notes || '-' }}</span></template>
                     </el-table-column>
                   </el-table>
@@ -319,53 +339,53 @@ const categoryCount = computed(() => {
 
                 <!-- 换算预览 -->
                 <div class="fv-detail-right">
-                  <div class="fv-section-title">🔄 换算预览（导入处方时的效果）</div>
+                  <div class="fv-section-title">{{ t('formulaView.previewTitle') }}</div>
                   <el-form size="small" label-width="70px">
-                    <el-form-item label="类型">
+                    <el-form-item :label="t('formulaView.previewMode')">
                       <el-radio-group v-model="previewType" size="small">
-                        <el-radio-button value="raw_herbs">草药</el-radio-button>
-                        <el-radio-button value="powder">粉剂</el-radio-button>
-                        <el-radio-button value="pills">成药</el-radio-button>
-                        <el-radio-button value="none">仅方</el-radio-button>
+                        <el-radio-button value="raw_herbs">{{ t('formulaView.modeRawHerbs') }}</el-radio-button>
+                        <el-radio-button value="powder">{{ t('formulaView.modePowder') }}</el-radio-button>
+                        <el-radio-button value="pills">{{ t('formulaView.modePills') }}</el-radio-button>
+                        <el-radio-button value="none">{{ t('formulaView.modeNone') }}</el-radio-button>
                       </el-radio-group>
                     </el-form-item>
-                    <el-form-item label="剂数">
+                    <el-form-item :label="t('formulaView.previewQuantity')">
                       <el-input-number v-model="previewQty" :min="1" :max="30" size="small" />
                     </el-form-item>
                   </el-form>
                   <el-table v-if="previewResult" :data="previewResult.items" size="small" max-height="250" stripe>
-                    <el-table-column prop="name" label="药材" min-width="80" />
-                    <el-table-column label="原方" width="70"><template #default="{ row }">{{ row.originalDosage }}g</template></el-table-column>
-                    <el-table-column label="换算" width="80">
+                    <el-table-column prop="name" :label="t('admin.formulaHerbName')" min-width="80" />
+                    <el-table-column :label="t('formulaView.originalFormula')" width="70"><template #default="{ row }">{{ row.originalDosage }}g</template></el-table-column>
+                    <el-table-column :label="t('formulaView.converted')" width="80">
                       <template #default="{ row }">
                         <span :style="{ color: row.stockSufficient === false ? '#e63946' : '#2d6a4f', fontWeight: 600 }">
                           {{ row.convertedQty }}{{ row.convertedUnit }}
                         </span>
                       </template>
                     </el-table-column>
-                    <el-table-column label="供应商" width="90">
+                    <el-table-column :label="t('formulaView.supplier')" width="90">
                       <template #default="{ row }"><span style="font-size:12px; color:#888">{{ row.supplierName || '-' }}</span></template>
                     </el-table-column>
-                    <el-table-column label="库存" width="70">
+                    <el-table-column :label="t('formulaView.stock')" width="70">
                       <template #default="{ row }">
                         <el-tag v-if="row.inventoryId" :type="row.stockSufficient ? 'success' : 'danger'" size="small">
                           {{ row.inventoryStock }}
                         </el-tag>
-                        <el-tag v-else type="info" size="small">无</el-tag>
+                        <el-tag v-else type="info" size="small">{{ t('formulaView.noStock') }}</el-tag>
                       </template>
                     </el-table-column>
                   </el-table>
                   <div v-else-if="previewType === 'none'" style="color:#888; font-size:13px; padding:12px">
-                    「仅方」模式不进行换算，导入处方后直接显示原方剂量。
+                    {{ t('formulaView.noneModeHint') }}
                   </div>
                 </div>
               </div>
 
               <div class="fv-card-actions">
                 <el-button size="small" type="primary" @click.stop="startEdit(formula)">
-                  <el-icon><Edit /></el-icon> 编辑方剂
+                  <el-icon><Edit /></el-icon> {{ t('formulaView.editFormula') }}
                 </el-button>
-                <el-button size="small" type="danger" text @click.stop="deleteFormula(formula)">删除</el-button>
+                <el-button size="small" type="danger" text @click.stop="deleteFormula(formula)">{{ t('common.delete') }}</el-button>
               </div>
             </template>
 
@@ -375,46 +395,46 @@ const categoryCount = computed(() => {
                 <el-form :model="editForm" label-width="80px" size="small">
                   <el-row :gutter="16">
                     <el-col :span="8">
-                      <el-form-item label="方剂名" required>
+                      <el-form-item :label="t('admin.formulaName')" required>
                         <el-input v-model="editForm.name" />
                       </el-form-item>
                     </el-col>
                     <el-col :span="8">
-                      <el-form-item label="分类">
+                      <el-form-item :label="t('admin.formulaCategory')">
                         <el-select v-model="editForm.category" filterable allow-create style="width:100%">
-                          <el-option v-for="c in FORMULA_CATEGORIES.slice(1)" :key="c.value" :label="c.label" :value="c.value" />
+                          <el-option v-for="c in formulaCategoryOptions.slice(1)" :key="c.value" :label="c.label" :value="c.value" />
                         </el-select>
                       </el-form-item>
                     </el-col>
                     <el-col :span="8">
-                      <el-form-item label="出处">
+                      <el-form-item :label="t('admin.formulaSource')">
                         <el-input v-model="editForm.source" />
                       </el-form-item>
                     </el-col>
                     <el-col :span="24">
-                      <el-form-item label="功效">
+                      <el-form-item :label="t('admin.formulaEfficacy')">
                         <el-input v-model="editForm.description" type="textarea" :rows="2" />
                       </el-form-item>
                     </el-col>
                   </el-row>
-                  <el-divider>药材组成</el-divider>
+                  <el-divider>{{ t('admin.formulaHerbs') }}</el-divider>
                   <el-row :gutter="8" style="margin-bottom:8px">
-                    <el-col :span="8"><el-input v-model="editHerb.herbName" placeholder="药材名" size="small" /></el-col>
+                    <el-col :span="8"><el-input v-model="editHerb.herbName" :placeholder="t('admin.formulaHerbNamePh')" size="small" /></el-col>
                     <el-col :span="5"><el-input-number v-model="editHerb.dosage" :min="0" :step="1" size="small" style="width:100%" /></el-col>
-                    <el-col :span="4"><el-input v-model="editHerb.unit" placeholder="单位" size="small" /></el-col>
-                    <el-col :span="4"><el-input v-model="editHerb.notes" placeholder="备注" size="small" /></el-col>
-                    <el-col :span="3"><el-button size="small" type="primary" @click="addEditHerb">添加</el-button></el-col>
+                    <el-col :span="4"><el-input v-model="editHerb.unit" :placeholder="t('admin.formulaUnit')" size="small" /></el-col>
+                    <el-col :span="4"><el-input v-model="editHerb.notes" :placeholder="t('admin.formulaHerbNotes')" size="small" /></el-col>
+                    <el-col :span="3"><el-button size="small" type="primary" @click="addEditHerb">{{ t('consultation.addHerb') }}</el-button></el-col>
                   </el-row>
-                  <el-table :data="editForm.items" size="small" max-height="250" empty-text="请添加药材">
-                    <el-table-column prop="herbName" label="药材" min-width="100" />
-                    <el-table-column label="剂量" width="80"><template #default="{ row }">{{ row.dosage }}{{ row.unit }}</template></el-table-column>
-                    <el-table-column prop="notes" label="备注" width="100" />
-                    <el-table-column width="60"><template #default="{ $index }"><el-button size="small" text type="danger" @click="removeEditHerb($index)">删除</el-button></template></el-table-column>
+                  <el-table :data="editForm.items" size="small" max-height="250" :empty-text="t('admin.formulaNoHerbsAdd')">
+                    <el-table-column prop="herbName" :label="t('admin.formulaHerbName')" min-width="100" />
+                    <el-table-column :label="t('admin.formulaDosage')" width="80"><template #default="{ row }">{{ row.dosage }}{{ row.unit }}</template></el-table-column>
+                    <el-table-column prop="notes" :label="t('admin.formulaHerbNotes')" width="100" />
+                    <el-table-column width="60"><template #default="{ $index }"><el-button size="small" text type="danger" @click="removeEditHerb($index)">{{ t('common.delete') }}</el-button></template></el-table-column>
                   </el-table>
                 </el-form>
                 <div class="fv-card-actions">
-                  <el-button @click="cancelEdit">取消</el-button>
-                  <el-button type="primary" @click="saveEdit">保存</el-button>
+                  <el-button @click="cancelEdit">{{ t('common.cancel') }}</el-button>
+                  <el-button type="primary" @click="saveEdit">{{ t('common.save') }}</el-button>
                 </div>
               </div>
             </template>
@@ -422,7 +442,7 @@ const categoryCount = computed(() => {
         </transition>
       </div>
 
-      <el-empty v-if="filteredFormulas.length === 0" description="没有找到匹配的方剂" />
+      <el-empty v-if="filteredFormulas.length === 0" :description="t('formulaView.noMatch')" />
     </div>
   </div>
 </template>

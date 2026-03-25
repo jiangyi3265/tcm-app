@@ -64,14 +64,14 @@ const selectedConsult = ref(null)
 const showInvoiceDialog = ref(false)
 const selectedPaymentMethod = ref('cash')
 
-const paymentMethods = [
-  { value: 'cash', label: '现金 Cash' },
-  { value: 'card', label: '刷卡 Card' },
-  { value: 'wechat', label: '微信 WeChat' },
-  { value: 'alipay', label: '支付宝 Alipay' },
-  { value: 'transfer', label: '转账 Transfer' },
-  { value: 'other', label: '其他 Other' },
-]
+const paymentMethods = computed(() => [
+  { value: 'cash', label: t('cashier.paymentMethods.cash') },
+  { value: 'card', label: t('cashier.paymentMethods.card') },
+  { value: 'wechat', label: t('cashier.paymentMethods.wechat') },
+  { value: 'alipay', label: t('cashier.paymentMethods.alipay') },
+  { value: 'transfer', label: t('cashier.paymentMethods.transfer') },
+  { value: 'other', label: t('cashier.paymentMethods.other') },
+])
 
 function viewInvoice(consult) {
   selectedConsult.value = consult
@@ -254,7 +254,7 @@ const todayCount = computed(() => {
           <div class="inv-row total"><span>{{ t('cashier.totalAmount') }}</span><span>${{ formatAmount(selectedConsult.totalAmount) }}</span></div>
         </div>
         <div v-if="selectedConsult.status !== 'paid'" style="margin-top: 12px">
-          <strong style="font-size: 13px; color: #555">{{ t('cashier.paymentMethod') || '支付方式' }}：</strong>
+          <strong style="font-size: 13px; color: #555">{{ t('cashier.paymentMethod') }}：</strong>
           <el-radio-group v-model="selectedPaymentMethod" size="small" style="margin-top: 6px">
             <el-radio-button v-for="m in paymentMethods" :key="m.value" :value="m.value">{{ m.label }}</el-radio-button>
           </el-radio-group>

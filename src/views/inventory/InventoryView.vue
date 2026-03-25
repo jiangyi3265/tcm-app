@@ -9,7 +9,7 @@ import { useSettingsStore } from '../../stores/settings'
 import { hasPermission } from '../../utils/permissions'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-const { t } = useI18n()
+const { t, te, locale } = useI18n()
 
 const inventoryStore = useInventoryStore()
 const authStore = useAuthStore()
@@ -38,9 +38,9 @@ const adjustDelta = ref(0)
 const adjustReason = ref('')
 
 const CATEGORY_CONFIG = computed(() => ({
-  powder: { label: t('inventory.powder'), unit: t('inventory.unitBag'), defaultUnit: t('inventory.unitBag') },
+  powder: { label: t('inventory.powder'), unit: '包', defaultUnit: '包' },
   raw_herbs: { label: t('inventory.rawHerbs'), unit: 'g', defaultUnit: 'g' },
-  pills: { label: t('inventory.pillsMed'), unit: t('inventory.unitBox'), defaultUnit: t('inventory.unitBox') },
+  pills: { label: t('inventory.pillsMed'), unit: '盒', defaultUnit: '盒' },
 }))
 
 // TCM 药材属性选项
@@ -48,6 +48,22 @@ const HERB_NATURES = ['寒', '凉', '平', '温', '热']
 const HERB_TASTES = ['酸', '苦', '甘', '辛', '咸', '淡', '涩']
 const HERB_CHANNELS = ['肺', '大肠', '胃', '脾', '心', '小肠', '膀胱', '肾', '心包', '三焦', '胆', '肝']
 const HERB_TOXICITY = ['无毒', '小毒', '有毒', '大毒']
+
+function localizeInventoryValue(group, value) {
+  if (!value) return value
+  const key = `inventory.${group}.${value}`
+  return te(key) ? t(key) : value
+}
+
+function getUnitLabel(unit) {
+  return localizeInventoryValue('unitLabels', unit)
+}
+
+function getToxicityTagType(value) {
+  if (value === '无毒') return ''
+  if (value === '小毒') return 'warning'
+  return 'danger'
+}
 
 const newItem = ref({
   name: '',
@@ -150,7 +166,7 @@ async function handleAdjust() {
   try {
     const success = await inventoryStore.adjustStock(adjustItem.value.id, adjustDelta.value, adjustReason.value)
     if (success) {
-      ElMessage.success(t('inventory.adjusted', { delta: Math.abs(adjustDelta.value), unit: adjustItem.value.unit }))
+      ElMessage.success(t('inventory.adjusted', { delta: Math.abs(adjustDelta.value), unit: getUnitLabel(adjustItem.value.unit) }))
       showAdjustDialog.value = false
     } else {
       ElMessage.error(t('inventory.cannotBeNegative'))
@@ -293,26 +309,26 @@ async function openAdjustmentHistory(item) {
                 </div>
               </template>
             </el-table-column>
-            <el-table-column :label="t('inventory.natureTasteChannel')" min-width="180">
+          <el-table-column :label="t('inventory.natureTasteChannel')" min-width="180">
               <template #default="{ row }">
                 <div v-if="editingId === row.id">
                   <el-select v-model="editForm.nature" size="small" :placeholder="t('inventory.nature')" style="width: 100%; margin-bottom: 4px">
-                    <el-option v-for="n in HERB_NATURES" :key="n" :label="n" :value="n" />
+                    <el-option v-for="n in HERB_NATURES" :key="n" :label="localizeInventoryValue('natureOptions', n)" :value="n" />
                   </el-select>
                   <el-select v-model="editForm.taste" size="small" multiple :placeholder="t('inventory.taste')" style="width: 100%; margin-bottom: 4px" collapse-tags>
-                    <el-option v-for="taste in HERB_TASTES" :key="taste" :label="taste" :value="taste" />
+                    <el-option v-for="taste in HERB_TASTES" :key="taste" :label="localizeInventoryValue('tasteOptions', taste)" :value="taste" />
                   </el-select>
                   <el-select v-model="editForm.guijing" size="small" multiple :placeholder="t('inventory.channel')" style="width: 100%" collapse-tags>
-                    <el-option v-for="c in HERB_CHANNELS" :key="c" :label="c" :value="c" />
+                    <el-option v-for="c in HERB_CHANNELS" :key="c" :label="localizeInventoryValue('channelOptions', c)" :value="c" />
                   </el-select>
                 </div>
                 <div v-else>
                   <div style="font-size: 12px">
-                    <span v-if="row.nature" class="tcm-badge nature">{{ row.nature }}</span>
-                    <span v-for="taste in normalizeArray(row.taste)" :key="taste" class="tcm-badge taste">{{ taste }}</span>
+                    <span v-if="row.nature" class="tcm-badge nature">{{ localizeInventoryValue('natureOptions', row.nature) }}</span>
+                    <span v-for="taste in normalizeArray(row.taste)" :key="taste" class="tcm-badge taste">{{ localizeInventoryValue('tasteOptions', taste) }}</span>
                   </div>
                   <div v-if="normalizeArray(row.guijing).length" style="font-size: 11px; color: #888; margin-top: 2px">
-                    {{ t('inventory.channelShort') }}：{{ normalizeArray(row.guijing).join('、') }}
+                    {{ t('inventory.channelShort') }}：{{ normalizeArray(row.guijing).map((item) => localizeInventoryValue('channelOptions', item)).join(locale === 'zh-CN' ? '、' : ', ') }}
                   </div>
                 </div>
               </template>
@@ -323,7 +339,7 @@ async function openAdjustmentHistory(item) {
                   <el-input-number v-model="editForm.quantity" :min="0" :step="1" size="small" controls-position="right" style="width: 100%" />
                 </div>
                 <span v-else :class="{ 'low-stock': row.quantity <= row.minStockLevel && row.quantity > 0, 'out-of-stock': row.quantity === 0 }">
-                  {{ row.quantity }} {{ row.unit }}
+                  {{ row.quantity }} {{ getUnitLabel(row.unit) }}
                 </span>
               </template>
             </el-table-column>
@@ -332,7 +348,7 @@ async function openAdjustmentHistory(item) {
                 <div v-if="editingId === row.id">
                   <el-input-number v-model="editForm.minStockLevel" :min="0" size="small" controls-position="right" style="width: 100%" />
                 </div>
-                <span v-else style="font-size: 13px; color: #888">{{ row.minStockLevel }} {{ row.unit }}</span>
+                <span v-else style="font-size: 13px; color: #888">{{ row.minStockLevel }} {{ getUnitLabel(row.unit) }}</span>
               </template>
             </el-table-column>
             <el-table-column :label="t('inventory.unitPrice')" min-width="120">
@@ -340,7 +356,7 @@ async function openAdjustmentHistory(item) {
                 <div v-if="editingId === row.id">
                   <el-input-number v-model="editForm.pricePerUnit" :min="0" :step="0.1" size="small" controls-position="right" style="width: 100%" />
                 </div>
-                <span v-else>¥{{ row.pricePerUnit }}/{{ row.unit }}</span>
+                <span v-else>¥{{ row.pricePerUnit }}/{{ getUnitLabel(row.unit) }}</span>
               </template>
             </el-table-column>
             <el-table-column :label="t('inventory.supplier')" min-width="160">
@@ -366,15 +382,15 @@ async function openAdjustmentHistory(item) {
               <template #default="{ row }">
                 <div v-if="editingId === row.id">
                   <el-select v-model="editForm.toxicity" size="small" style="width: 100%">
-                    <el-option v-for="tox in HERB_TOXICITY" :key="tox" :label="tox" :value="tox" />
+                    <el-option v-for="tox in HERB_TOXICITY" :key="tox" :label="localizeInventoryValue('toxicityOptions', tox)" :value="tox" />
                   </el-select>
                 </div>
                 <el-tag
                   v-else
-                  :type="row.toxicity === '无毒' ? '' : row.toxicity === '小毒' ? 'warning' : 'danger'"
+                  :type="getToxicityTagType(row.toxicity || '无毒')"
                   size="small"
                 >
-                  {{ row.toxicity || '无毒' }}
+                  {{ localizeInventoryValue('toxicityOptions', row.toxicity || '无毒') }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -435,16 +451,16 @@ async function openAdjustmentHistory(item) {
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="Purchase Price 购买价格">
+            <el-form-item :label="t('inventory.purchasePriceLabel')">
               <el-input-number v-model="newItem.purchasePrice" :min="0" :step="0.01" :precision="4" style="width:100%"
                 @change="autoCalcSellingPrice(newItem)" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item :label="t('inventory.priceLabel') + ' (售价)'">
+            <el-form-item :label="t('inventory.sellingPriceLabel')">
               <el-input-number v-model="newItem.pricePerUnit" :min="0" :step="0.01" :precision="4" style="width:100%" />
               <div style="font-size:11px; color:#888; margin-top:2px" v-if="newItem.purchasePrice > 0">
-                利润比例: {{ settingsStore.profitRatio }}x → 售价 = 进价 × {{ (1 + settingsStore.profitRatio).toFixed(2) }}
+                {{ t('inventory.sellingPriceHint', { ratio: settingsStore.profitRatio, multiplier: (1 + settingsStore.profitRatio).toFixed(2) }) }}
               </div>
             </el-form-item>
           </el-col>
@@ -468,28 +484,28 @@ async function openAdjustmentHistory(item) {
           <el-col :span="12">
             <el-form-item :label="t('inventory.nature')">
               <el-select v-model="newItem.nature" :placeholder="t('inventory.selectNature')" style="width:100%">
-                <el-option v-for="n in HERB_NATURES" :key="n" :label="n" :value="n" />
+                <el-option v-for="n in HERB_NATURES" :key="n" :label="localizeInventoryValue('natureOptions', n)" :value="n" />
               </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item :label="t('inventory.toxicity')">
               <el-select v-model="newItem.toxicity" style="width:100%">
-                <el-option v-for="tox in HERB_TOXICITY" :key="tox" :label="tox" :value="tox" />
+                <el-option v-for="tox in HERB_TOXICITY" :key="tox" :label="localizeInventoryValue('toxicityOptions', tox)" :value="tox" />
               </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item :label="t('inventory.taste')">
               <el-select v-model="newItem.taste" multiple :placeholder="t('inventory.multiSelect')" style="width:100%" collapse-tags>
-                <el-option v-for="taste in HERB_TASTES" :key="taste" :label="taste" :value="taste" />
+                <el-option v-for="taste in HERB_TASTES" :key="taste" :label="localizeInventoryValue('tasteOptions', taste)" :value="taste" />
               </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item :label="t('inventory.channel')">
               <el-select v-model="newItem.guijing" multiple :placeholder="t('inventory.multiSelect')" style="width:100%" collapse-tags>
-                <el-option v-for="c in HERB_CHANNELS" :key="c" :label="c" :value="c" />
+                <el-option v-for="c in HERB_CHANNELS" :key="c" :label="localizeInventoryValue('channelOptions', c)" :value="c" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -517,20 +533,20 @@ async function openAdjustmentHistory(item) {
         <el-descriptions-item :label="t('inventory.aliases')" :span="2">{{ detailItem.aliases || '-' }}</el-descriptions-item>
         <el-descriptions-item :label="t('inventory.categoryLabel')">{{ CATEGORY_CONFIG[detailItem.category]?.label || detailItem.category }}</el-descriptions-item>
         <el-descriptions-item :label="t('inventory.toxicity')">
-          <el-tag :type="detailItem.toxicity === '无毒' ? '' : 'danger'" size="small">
-            {{ detailItem.toxicity || '无毒' }}
+          <el-tag :type="getToxicityTagType(detailItem.toxicity || '无毒')" size="small">
+            {{ localizeInventoryValue('toxicityOptions', detailItem.toxicity || '无毒') }}
           </el-tag>
         </el-descriptions-item>
-        <el-descriptions-item :label="t('inventory.nature')">{{ detailItem.nature || '-' }}</el-descriptions-item>
-        <el-descriptions-item :label="t('inventory.taste')">{{ normalizeArray(detailItem.taste).join('、') || '-' }}</el-descriptions-item>
-        <el-descriptions-item :label="t('inventory.channel')" :span="2">{{ normalizeArray(detailItem.guijing).join('、') || '-' }}</el-descriptions-item>
+        <el-descriptions-item :label="t('inventory.nature')">{{ detailItem.nature ? localizeInventoryValue('natureOptions', detailItem.nature) : '-' }}</el-descriptions-item>
+        <el-descriptions-item :label="t('inventory.taste')">{{ normalizeArray(detailItem.taste).map((item) => localizeInventoryValue('tasteOptions', item)).join(locale === 'zh-CN' ? '、' : ', ') || '-' }}</el-descriptions-item>
+        <el-descriptions-item :label="t('inventory.channel')" :span="2">{{ normalizeArray(detailItem.guijing).map((item) => localizeInventoryValue('channelOptions', item)).join(locale === 'zh-CN' ? '、' : ', ') || '-' }}</el-descriptions-item>
         <el-descriptions-item :label="t('inventory.currentStock')" :span="2">
           <span :class="{ 'low-stock': detailItem.quantity <= detailItem.minStockLevel, 'out-of-stock': detailItem.quantity === 0 }">
-            {{ detailItem.quantity }} {{ detailItem.unit }}
+            {{ detailItem.quantity }} {{ getUnitLabel(detailItem.unit) }}
           </span>
-          &nbsp;（{{ t('inventory.alertShort') }}：{{ detailItem.minStockLevel }} {{ detailItem.unit }}）
+          &nbsp;（{{ t('inventory.alertShort') }}：{{ detailItem.minStockLevel }} {{ getUnitLabel(detailItem.unit) }}）
         </el-descriptions-item>
-        <el-descriptions-item :label="t('inventory.unitPrice')" :span="2">¥{{ detailItem.pricePerUnit }}/{{ detailItem.unit }}</el-descriptions-item>
+        <el-descriptions-item :label="t('inventory.unitPrice')" :span="2">¥{{ detailItem.pricePerUnit }}/{{ getUnitLabel(detailItem.unit) }}</el-descriptions-item>
         <el-descriptions-item :label="t('inventory.supplier')" :span="2">{{ getSupplierName(detailItem) }}</el-descriptions-item>
         <el-descriptions-item v-if="detailItem.category === 'powder'" :label="t('inventory.gramsPerBag')" :span="2">
           {{ detailItem.gramsPerPacket ? detailItem.gramsPerPacket + 'g' : '-' }}
@@ -554,7 +570,7 @@ async function openAdjustmentHistory(item) {
     <el-dialog v-model="showAdjustDialog" :title="t('inventory.adjustStockTitle', { name: adjustItem?.name })" width="360px">
       <el-form label-width="90px">
         <el-form-item :label="t('inventory.currentStock')">
-          <span style="font-weight: 600">{{ adjustItem?.quantity }} {{ adjustItem?.unit }}</span>
+          <span style="font-weight: 600">{{ adjustItem?.quantity }} {{ getUnitLabel(adjustItem?.unit) }}</span>
         </el-form-item>
         <el-form-item :label="t('inventory.adjustQty')">
           <el-input-number v-model="adjustDelta" :step="1" />
@@ -562,7 +578,7 @@ async function openAdjustmentHistory(item) {
         </el-form-item>
         <el-form-item :label="t('inventory.afterAdjust')">
           <span style="font-weight: 600" :class="{ 'low-stock': (adjustItem?.quantity + adjustDelta) <= adjustItem?.minStockLevel }">
-            {{ (adjustItem?.quantity || 0) + adjustDelta }} {{ adjustItem?.unit }}
+            {{ (adjustItem?.quantity || 0) + adjustDelta }} {{ getUnitLabel(adjustItem?.unit) }}
           </span>
         </el-form-item>
         <el-form-item :label="t('inventory.reason')">
@@ -594,7 +610,7 @@ async function openAdjustmentHistory(item) {
     <el-drawer v-model="showHistoryDialog" :title="t('inventory.adjustHistory') + (historyItemName ? ' - ' + historyItemName : '')" size="700px" direction="rtl">
       <el-table :data="adjustmentHistory" v-loading="historyLoading" stripe max-height="400">
         <el-table-column prop="createdAt" :label="t('inventory.historyTime')" width="180">
-          <template #default="{ row }">{{ row.createdAt ? new Date(row.createdAt).toLocaleString() : '-' }}</template>
+          <template #default="{ row }">{{ row.createdAt ? new Date(row.createdAt).toLocaleString(locale === 'zh-CN' ? 'zh-CN' : 'en-US') : '-' }}</template>
         </el-table-column>
         <el-table-column prop="targetName" :label="t('inventory.historyItem')" width="120" />
         <el-table-column prop="userName" :label="t('inventory.historyOperator')" width="100" />

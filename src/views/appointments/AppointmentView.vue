@@ -12,7 +12,7 @@ import { SERVICE_TYPES } from '../../utils/sampleData'
 import { useEmailSimulator } from '../../utils/emailSimulator'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 
 const appointmentsStore = useAppointmentsStore()
 const patientsStore = usePatientsStore()
@@ -56,12 +56,13 @@ function getDayAppointments(date) {
 }
 
 function getAppointmentWithInfo(appt) {
+  const fallbackServiceLabel = SERVICE_TYPES[appt.serviceType]?.label || appt.serviceType
   return {
     ...appt,
     patient: patientsStore.getPatient(appt.patientId),
     practitioner: authStore.users.find((u) => u.id === appt.practitionerId),
     room: settingsStore.rooms.find((r) => r.id === appt.roomId),
-    serviceLabel: SERVICE_TYPES[appt.serviceType]?.label || appt.serviceType,
+    serviceLabel: getServiceTypeLabel(appt.serviceType, fallbackServiceLabel),
   }
 }
 
@@ -108,7 +109,7 @@ const startTimeOptions = computed(() => {
   if (lastStart < startTotal) return []
 
   const slots = []
-  for (let total = startTotal; total <= lastStart; total += 15) {
+  for (let total = startTotal; total <= lastStart; total += slotIntervalMinutes.value) {
     const hour = Math.floor(total / 60)
     const minute = total % 60
     const value = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
@@ -133,6 +134,18 @@ const selectedStartTime = computed({
     newAppt.value.startMinute = Number.isNaN(minute) ? null : minute
   },
 })
+
+const slotIntervalMinutes = computed(() => {
+  const practitionerId = newAppt.value.practitionerId
+  const interval = practitionerId ? Number(settingsStore.getPractitionerInterval(practitionerId)) : 15
+  return Number.isFinite(interval) && interval > 0 ? interval : 15
+})
+
+function getServiceTypeLabel(serviceType, fallback = '') {
+  const translationKey = `appointments.serviceTypes.${serviceType}`
+  if (te(translationKey)) return t(translationKey)
+  return fallback || settingsStore.serviceTypes[serviceType]?.label || SERVICE_TYPES[serviceType]?.label || serviceType
+}
 
 const appointmentEndTimeLabel = computed(() => {
   if (!selectedStartTime.value || !newAppt.value.serviceType) return ''
@@ -168,10 +181,15 @@ async function createAppointment() {
   if (!newAppt.value.practitionerId) return ElMessage.warning(t('appointments.selectPractitionerMsg'))
   if (!newAppt.value.serviceType) return ElMessage.warning(t('appointments.selectServiceType'))
   if (!selectedStartTime.value) {
-    return ElMessage.warning(startTimeOptions.value.length === 0 ? '当前医师当天没有可预约时间' : '请选择开始时间')
+    return ElMessage.warning(
+      startTimeOptions.value.length === 0
+        ? t('appointments.noAvailableSlots')
+        : t('appointments.selectStartTime'),
+    )
   }
 
   const serviceConfig = SERVICE_TYPES[newAppt.value.serviceType]
+  const serviceLabel = getServiceTypeLabel(newAppt.value.serviceType, serviceConfig?.label)
   const startTime = dayjs(newAppt.value.date)
     .hour(newAppt.value.startHour)
     .minute(newAppt.value.startMinute)
@@ -187,7 +205,7 @@ async function createAppointment() {
   )
 
   if (!check.available) {
-    return ElMessage.error(check.reason || '该时间不可预约')
+    return ElMessage.error(check.reason || t('appointments.slotUnavailable'))
   }
 
   const apptData = {
@@ -202,7 +220,7 @@ async function createAppointment() {
   // 邮件预览
   const patient = patientsStore.getPatient(newAppt.value.patientId)
   const practitioner = authStore.users.find(u => u.id === newAppt.value.practitionerId)
-  const emailContent = buildAppointmentConfirmEmail(patient, apptData, practitioner, serviceConfig?.label || '')
+  const emailContent = buildAppointmentConfirmEmail(patient, apptData, practitioner, serviceLabel)
   if (patient?.emails?.[0] || patient?.email) {
     openEmailPreview(emailContent)
   }
@@ -316,7 +334,7 @@ const STATUS_COLORS = {
             <div class="appt-patient-name">
               {{ patientsStore.getPatient(appt.patientId)?.name || t('appointments.unknown') }}
             </div>
-            <div class="appt-service-label">{{ SERVICE_TYPES[appt.serviceType]?.label }}</div>
+            <div class="appt-service-label">{{ getServiceTypeLabel(appt.serviceType, SERVICE_TYPES[appt.serviceType]?.label) }}</div>
           </div>
           <div v-if="getDayAppointments(day).length === 0" class="day-empty">
             <span>{{ t('appointments.noAppointments') }}</span>
@@ -343,7 +361,7 @@ const STATUS_COLORS = {
             <el-option
               v-for="(config, key) in SERVICE_TYPES"
               :key="key"
-              :label="config.label + ' (' + config.duration + t('appointments.minutesSuffix') + ')'"
+              :label="getServiceTypeLabel(key, config.label) + ' (' + config.duration + t('appointments.minutesSuffix') + ')'"
               :value="key"
             />
           </el-select>
@@ -357,14 +375,14 @@ const STATUS_COLORS = {
           <el-date-picker v-model="newAppt.date" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
         </el-form-item>
         <el-form-item :label="t('appointments.startTime')" required>
-          <el-select v-model="selectedStartTime" style="width: 160px" placeholder="请选择开始时间">
+          <el-select v-model="selectedStartTime" style="width: 160px" :placeholder="t('appointments.selectStartTime')">
             <el-option v-for="opt in startTimeOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
           </el-select>
           <span v-if="appointmentEndTimeLabel" style="margin-left: 10px; font-size: 12px; color: #888">
             {{ t('appointments.endTime') }}{{ appointmentEndTimeLabel }}
           </span>
           <span v-else-if="newAppt.practitionerId" style="margin-left: 10px; font-size: 12px; color: #c0392b">
-            当前医师当天没有可预约时间
+            {{ t('appointments.noAvailableSlots') }}
           </span>
         </el-form-item>
         <el-form-item :label="t('appointments.notesLabel')">

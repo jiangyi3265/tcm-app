@@ -11,7 +11,7 @@ import { useBranchesStore } from '../stores/branches'
 import { formatTime, formatDate, dayjs } from '../utils/dateUtils'
 import { SERVICE_TYPES } from '../utils/sampleData'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -81,6 +81,9 @@ const weekStats = computed(() => {
 })
 
 const pendingPrescriptions = computed(() => consultationsStore.pendingPrescriptions)
+const currentWeekday = computed(() =>
+  new Intl.DateTimeFormat(locale.value === 'zh-CN' ? 'zh-CN' : 'en-US', { weekday: 'long' }).format(new Date()),
+)
 
 function goToPatient(patientId) {
   router.push(`/patients/${patientId}`)
@@ -122,7 +125,7 @@ const CONSULT_STATUS = {
       <div>
         <h2 class="welcome-title">{{ t('dashboard.welcome', { name: user?.name }) }}</h2>
         <p class="welcome-date">
-          {{ formatDate(new Date()) }} · {{ new Date().toLocaleDateString('zh-CN', { weekday: 'long' }) }}
+          {{ formatDate(new Date()) }} · {{ currentWeekday }}
           <span v-if="branchesStore.currentBranch" style="margin-left: 8px; color: #2d6a4f; font-weight: 600">
             · {{ branchesStore.currentBranch.name }}
           </span>

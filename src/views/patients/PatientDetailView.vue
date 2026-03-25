@@ -239,6 +239,7 @@ async function sendConsentByEmail() {
   try {
     const res = await patientsApi.sendConsentEmail(patientId, {
       clinicName: settingsStore.clinicName || '',
+      appBaseUrl: window.location.origin,
     })
     if (res?.sent === false) {
       ElMessage.warning(res.message || t('patientDetail.consentEmailFailed'))
@@ -261,17 +262,17 @@ async function sendIntakeByEmail() {
   }
   sendingIntakeEmail.value = true
   try {
-    const res = await patientsApi.sendConsentEmail(patientId, {
+    const res = await patientsApi.sendIntakeEmail(patientId, {
       clinicName: settingsStore.clinicName || '',
-      includeIntakeForm: true,
+      appBaseUrl: window.location.origin,
     })
     if (res?.sent === false) {
-      ElMessage.warning(res.message || '问诊单发送失败')
+      ElMessage.warning(res.message || t('patientDetail.intakeEmailFailed'))
     } else {
-      ElMessage.success(res.message || '问诊单已发送')
+      ElMessage.success(res.message || t('patientDetail.intakeEmailSent'))
     }
   } catch (e) {
-    ElMessage.error(e.message || '问诊单发送失败')
+    ElMessage.error(e.message || t('patientDetail.intakeEmailFailed'))
   } finally {
     sendingIntakeEmail.value = false
   }
@@ -553,8 +554,8 @@ const fileTree = computed(() => {
                     <el-button v-if="!patient.consentSigned" size="small" type="primary" plain @click="sendConsent">
                       <el-icon><Document /></el-icon> {{ t('patientDetail.markAsSigned') }}
                     </el-button>
-                    <el-button size="small" type="success" plain :loading="sendingConsentEmail" @click="sendConsentByEmail">
-                      <el-icon><Message /></el-icon> {{ patient.consentSigned ? '重新发送知情同意书' : t('patientDetail.sendConsentEmail') }}
+                    <el-button v-if="!patient.consentSigned" size="small" type="success" plain :loading="sendingConsentEmail" @click="sendConsentByEmail">
+                      <el-icon><Message /></el-icon> {{ t('patientDetail.sendConsentEmail') }}
                     </el-button>
                     <el-button size="small" type="warning" plain :loading="sendingIntakeEmail" @click="sendIntakeByEmail">
                       <el-icon><EditPen /></el-icon> 发送问诊单
@@ -701,7 +702,7 @@ const fileTree = computed(() => {
                         type="info"
                         :closable="false"
                         show-icon
-                        title="病史与用药已由首诊记录驱动，请到首诊记录中修改。"
+                        :title="t('patientDetail.historyDrivenByFirstConsult')"
                       />
                       <div style="margin-top: 8px; white-space: pre-wrap; line-height: 1.6; padding: 10px 12px; border: 1px solid #ebeef5; border-radius: 6px; background: #fafafa;">
                         {{ consultationDrivenHistory || '-' }}
@@ -714,7 +715,7 @@ const fileTree = computed(() => {
                           plain
                           @click="$router.push(`/patients/${patientId}/consultations/${firstConsultation.id}`)"
                         >
-                          打开首诊记录
+                          {{ t('patientDetail.openFirstConsultation') }}
                         </el-button>
                       </div>
                     </template>

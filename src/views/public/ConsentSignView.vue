@@ -1,8 +1,10 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { consentPublicApi } from '../../utils/api'
 
+const { t, locale } = useI18n()
 const route = useRoute()
 const token = route.params.token
 
@@ -15,6 +17,13 @@ const signing = ref(false)
 const signed = ref(false)
 const signedAt = ref('')
 
+const formattedSignedAt = computed(() => {
+  if (!signedAt.value) return ''
+  const parsed = new Date(signedAt.value)
+  if (Number.isNaN(parsed.getTime())) return signedAt.value
+  return parsed.toLocaleString(locale.value === 'zh-CN' ? 'zh-CN' : 'en-US')
+})
+
 onMounted(async () => {
   try {
     const info = await consentPublicApi.getInfo(token)
@@ -24,7 +33,7 @@ onMounted(async () => {
       signed.value = true
     }
   } catch (e) {
-    error.value = e.message || '无法加载同意书信息'
+    error.value = e.message || t('publicConsent.loadFailed')
   } finally {
     loading.value = false
   }
@@ -34,12 +43,13 @@ async function handleSign() {
   if (!agreed.value) return
   if (!signatureName.value.trim()) return
   signing.value = true
+  error.value = ''
   try {
     const result = await consentPublicApi.sign(token, signatureName.value.trim())
     signed.value = true
     signedAt.value = result.consentSignedAt
   } catch (e) {
-    error.value = e.message || '签署失败'
+    error.value = e.message || t('publicConsent.signFailed')
   } finally {
     signing.value = false
   }
@@ -56,14 +66,14 @@ async function handleSign() {
             <path d="M12 6v6l4 2"/>
           </svg>
         </div>
-        <h1>中医诊所综合管理系统</h1>
-        <p class="subtitle">TCM Clinic Management System</p>
+        <h1>{{ t('publicConsent.appTitle') }}</h1>
+        <p class="subtitle">{{ t('publicConsent.appSubtitle') }}</p>
       </div>
 
       <!-- Loading -->
       <div v-if="loading" class="consent-loading">
         <div class="spinner"></div>
-        <p>正在加载...</p>
+        <p>{{ t('publicConsent.loading') }}</p>
       </div>
 
       <!-- Error -->
@@ -73,7 +83,7 @@ async function handleSign() {
           <line x1="15" y1="9" x2="9" y2="15"/>
           <line x1="9" y1="9" x2="15" y2="15"/>
         </svg>
-        <h2>无法处理请求</h2>
+        <h2>{{ t('publicConsent.invalidRequest') }}</h2>
         <p>{{ error }}</p>
       </div>
 
@@ -83,28 +93,28 @@ async function handleSign() {
           <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
           <polyline points="22 4 12 14.01 9 11.01"/>
         </svg>
-        <h2>同意书已签署</h2>
-        <p v-if="signedAt">签署时间：{{ signedAt }}</p>
-        <p>感谢您的配合，您可以关闭此页面。</p>
+        <h2>{{ t('publicConsent.signedTitle') }}</h2>
+        <p v-if="formattedSignedAt">{{ t('publicConsent.signedAt', { time: formattedSignedAt }) }}</p>
+        <p>{{ t('publicConsent.signedDesc') }}</p>
       </div>
 
       <!-- Consent Form -->
       <div v-else class="consent-form">
-        <h2>知情同意书</h2>
-        <p class="patient-info">病人姓名：<strong>{{ patientName }}</strong></p>
+        <h2>{{ t('publicConsent.formTitle') }}</h2>
+        <p class="patient-info">{{ t('publicConsent.patientLabel') }}<strong>{{ patientName }}</strong></p>
 
         <div class="consent-content">
-          <h3>诊疗知情同意书</h3>
+          <h3>{{ t('publicConsent.documentTitle') }}</h3>
           <div class="consent-text">
-            <p>尊敬的患者：</p>
-            <p>欢迎您来到本诊所就诊。在接受中医诊疗服务之前，请您仔细阅读以下内容：</p>
+            <p>{{ t('publicConsent.greeting') }}</p>
+            <p>{{ t('publicConsent.intro') }}</p>
             <ol>
-              <li><strong>诊疗范围：</strong>本诊所提供中医诊疗服务，包括但不限于中医问诊、辨证论治、针灸治疗、中药处方等。</li>
-              <li><strong>风险告知：</strong>任何医疗行为均存在一定风险。针灸治疗可能出现局部疼痛、淤血、晕针等反应；中药可能因个人体质差异产生不同反应。</li>
-              <li><strong>隐私保护：</strong>您的个人信息和诊疗记录将严格保密，仅用于诊疗目的。未经您的同意，不会向第三方披露。</li>
-              <li><strong>配合义务：</strong>请如实告知您的病史、过敏史、正在使用的药物等信息，以便医师准确诊断和制定治疗方案。</li>
-              <li><strong>费用说明：</strong>诊疗费用将在治疗前告知，包含诊疗费、药材费及相关税费。</li>
-              <li><strong>知情权：</strong>您有权了解治疗方案、预期效果及可能的风险，如有疑问请随时向主治医师咨询。</li>
+              <li><strong>{{ t('publicConsent.scopeTitle') }}</strong>{{ t('publicConsent.scopeDesc') }}</li>
+              <li><strong>{{ t('publicConsent.riskTitle') }}</strong>{{ t('publicConsent.riskDesc') }}</li>
+              <li><strong>{{ t('publicConsent.privacyTitle') }}</strong>{{ t('publicConsent.privacyDesc') }}</li>
+              <li><strong>{{ t('publicConsent.cooperationTitle') }}</strong>{{ t('publicConsent.cooperationDesc') }}</li>
+              <li><strong>{{ t('publicConsent.feeTitle') }}</strong>{{ t('publicConsent.feeDesc') }}</li>
+              <li><strong>{{ t('publicConsent.rightsTitle') }}</strong>{{ t('publicConsent.rightsDesc') }}</li>
             </ol>
           </div>
         </div>
@@ -112,15 +122,15 @@ async function handleSign() {
         <div class="consent-actions">
           <label class="agree-checkbox">
             <input type="checkbox" v-model="agreed" />
-            <span>我已仔细阅读并理解以上内容，同意接受诊疗服务</span>
+            <span>{{ t('publicConsent.agreeText') }}</span>
           </label>
 
           <div class="signature-area">
-            <label>签名确认 / Signature：</label>
+            <label>{{ t('publicConsent.signatureLabel') }}</label>
             <input
               type="text"
               v-model="signatureName"
-              placeholder="请输入您的姓名"
+              :placeholder="t('publicConsent.signaturePlaceholder')"
               :disabled="!agreed"
               class="signature-input"
             />
@@ -131,7 +141,7 @@ async function handleSign() {
             :disabled="!agreed || !signatureName.trim() || signing"
             @click="handleSign"
           >
-            {{ signing ? '签署中...' : '确认签署' }}
+            {{ signing ? t('publicConsent.signing') : t('publicConsent.confirm') }}
           </button>
         </div>
       </div>

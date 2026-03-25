@@ -5,8 +5,9 @@ import { useConsultationsStore } from '../../stores/consultations'
 import { useAuthStore } from '../../stores/auth'
 import { formatDate } from '../../utils/dateUtils'
 import { emptyDiff } from '../../utils/sampleData'
+import { localizeMixedJoinedValue, localizeMixedText } from '../../utils/localizeMixedText'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const props = defineProps({
   patientId: { type: String, required: true },
@@ -131,34 +132,34 @@ function getPractitionerName(id) {
 
 // 辨证对比辅助
 const diffFields = computed(() => [
-  { key: 'coldHeat', label: 'Cold/Heat 寒热' },
-  { key: 'sweat', label: 'Sweat 汗出' },
-  { key: 'headDiscomfort', label: 'Head 头部不适' },
-  { key: 'headPosition', label: 'Head Position 位置' },
-  { key: 'eye', label: 'Eye 眼睛' },
-  { key: 'ear', label: 'Ears 耳朵' },
-  { key: 'nose', label: 'Noses 鼻子' },
-  { key: 'mouth', label: 'Mouth 口' },
-  { key: 'taste', label: 'Taste 味道' },
-  { key: 'bodyDiscomforts', label: 'Body Discomforts 身体不适' },
-  { key: 'bodyDiscomfortsLocation', label: 'Body Location 位置' },
-  { key: 'skinIssues', label: 'Skin 皮肤' },
-  { key: 'chest', label: 'Chest 心胸' },
-  { key: 'hypochondriac', label: 'Hypochondriac 两胁' },
-  { key: 'sleep', label: 'Sleep 睡觉' },
-  { key: 'appetite', label: 'Appetite 胃口' },
-  { key: 'thirst', label: 'Thirst 口渴' },
-  { key: 'abdomen', label: 'Abdomen 腹部' },
-  { key: 'bowelMovement', label: 'Bowel 大便' },
-  { key: 'urine', label: 'Urine 小便' },
-  { key: 'bloodQuality', label: 'Blood Quality 经血' },
-  { key: 'pms', label: 'PMS 经期症状' },
-  { key: 'pulse', label: 'Pulse 脉' },
-  { key: 'detailedPulse', label: 'Detailed Pulse 脉详' },
-  { key: 'tongueColor', label: 'Tongue Color 舌色' },
-  { key: 'tongueBody', label: 'Tongue Body 舌体' },
-  { key: 'tongueCoating', label: 'Tongue Coating 舌苔' },
-  { key: 'pathologicalChannel', label: 'Channel 病变经络' },
+  { key: 'coldHeat', label: localizeMixedText('Cold/Heat 寒热', locale.value) },
+  { key: 'sweat', label: localizeMixedText('Sweat 汗出', locale.value) },
+  { key: 'headDiscomfort', label: localizeMixedText('Head 头部不适', locale.value) },
+  { key: 'headPosition', label: localizeMixedText('Head Position 位置', locale.value) },
+  { key: 'eye', label: localizeMixedText('Eye 眼睛', locale.value) },
+  { key: 'ear', label: localizeMixedText('Ears 耳朵', locale.value) },
+  { key: 'nose', label: localizeMixedText('Noses 鼻子', locale.value) },
+  { key: 'mouth', label: localizeMixedText('Mouth 口', locale.value) },
+  { key: 'taste', label: localizeMixedText('Taste 味道', locale.value) },
+  { key: 'bodyDiscomforts', label: localizeMixedText('Body Discomforts 身体不适', locale.value) },
+  { key: 'bodyDiscomfortsLocation', label: localizeMixedText('Body Location 位置', locale.value) },
+  { key: 'skinIssues', label: localizeMixedText('Skin 皮肤', locale.value) },
+  { key: 'chest', label: localizeMixedText('Chest 心胸', locale.value) },
+  { key: 'hypochondriac', label: localizeMixedText('Hypochondriac 两胁', locale.value) },
+  { key: 'sleep', label: localizeMixedText('Sleep 睡觉', locale.value) },
+  { key: 'appetite', label: localizeMixedText('Appetite 胃口', locale.value) },
+  { key: 'thirst', label: localizeMixedText('Thirst 口渴', locale.value) },
+  { key: 'abdomen', label: localizeMixedText('Abdomen 腹部', locale.value) },
+  { key: 'bowelMovement', label: localizeMixedText('Bowel 大便', locale.value) },
+  { key: 'urine', label: localizeMixedText('Urine 小便', locale.value) },
+  { key: 'bloodQuality', label: localizeMixedText('Blood Quality 经血', locale.value) },
+  { key: 'pms', label: localizeMixedText('PMS 经期症状', locale.value) },
+  { key: 'pulse', label: localizeMixedText('Pulse 脉', locale.value) },
+  { key: 'detailedPulse', label: localizeMixedText('Detailed Pulse 脉详', locale.value) },
+  { key: 'tongueColor', label: localizeMixedText('Tongue Color 舌色', locale.value) },
+  { key: 'tongueBody', label: localizeMixedText('Tongue Body 舌体', locale.value) },
+  { key: 'tongueCoating', label: localizeMixedText('Tongue Coating 舌苔', locale.value) },
+  { key: 'pathologicalChannel', label: localizeMixedText('Channel 病变经络', locale.value) },
 ])
 
 // 直接编辑当前记录的字段
@@ -171,8 +172,8 @@ function updateCurrentDiffField(key, value) {
 
 function getDiffVal(consult, key) {
   const val = consult?.diff?.[key]
-  if (Array.isArray(val)) return val.length > 0 ? val.join(', ') : '-'
-  return val != null && val !== '' ? String(val) : '-'
+  if (Array.isArray(val)) return val.length > 0 ? localizeMixedJoinedValue(val, locale.value) : '-'
+  return val != null && val !== '' ? localizeMixedJoinedValue(val, locale.value) : '-'
 }
 function isDiffChanged(key) {
   if (!selected.value || !props.currentForm) return false
@@ -216,7 +217,7 @@ function isDiffChanged(key) {
           <el-icon><arrow-right /></el-icon>
         </el-button>
         <el-button size="small" type="primary" @click="copyAll" style="margin-left: 16px">
-          {{ t('compare.copyAllToCurrent') || '一键拷贝全部到当前' }}
+          {{ t('compare.copyAllToCurrent') }}
         </el-button>
       </div>
 
@@ -231,19 +232,19 @@ function isDiffChanged(key) {
           </el-button>
         </div>
         <el-table :data="[
-          { field: 'Chief Complaint 主诉', key: 'chiefComplaint', old: selected.chiefComplaint, cur: currentForm.chiefComplaint },
-          { field: 'Duration 持续时间', key: 'chiefComplaintDuration', old: selected.chiefComplaintDuration, cur: currentForm.chiefComplaintDuration },
-          { field: 'Description 描述', key: 'chiefComplaintDescription', old: selected.chiefComplaintDescription, cur: currentForm.chiefComplaintDescription },
-          { field: 'Progress 病程', key: 'progressOfDisease', old: selected.progressOfDisease, cur: currentForm.progressOfDisease },
-          { field: 'Prognosis 预后', key: 'prognosis', old: selected.prognosis, cur: currentForm.prognosis },
+          { field: t('compare.chiefComplaint'), key: 'chiefComplaint', old: selected.chiefComplaint, cur: currentForm.chiefComplaint },
+          { field: t('compare.duration'), key: 'chiefComplaintDuration', old: selected.chiefComplaintDuration, cur: currentForm.chiefComplaintDuration },
+          { field: t('compare.description'), key: 'chiefComplaintDescription', old: selected.chiefComplaintDescription, cur: currentForm.chiefComplaintDescription },
+          { field: localizeMixedText('Progress 病程', locale.value), key: 'progressOfDisease', old: selected.progressOfDisease, cur: currentForm.progressOfDisease },
+          { field: t('compare.prognosis'), key: 'prognosis', old: selected.prognosis, cur: currentForm.prognosis },
         ]" border size="small" style="width: 100%">
           <el-table-column label="Field" prop="field" width="180" />
-          <el-table-column :label="'历史记录 History (' + formatDate(selected.date) + ')'">
+          <el-table-column :label="`${t('compare.historyRecord')} (${formatDate(selected.date)})`">
             <template #default="{ row }">
               <span class="compare-old-text">{{ row.old || '-' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="当前记录 Current (可编辑)">
+          <el-table-column :label="`${t('compare.currentRecord')} (${t('compare.editable')})`">
             <template #default="{ row }">
               <el-input
                 :model-value="row.cur || ''"
@@ -273,7 +274,7 @@ function isDiffChanged(key) {
               </span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('compare.currentRecord') + ' (可编辑)'">
+          <el-table-column :label="`${t('compare.currentRecord')} (${t('compare.editable')})`">
             <template #default="{ row }">
               <el-input
                 v-if="typeof currentForm.diff?.[row.key] === 'string' || currentForm.diff?.[row.key] == null"
