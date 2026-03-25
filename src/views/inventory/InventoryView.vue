@@ -5,6 +5,7 @@ import { useInventoryStore } from '../../stores/inventory'
 import { useAuthStore } from '../../stores/auth'
 import { useBranchesStore } from '../../stores/branches'
 import { useSuppliersStore } from '../../stores/suppliers'
+import { useSettingsStore } from '../../stores/settings'
 import { hasPermission } from '../../utils/permissions'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -14,6 +15,7 @@ const inventoryStore = useInventoryStore()
 const authStore = useAuthStore()
 const branchesStore = useBranchesStore()
 const suppliersStore = useSuppliersStore()
+const settingsStore = useSettingsStore()
 
 const roles = computed(() => authStore.roles)
 const canEdit = computed(() => hasPermission(roles.value, 'inventory.edit'))
@@ -53,7 +55,8 @@ const newItem = ref({
   category: 'powder',
   unit: '包',
   quantity: 0,
-  pricePerUnit: 0,
+  purchasePrice: 0, // 购买价格(进价)
+  pricePerUnit: 0,   // 售价(自动计算或手动)
   supplierId: '',
   supplier: '',
   gramsPerPacket: null,
@@ -66,6 +69,13 @@ const newItem = ref({
   functionsAndIndications: '',
   contraindications: '',
 })
+
+// 自动计算售价：进价 × (1 + 利润比例)
+function autoCalcSellingPrice(item) {
+  if (item.purchasePrice > 0 && settingsStore.profitRatio > 0) {
+    item.pricePerUnit = +(item.purchasePrice * (1 + settingsStore.profitRatio)).toFixed(4)
+  }
+}
 
 // 供应商名称解析（兼容旧文本字段）
 const normalizeArray = (val) => {
@@ -116,7 +126,7 @@ async function handleAddItem() {
 
 function resetNewItem() {
   newItem.value = {
-    name: '', aliases: '', category: 'powder', unit: '包', quantity: 0,
+    name: '', aliases: '', category: 'powder', unit: '包', quantity: 0, purchasePrice: 0,
     pricePerUnit: 0, supplierId: '', supplier: '', gramsPerPacket: null, minStockLevel: 10,
     nature: '', taste: [], guijing: [], toxicity: '无毒',
     functionsAndIndications: '', contraindications: '',
@@ -425,8 +435,17 @@ async function openAdjustmentHistory(item) {
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item :label="t('inventory.priceLabel')">
-              <el-input-number v-model="newItem.pricePerUnit" :min="0" :step="0.1" style="width:100%" />
+            <el-form-item label="Purchase Price 购买价格">
+              <el-input-number v-model="newItem.purchasePrice" :min="0" :step="0.01" :precision="4" style="width:100%"
+                @change="autoCalcSellingPrice(newItem)" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item :label="t('inventory.priceLabel') + ' (售价)'">
+              <el-input-number v-model="newItem.pricePerUnit" :min="0" :step="0.01" :precision="4" style="width:100%" />
+              <div style="font-size:11px; color:#888; margin-top:2px" v-if="newItem.purchasePrice > 0">
+                利润比例: {{ settingsStore.profitRatio }}x → 售价 = 进价 × {{ (1 + settingsStore.profitRatio).toFixed(2) }}
+              </div>
             </el-form-item>
           </el-col>
           <el-col :span="12">

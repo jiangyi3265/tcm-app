@@ -1,0 +1,1997 @@
+[
+  {
+    "id": "acu-1",
+    "name": "Ashi point (阿是穴)",
+    "isActive": true
+  },
+  {
+    "id": "acu-2",
+    "name": "Ba Feng（八风）",
+    "isActive": true
+  },
+  {
+    "id": "acu-3",
+    "name": "Ba Xie（八邪）",
+    "isActive": true
+  },
+  {
+    "id": "acu-4",
+    "name": "Bai Lao（百劳）",
+    "isActive": true
+  },
+  {
+    "id": "acu-5",
+    "name": "DannangXue（胆囊穴）",
+    "isActive": true
+  },
+  {
+    "id": "acu-6",
+    "name": "Ding Chuan(定喘）",
+    "isActive": true
+  },
+  {
+    "id": "acu-7",
+    "name": "DU-10灵台",
+    "isActive": true
+  },
+  {
+    "id": "acu-8",
+    "name": "DU-11神道",
+    "isActive": true
+  },
+  {
+    "id": "acu-9",
+    "name": "DU-12身柱",
+    "isActive": true
+  },
+  {
+    "id": "acu-10",
+    "name": "DU-13陶道",
+    "isActive": true
+  },
+  {
+    "id": "acu-11",
+    "name": "DU-14大椎",
+    "isActive": true
+  },
+  {
+    "id": "acu-12",
+    "name": "DU-15哑门",
+    "isActive": true
+  },
+  {
+    "id": "acu-13",
+    "name": "DU-16风府",
+    "isActive": true
+  },
+  {
+    "id": "acu-14",
+    "name": "DU-17脑户",
+    "isActive": true
+  },
+  {
+    "id": "acu-15",
+    "name": "DU-18强间",
+    "isActive": true
+  },
+  {
+    "id": "acu-16",
+    "name": "DU-19后顶",
+    "isActive": true
+  },
+  {
+    "id": "acu-17",
+    "name": "DU-1长强",
+    "isActive": true
+  },
+  {
+    "id": "acu-18",
+    "name": "DU-20百会",
+    "isActive": true
+  },
+  {
+    "id": "acu-19",
+    "name": "DU-21前顶",
+    "isActive": true
+  },
+  {
+    "id": "acu-20",
+    "name": "DU-22囟会",
+    "isActive": true
+  },
+  {
+    "id": "acu-21",
+    "name": "DU-23上星",
+    "isActive": true
+  },
+  {
+    "id": "acu-22",
+    "name": "DU-24神庭",
+    "isActive": true
+  },
+  {
+    "id": "acu-23",
+    "name": "DU-25素髎",
+    "isActive": true
+  },
+  {
+    "id": "acu-24",
+    "name": "DU-26水沟",
+    "isActive": true
+  },
+  {
+    "id": "acu-25",
+    "name": "DU-27兑端",
+    "isActive": true
+  },
+  {
+    "id": "acu-26",
+    "name": "DU-28龈交",
+    "isActive": true
+  },
+  {
+    "id": "acu-27",
+    "name": "DU-2腰俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-28",
+    "name": "DU-3腰阳关",
+    "isActive": true
+  },
+  {
+    "id": "acu-29",
+    "name": "DU-4命门",
+    "isActive": true
+  },
+  {
+    "id": "acu-30",
+    "name": "DU-5悬枢",
+    "isActive": true
+  },
+  {
+    "id": "acu-31",
+    "name": "DU-6脊中",
+    "isActive": true
+  },
+  {
+    "id": "acu-32",
+    "name": "DU-7中枢",
+    "isActive": true
+  },
+  {
+    "id": "acu-33",
+    "name": "DU-8筋缩",
+    "isActive": true
+  },
+  {
+    "id": "acu-34",
+    "name": "DU-9至阳",
+    "isActive": true
+  },
+  {
+    "id": "acu-35",
+    "name": "GB-10浮白",
+    "isActive": true
+  },
+  {
+    "id": "acu-36",
+    "name": "GB-11头窍阴",
+    "isActive": true
+  },
+  {
+    "id": "acu-37",
+    "name": "GB-12完骨",
+    "isActive": true
+  },
+  {
+    "id": "acu-38",
+    "name": "GB-13本神",
+    "isActive": true
+  },
+  {
+    "id": "acu-39",
+    "name": "GB-14阳白",
+    "isActive": true
+  },
+  {
+    "id": "acu-40",
+    "name": "GB-15头临泣",
+    "isActive": true
+  },
+  {
+    "id": "acu-41",
+    "name": "GB-16目窗",
+    "isActive": true
+  },
+  {
+    "id": "acu-42",
+    "name": "GB-17正营",
+    "isActive": true
+  },
+  {
+    "id": "acu-43",
+    "name": "GB-18承灵",
+    "isActive": true
+  },
+  {
+    "id": "acu-44",
+    "name": "GB-19脑空",
+    "isActive": true
+  },
+  {
+    "id": "acu-45",
+    "name": "GB-1瞳子髎",
+    "isActive": true
+  },
+  {
+    "id": "acu-46",
+    "name": "GB-20风池",
+    "isActive": true
+  },
+  {
+    "id": "acu-47",
+    "name": "GB-21肩井",
+    "isActive": true
+  },
+  {
+    "id": "acu-48",
+    "name": "GB-22渊腋",
+    "isActive": true
+  },
+  {
+    "id": "acu-49",
+    "name": "GB-23辄筋",
+    "isActive": true
+  },
+  {
+    "id": "acu-50",
+    "name": "GB-24日月",
+    "isActive": true
+  },
+  {
+    "id": "acu-51",
+    "name": "GB-25京门",
+    "isActive": true
+  },
+  {
+    "id": "acu-52",
+    "name": "GB-26带脉",
+    "isActive": true
+  },
+  {
+    "id": "acu-53",
+    "name": "GB-27五枢",
+    "isActive": true
+  },
+  {
+    "id": "acu-54",
+    "name": "GB-28维道",
+    "isActive": true
+  },
+  {
+    "id": "acu-55",
+    "name": "GB-29居髎",
+    "isActive": true
+  },
+  {
+    "id": "acu-56",
+    "name": "GB-2听会",
+    "isActive": true
+  },
+  {
+    "id": "acu-57",
+    "name": "GB-30环跳",
+    "isActive": true
+  },
+  {
+    "id": "acu-58",
+    "name": "GB-31风市",
+    "isActive": true
+  },
+  {
+    "id": "acu-59",
+    "name": "GB-32中渎",
+    "isActive": true
+  },
+  {
+    "id": "acu-60",
+    "name": "GB-33膝阳关",
+    "isActive": true
+  },
+  {
+    "id": "acu-61",
+    "name": "GB-34阳陵泉",
+    "isActive": true
+  },
+  {
+    "id": "acu-62",
+    "name": "GB-35阳交",
+    "isActive": true
+  },
+  {
+    "id": "acu-63",
+    "name": "GB-36外丘",
+    "isActive": true
+  },
+  {
+    "id": "acu-64",
+    "name": "GB-37光明",
+    "isActive": true
+  },
+  {
+    "id": "acu-65",
+    "name": "GB-38阳辅",
+    "isActive": true
+  },
+  {
+    "id": "acu-66",
+    "name": "GB-39悬钟",
+    "isActive": true
+  },
+  {
+    "id": "acu-67",
+    "name": "GB-3上关",
+    "isActive": true
+  },
+  {
+    "id": "acu-68",
+    "name": "GB-40丘墟",
+    "isActive": true
+  },
+  {
+    "id": "acu-69",
+    "name": "GB-41足临泣",
+    "isActive": true
+  },
+  {
+    "id": "acu-70",
+    "name": "GB-42地五会",
+    "isActive": true
+  },
+  {
+    "id": "acu-71",
+    "name": "GB-43侠溪",
+    "isActive": true
+  },
+  {
+    "id": "acu-72",
+    "name": "GB-44足窍阴",
+    "isActive": true
+  },
+  {
+    "id": "acu-73",
+    "name": "GB-4颔厌",
+    "isActive": true
+  },
+  {
+    "id": "acu-74",
+    "name": "GB-5悬颅",
+    "isActive": true
+  },
+  {
+    "id": "acu-75",
+    "name": "GB-6悬厘",
+    "isActive": true
+  },
+  {
+    "id": "acu-76",
+    "name": "GB-7曲鬓",
+    "isActive": true
+  },
+  {
+    "id": "acu-77",
+    "name": "GB-8率谷",
+    "isActive": true
+  },
+  {
+    "id": "acu-78",
+    "name": "GB-9天冲",
+    "isActive": true
+  },
+  {
+    "id": "acu-79",
+    "name": "H-1极泉",
+    "isActive": true
+  },
+  {
+    "id": "acu-80",
+    "name": "H-2青灵",
+    "isActive": true
+  },
+  {
+    "id": "acu-81",
+    "name": "H-3少海",
+    "isActive": true
+  },
+  {
+    "id": "acu-82",
+    "name": "H-4灵道",
+    "isActive": true
+  },
+  {
+    "id": "acu-83",
+    "name": "H-5通里",
+    "isActive": true
+  },
+  {
+    "id": "acu-84",
+    "name": "H-6阴郄",
+    "isActive": true
+  },
+  {
+    "id": "acu-85",
+    "name": "H-7神门",
+    "isActive": true
+  },
+  {
+    "id": "acu-86",
+    "name": "H-8少府",
+    "isActive": true
+  },
+  {
+    "id": "acu-87",
+    "name": "H-9少冲",
+    "isActive": true
+  },
+  {
+    "id": "acu-88",
+    "name": "Heding( 鹤顶）",
+    "isActive": true
+  },
+  {
+    "id": "acu-89",
+    "name": "Hua Tuo Jia Ji (华佗夹脊）",
+    "isActive": true
+  },
+  {
+    "id": "acu-90",
+    "name": "Huanchao（还巢）",
+    "isActive": true
+  },
+  {
+    "id": "acu-91",
+    "name": "Jing Bai Lao（颈百劳）",
+    "isActive": true
+  },
+  {
+    "id": "acu-92",
+    "name": "Jing3(颈3)",
+    "isActive": true
+  },
+  {
+    "id": "acu-93",
+    "name": "K-10阴谷",
+    "isActive": true
+  },
+  {
+    "id": "acu-94",
+    "name": "K-11横骨",
+    "isActive": true
+  },
+  {
+    "id": "acu-95",
+    "name": "K-12大赫",
+    "isActive": true
+  },
+  {
+    "id": "acu-96",
+    "name": "K-13气穴",
+    "isActive": true
+  },
+  {
+    "id": "acu-97",
+    "name": "K-14四满",
+    "isActive": true
+  },
+  {
+    "id": "acu-98",
+    "name": "K-15中注",
+    "isActive": true
+  },
+  {
+    "id": "acu-99",
+    "name": "K-16肓俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-100",
+    "name": "K-17商曲",
+    "isActive": true
+  },
+  {
+    "id": "acu-101",
+    "name": "K-18石关",
+    "isActive": true
+  },
+  {
+    "id": "acu-102",
+    "name": "K-19阴都",
+    "isActive": true
+  },
+  {
+    "id": "acu-103",
+    "name": "K-1涌泉",
+    "isActive": true
+  },
+  {
+    "id": "acu-104",
+    "name": "K-20腹通谷",
+    "isActive": true
+  },
+  {
+    "id": "acu-105",
+    "name": "K-21幽门",
+    "isActive": true
+  },
+  {
+    "id": "acu-106",
+    "name": "K-22步廊",
+    "isActive": true
+  },
+  {
+    "id": "acu-107",
+    "name": "K-23神封",
+    "isActive": true
+  },
+  {
+    "id": "acu-108",
+    "name": "K-24灵墟",
+    "isActive": true
+  },
+  {
+    "id": "acu-109",
+    "name": "K-25神藏",
+    "isActive": true
+  },
+  {
+    "id": "acu-110",
+    "name": "K-26彧中",
+    "isActive": true
+  },
+  {
+    "id": "acu-111",
+    "name": "K-27俞府",
+    "isActive": true
+  },
+  {
+    "id": "acu-112",
+    "name": "K-2然谷",
+    "isActive": true
+  },
+  {
+    "id": "acu-113",
+    "name": "K-3太溪",
+    "isActive": true
+  },
+  {
+    "id": "acu-114",
+    "name": "K-4大钟",
+    "isActive": true
+  },
+  {
+    "id": "acu-115",
+    "name": "K-5水泉",
+    "isActive": true
+  },
+  {
+    "id": "acu-116",
+    "name": "K-6照海",
+    "isActive": true
+  },
+  {
+    "id": "acu-117",
+    "name": "K-7复溜",
+    "isActive": true
+  },
+  {
+    "id": "acu-118",
+    "name": "K-8交信",
+    "isActive": true
+  },
+  {
+    "id": "acu-119",
+    "name": "K-9筑宾",
+    "isActive": true
+  },
+  {
+    "id": "acu-120",
+    "name": "Lanweixue (阑尾穴）",
+    "isActive": true
+  },
+  {
+    "id": "acu-121",
+    "name": "LI-10手三里",
+    "isActive": true
+  },
+  {
+    "id": "acu-122",
+    "name": "LI-11曲池",
+    "isActive": true
+  },
+  {
+    "id": "acu-123",
+    "name": "LI-12肘髎",
+    "isActive": true
+  },
+  {
+    "id": "acu-124",
+    "name": "LI-13手五里",
+    "isActive": true
+  },
+  {
+    "id": "acu-125",
+    "name": "LI-14臂臑",
+    "isActive": true
+  },
+  {
+    "id": "acu-126",
+    "name": "LI-15肩髃",
+    "isActive": true
+  },
+  {
+    "id": "acu-127",
+    "name": "LI-16巨骨",
+    "isActive": true
+  },
+  {
+    "id": "acu-128",
+    "name": "LI-17天鼎",
+    "isActive": true
+  },
+  {
+    "id": "acu-129",
+    "name": "LI-18扶突",
+    "isActive": true
+  },
+  {
+    "id": "acu-130",
+    "name": "LI-19口禾髎",
+    "isActive": true
+  },
+  {
+    "id": "acu-131",
+    "name": "LI-1商阳",
+    "isActive": true
+  },
+  {
+    "id": "acu-132",
+    "name": "LI-20迎香",
+    "isActive": true
+  },
+  {
+    "id": "acu-133",
+    "name": "LI-2二间",
+    "isActive": true
+  },
+  {
+    "id": "acu-134",
+    "name": "LI-3三间",
+    "isActive": true
+  },
+  {
+    "id": "acu-135",
+    "name": "LI-4合谷",
+    "isActive": true
+  },
+  {
+    "id": "acu-136",
+    "name": "LI-5阳溪",
+    "isActive": true
+  },
+  {
+    "id": "acu-137",
+    "name": "LI-6偏历",
+    "isActive": true
+  },
+  {
+    "id": "acu-138",
+    "name": "LI-7温溜",
+    "isActive": true
+  },
+  {
+    "id": "acu-139",
+    "name": "LI-8下廉",
+    "isActive": true
+  },
+  {
+    "id": "acu-140",
+    "name": "LI-9上廉",
+    "isActive": true
+  },
+  {
+    "id": "acu-141",
+    "name": "LIV-10足五里",
+    "isActive": true
+  },
+  {
+    "id": "acu-142",
+    "name": "LIV-11阴廉",
+    "isActive": true
+  },
+  {
+    "id": "acu-143",
+    "name": "LIV-12急脉",
+    "isActive": true
+  },
+  {
+    "id": "acu-144",
+    "name": "LIV-13章门",
+    "isActive": true
+  },
+  {
+    "id": "acu-145",
+    "name": "LIV-14期门",
+    "isActive": true
+  },
+  {
+    "id": "acu-146",
+    "name": "LIV-1大敦",
+    "isActive": true
+  },
+  {
+    "id": "acu-147",
+    "name": "LIV-2行间",
+    "isActive": true
+  },
+  {
+    "id": "acu-148",
+    "name": "LIV-3太冲",
+    "isActive": true
+  },
+  {
+    "id": "acu-149",
+    "name": "LIV-4中封",
+    "isActive": true
+  },
+  {
+    "id": "acu-150",
+    "name": "LIV-5蠡沟",
+    "isActive": true
+  },
+  {
+    "id": "acu-151",
+    "name": "LIV-6中都",
+    "isActive": true
+  },
+  {
+    "id": "acu-152",
+    "name": "LIV-7膝关",
+    "isActive": true
+  },
+  {
+    "id": "acu-153",
+    "name": "LIV-8曲泉",
+    "isActive": true
+  },
+  {
+    "id": "acu-154",
+    "name": "LIV-9阴包",
+    "isActive": true
+  },
+  {
+    "id": "acu-155",
+    "name": "LU-10鱼际",
+    "isActive": true
+  },
+  {
+    "id": "acu-156",
+    "name": "LU-11少商",
+    "isActive": true
+  },
+  {
+    "id": "acu-157",
+    "name": "LU-1中府",
+    "isActive": true
+  },
+  {
+    "id": "acu-158",
+    "name": "LU-2云门",
+    "isActive": true
+  },
+  {
+    "id": "acu-159",
+    "name": "LU-3天府",
+    "isActive": true
+  },
+  {
+    "id": "acu-160",
+    "name": "LU-4侠白",
+    "isActive": true
+  },
+  {
+    "id": "acu-161",
+    "name": "LU-5尺泽",
+    "isActive": true
+  },
+  {
+    "id": "acu-162",
+    "name": "LU-6孔最",
+    "isActive": true
+  },
+  {
+    "id": "acu-163",
+    "name": "LU-7列缺",
+    "isActive": true
+  },
+  {
+    "id": "acu-164",
+    "name": "LU-8经渠",
+    "isActive": true
+  },
+  {
+    "id": "acu-165",
+    "name": "LU-9太渊",
+    "isActive": true
+  },
+  {
+    "id": "acu-166",
+    "name": "Nei Xi Yan (内膝眼)",
+    "isActive": true
+  },
+  {
+    "id": "acu-167",
+    "name": "PC-1天池",
+    "isActive": true
+  },
+  {
+    "id": "acu-168",
+    "name": "PC-2天泉",
+    "isActive": true
+  },
+  {
+    "id": "acu-169",
+    "name": "PC-3曲泽",
+    "isActive": true
+  },
+  {
+    "id": "acu-170",
+    "name": "PC-4郄门",
+    "isActive": true
+  },
+  {
+    "id": "acu-171",
+    "name": "PC-5间使",
+    "isActive": true
+  },
+  {
+    "id": "acu-172",
+    "name": "PC-6内关",
+    "isActive": true
+  },
+  {
+    "id": "acu-173",
+    "name": "PC-7大陵",
+    "isActive": true
+  },
+  {
+    "id": "acu-174",
+    "name": "PC-8劳宫",
+    "isActive": true
+  },
+  {
+    "id": "acu-175",
+    "name": "PC-9中冲",
+    "isActive": true
+  },
+  {
+    "id": "acu-176",
+    "name": "REN-10下脘",
+    "isActive": true
+  },
+  {
+    "id": "acu-177",
+    "name": "REN-11建里",
+    "isActive": true
+  },
+  {
+    "id": "acu-178",
+    "name": "REN-12中脘",
+    "isActive": true
+  },
+  {
+    "id": "acu-179",
+    "name": "REN-13上脘",
+    "isActive": true
+  },
+  {
+    "id": "acu-180",
+    "name": "REN-14巨阙",
+    "isActive": true
+  },
+  {
+    "id": "acu-181",
+    "name": "REN-15鸠尾",
+    "isActive": true
+  },
+  {
+    "id": "acu-182",
+    "name": "REN-16中庭",
+    "isActive": true
+  },
+  {
+    "id": "acu-183",
+    "name": "REN-17膻中",
+    "isActive": true
+  },
+  {
+    "id": "acu-184",
+    "name": "REN-18玉堂",
+    "isActive": true
+  },
+  {
+    "id": "acu-185",
+    "name": "REN-19紫宫",
+    "isActive": true
+  },
+  {
+    "id": "acu-186",
+    "name": "REN-1会阴",
+    "isActive": true
+  },
+  {
+    "id": "acu-187",
+    "name": "REN-20华盖",
+    "isActive": true
+  },
+  {
+    "id": "acu-188",
+    "name": "REN-21璇玑",
+    "isActive": true
+  },
+  {
+    "id": "acu-189",
+    "name": "REN-22天突",
+    "isActive": true
+  },
+  {
+    "id": "acu-190",
+    "name": "REN-23廉泉",
+    "isActive": true
+  },
+  {
+    "id": "acu-191",
+    "name": "REN-24承浆",
+    "isActive": true
+  },
+  {
+    "id": "acu-192",
+    "name": "REN-2曲骨",
+    "isActive": true
+  },
+  {
+    "id": "acu-193",
+    "name": "REN-3中极",
+    "isActive": true
+  },
+  {
+    "id": "acu-194",
+    "name": "REN-4关元",
+    "isActive": true
+  },
+  {
+    "id": "acu-195",
+    "name": "REN-5石门",
+    "isActive": true
+  },
+  {
+    "id": "acu-196",
+    "name": "REN-6气海",
+    "isActive": true
+  },
+  {
+    "id": "acu-197",
+    "name": "REN-7阴交",
+    "isActive": true
+  },
+  {
+    "id": "acu-198",
+    "name": "REN-8神阙",
+    "isActive": true
+  },
+  {
+    "id": "acu-199",
+    "name": "REN-9水分",
+    "isActive": true
+  },
+  {
+    "id": "acu-200",
+    "name": "San Zheng（三正）",
+    "isActive": true
+  },
+  {
+    "id": "acu-201",
+    "name": "Sanjian Xue（三肩穴）",
+    "isActive": true
+  },
+  {
+    "id": "acu-202",
+    "name": "Sanjian(三肩）",
+    "isActive": true
+  },
+  {
+    "id": "acu-203",
+    "name": "SanZheng(三正）",
+    "isActive": true
+  },
+  {
+    "id": "acu-204",
+    "name": "Shen Guan( 肾关）",
+    "isActive": true
+  },
+  {
+    "id": "acu-205",
+    "name": "SI-10臑俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-206",
+    "name": "SI-11天宗",
+    "isActive": true
+  },
+  {
+    "id": "acu-207",
+    "name": "SI-12秉风",
+    "isActive": true
+  },
+  {
+    "id": "acu-208",
+    "name": "SI-13曲垣",
+    "isActive": true
+  },
+  {
+    "id": "acu-209",
+    "name": "SI-14肩外俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-210",
+    "name": "SI-15肩中俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-211",
+    "name": "SI-16天窗",
+    "isActive": true
+  },
+  {
+    "id": "acu-212",
+    "name": "SI-17天容",
+    "isActive": true
+  },
+  {
+    "id": "acu-213",
+    "name": "SI-18颧髎",
+    "isActive": true
+  },
+  {
+    "id": "acu-214",
+    "name": "SI-19听宫",
+    "isActive": true
+  },
+  {
+    "id": "acu-215",
+    "name": "SI-1少泽",
+    "isActive": true
+  },
+  {
+    "id": "acu-216",
+    "name": "SI-2前谷",
+    "isActive": true
+  },
+  {
+    "id": "acu-217",
+    "name": "SI-3后溪",
+    "isActive": true
+  },
+  {
+    "id": "acu-218",
+    "name": "SI-4腕骨",
+    "isActive": true
+  },
+  {
+    "id": "acu-219",
+    "name": "SI-5阳谷",
+    "isActive": true
+  },
+  {
+    "id": "acu-220",
+    "name": "SI-6养老",
+    "isActive": true
+  },
+  {
+    "id": "acu-221",
+    "name": "SI-7支正",
+    "isActive": true
+  },
+  {
+    "id": "acu-222",
+    "name": "SI-8小海",
+    "isActive": true
+  },
+  {
+    "id": "acu-223",
+    "name": "SI-9肩贞",
+    "isActive": true
+  },
+  {
+    "id": "acu-224",
+    "name": "Sifeng( 四缝)",
+    "isActive": true
+  },
+  {
+    "id": "acu-225",
+    "name": "Sihua(四花)",
+    "isActive": true
+  },
+  {
+    "id": "acu-226",
+    "name": "Sishencong(四神聪）",
+    "isActive": true
+  },
+  {
+    "id": "acu-227",
+    "name": "SJ-10天井",
+    "isActive": true
+  },
+  {
+    "id": "acu-228",
+    "name": "SJ-11清冷渊",
+    "isActive": true
+  },
+  {
+    "id": "acu-229",
+    "name": "SJ-12消泺",
+    "isActive": true
+  },
+  {
+    "id": "acu-230",
+    "name": "SJ-13臑会",
+    "isActive": true
+  },
+  {
+    "id": "acu-231",
+    "name": "SJ-14肩髎",
+    "isActive": true
+  },
+  {
+    "id": "acu-232",
+    "name": "SJ-15天髎",
+    "isActive": true
+  },
+  {
+    "id": "acu-233",
+    "name": "SJ-16天牖",
+    "isActive": true
+  },
+  {
+    "id": "acu-234",
+    "name": "SJ-17翳风",
+    "isActive": true
+  },
+  {
+    "id": "acu-235",
+    "name": "SJ-18瘈脉",
+    "isActive": true
+  },
+  {
+    "id": "acu-236",
+    "name": "SJ-19颅息",
+    "isActive": true
+  },
+  {
+    "id": "acu-237",
+    "name": "SJ-1关冲",
+    "isActive": true
+  },
+  {
+    "id": "acu-238",
+    "name": "SJ-20角孙",
+    "isActive": true
+  },
+  {
+    "id": "acu-239",
+    "name": "SJ-21耳门",
+    "isActive": true
+  },
+  {
+    "id": "acu-240",
+    "name": "SJ-22耳和髎",
+    "isActive": true
+  },
+  {
+    "id": "acu-241",
+    "name": "SJ-23丝竹空",
+    "isActive": true
+  },
+  {
+    "id": "acu-242",
+    "name": "SJ-2液门",
+    "isActive": true
+  },
+  {
+    "id": "acu-243",
+    "name": "SJ-3中渚",
+    "isActive": true
+  },
+  {
+    "id": "acu-244",
+    "name": "SJ-4阳池",
+    "isActive": true
+  },
+  {
+    "id": "acu-245",
+    "name": "SJ-5外关",
+    "isActive": true
+  },
+  {
+    "id": "acu-246",
+    "name": "SJ-6支沟",
+    "isActive": true
+  },
+  {
+    "id": "acu-247",
+    "name": "SJ-7会宗",
+    "isActive": true
+  },
+  {
+    "id": "acu-248",
+    "name": "SJ-8三阳络",
+    "isActive": true
+  },
+  {
+    "id": "acu-249",
+    "name": "SJ-9四渎",
+    "isActive": true
+  },
+  {
+    "id": "acu-250",
+    "name": "SP-10血海",
+    "isActive": true
+  },
+  {
+    "id": "acu-251",
+    "name": "SP-11箕门",
+    "isActive": true
+  },
+  {
+    "id": "acu-252",
+    "name": "SP-12冲门",
+    "isActive": true
+  },
+  {
+    "id": "acu-253",
+    "name": "SP-13府舍",
+    "isActive": true
+  },
+  {
+    "id": "acu-254",
+    "name": "SP-14腹结",
+    "isActive": true
+  },
+  {
+    "id": "acu-255",
+    "name": "SP-15大横",
+    "isActive": true
+  },
+  {
+    "id": "acu-256",
+    "name": "SP-16腹哀",
+    "isActive": true
+  },
+  {
+    "id": "acu-257",
+    "name": "SP-17食窦",
+    "isActive": true
+  },
+  {
+    "id": "acu-258",
+    "name": "SP-18天谿",
+    "isActive": true
+  },
+  {
+    "id": "acu-259",
+    "name": "SP-19胸乡",
+    "isActive": true
+  },
+  {
+    "id": "acu-260",
+    "name": "SP-1隐白",
+    "isActive": true
+  },
+  {
+    "id": "acu-261",
+    "name": "SP-20周荣",
+    "isActive": true
+  },
+  {
+    "id": "acu-262",
+    "name": "SP-21大包",
+    "isActive": true
+  },
+  {
+    "id": "acu-263",
+    "name": "SP-2大都",
+    "isActive": true
+  },
+  {
+    "id": "acu-264",
+    "name": "SP-3太白",
+    "isActive": true
+  },
+  {
+    "id": "acu-265",
+    "name": "SP-4公孙",
+    "isActive": true
+  },
+  {
+    "id": "acu-266",
+    "name": "SP-5商邱",
+    "isActive": true
+  },
+  {
+    "id": "acu-267",
+    "name": "SP-6三阴交",
+    "isActive": true
+  },
+  {
+    "id": "acu-268",
+    "name": "SP-7漏谷",
+    "isActive": true
+  },
+  {
+    "id": "acu-269",
+    "name": "SP-8地机",
+    "isActive": true
+  },
+  {
+    "id": "acu-270",
+    "name": "SP-9阴陵泉",
+    "isActive": true
+  },
+  {
+    "id": "acu-271",
+    "name": "ST-10水突",
+    "isActive": true
+  },
+  {
+    "id": "acu-272",
+    "name": "ST-11气舍",
+    "isActive": true
+  },
+  {
+    "id": "acu-273",
+    "name": "ST-12缺盆",
+    "isActive": true
+  },
+  {
+    "id": "acu-274",
+    "name": "ST-13气户",
+    "isActive": true
+  },
+  {
+    "id": "acu-275",
+    "name": "ST-14库房",
+    "isActive": true
+  },
+  {
+    "id": "acu-276",
+    "name": "ST-15屋翳",
+    "isActive": true
+  },
+  {
+    "id": "acu-277",
+    "name": "ST-16膺窗",
+    "isActive": true
+  },
+  {
+    "id": "acu-278",
+    "name": "ST-17乳中",
+    "isActive": true
+  },
+  {
+    "id": "acu-279",
+    "name": "ST-18乳根",
+    "isActive": true
+  },
+  {
+    "id": "acu-280",
+    "name": "ST-19不容",
+    "isActive": true
+  },
+  {
+    "id": "acu-281",
+    "name": "ST-1承泣",
+    "isActive": true
+  },
+  {
+    "id": "acu-282",
+    "name": "ST-20承满",
+    "isActive": true
+  },
+  {
+    "id": "acu-283",
+    "name": "ST-21梁门",
+    "isActive": true
+  },
+  {
+    "id": "acu-284",
+    "name": "ST-22关门",
+    "isActive": true
+  },
+  {
+    "id": "acu-285",
+    "name": "ST-23太乙",
+    "isActive": true
+  },
+  {
+    "id": "acu-286",
+    "name": "ST-24滑肉门",
+    "isActive": true
+  },
+  {
+    "id": "acu-287",
+    "name": "ST-25天枢",
+    "isActive": true
+  },
+  {
+    "id": "acu-288",
+    "name": "ST-26外陵",
+    "isActive": true
+  },
+  {
+    "id": "acu-289",
+    "name": "ST-27大巨",
+    "isActive": true
+  },
+  {
+    "id": "acu-290",
+    "name": "ST-28水道",
+    "isActive": true
+  },
+  {
+    "id": "acu-291",
+    "name": "ST-29归来",
+    "isActive": true
+  },
+  {
+    "id": "acu-292",
+    "name": "ST-2四白",
+    "isActive": true
+  },
+  {
+    "id": "acu-293",
+    "name": "ST-30气冲",
+    "isActive": true
+  },
+  {
+    "id": "acu-294",
+    "name": "ST-31髀关",
+    "isActive": true
+  },
+  {
+    "id": "acu-295",
+    "name": "ST-32伏兔",
+    "isActive": true
+  },
+  {
+    "id": "acu-296",
+    "name": "ST-33阴市",
+    "isActive": true
+  },
+  {
+    "id": "acu-297",
+    "name": "ST-34梁丘",
+    "isActive": true
+  },
+  {
+    "id": "acu-298",
+    "name": "ST-35犊鼻",
+    "isActive": true
+  },
+  {
+    "id": "acu-299",
+    "name": "ST-36足三里",
+    "isActive": true
+  },
+  {
+    "id": "acu-300",
+    "name": "ST-37上巨虚",
+    "isActive": true
+  },
+  {
+    "id": "acu-301",
+    "name": "ST-38条口",
+    "isActive": true
+  },
+  {
+    "id": "acu-302",
+    "name": "ST-39下巨虚",
+    "isActive": true
+  },
+  {
+    "id": "acu-303",
+    "name": "ST-3巨髎",
+    "isActive": true
+  },
+  {
+    "id": "acu-304",
+    "name": "ST-40丰隆",
+    "isActive": true
+  },
+  {
+    "id": "acu-305",
+    "name": "ST-41解溪",
+    "isActive": true
+  },
+  {
+    "id": "acu-306",
+    "name": "ST-42冲阳",
+    "isActive": true
+  },
+  {
+    "id": "acu-307",
+    "name": "ST-43陷谷",
+    "isActive": true
+  },
+  {
+    "id": "acu-308",
+    "name": "ST-44内庭",
+    "isActive": true
+  },
+  {
+    "id": "acu-309",
+    "name": "ST-45厉兑",
+    "isActive": true
+  },
+  {
+    "id": "acu-310",
+    "name": "ST-4地仓",
+    "isActive": true
+  },
+  {
+    "id": "acu-311",
+    "name": "ST-5大迎",
+    "isActive": true
+  },
+  {
+    "id": "acu-312",
+    "name": "ST-6颊车",
+    "isActive": true
+  },
+  {
+    "id": "acu-313",
+    "name": "ST-7下关",
+    "isActive": true
+  },
+  {
+    "id": "acu-314",
+    "name": "ST-8头维",
+    "isActive": true
+  },
+  {
+    "id": "acu-315",
+    "name": "ST-9人迎",
+    "isActive": true
+  },
+  {
+    "id": "acu-316",
+    "name": "UB-10天柱",
+    "isActive": true
+  },
+  {
+    "id": "acu-317",
+    "name": "UB-11大杼",
+    "isActive": true
+  },
+  {
+    "id": "acu-318",
+    "name": "UB-12风门",
+    "isActive": true
+  },
+  {
+    "id": "acu-319",
+    "name": "UB-13肺俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-320",
+    "name": "UB-14厥阴俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-321",
+    "name": "UB-15心俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-322",
+    "name": "UB-16督俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-323",
+    "name": "UB-17膈俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-324",
+    "name": "UB-18肝俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-325",
+    "name": "UB-19胆俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-326",
+    "name": "UB-1睛明",
+    "isActive": true
+  },
+  {
+    "id": "acu-327",
+    "name": "UB-20脾俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-328",
+    "name": "UB-21胃俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-329",
+    "name": "UB-22三焦俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-330",
+    "name": "UB-23肾俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-331",
+    "name": "UB-24气海俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-332",
+    "name": "UB-25大肠俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-333",
+    "name": "UB-26关元俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-334",
+    "name": "UB-27小肠俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-335",
+    "name": "UB-28膀胱俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-336",
+    "name": "UB-29中膂俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-337",
+    "name": "UB-2攒竹",
+    "isActive": true
+  },
+  {
+    "id": "acu-338",
+    "name": "UB-30白环俞",
+    "isActive": true
+  },
+  {
+    "id": "acu-339",
+    "name": "UB-31上髎",
+    "isActive": true
+  },
+  {
+    "id": "acu-340",
+    "name": "UB-32次髎",
+    "isActive": true
+  },
+  {
+    "id": "acu-341",
+    "name": "UB-33中髎",
+    "isActive": true
+  },
+  {
+    "id": "acu-342",
+    "name": "UB-34下髎",
+    "isActive": true
+  },
+  {
+    "id": "acu-343",
+    "name": "UB-35会阳",
+    "isActive": true
+  },
+  {
+    "id": "acu-344",
+    "name": "UB-36承扶",
+    "isActive": true
+  },
+  {
+    "id": "acu-345",
+    "name": "UB-37殷门",
+    "isActive": true
+  },
+  {
+    "id": "acu-346",
+    "name": "UB-38浮郄",
+    "isActive": true
+  },
+  {
+    "id": "acu-347",
+    "name": "UB-39委阳",
+    "isActive": true
+  },
+  {
+    "id": "acu-348",
+    "name": "UB-3眉冲",
+    "isActive": true
+  },
+  {
+    "id": "acu-349",
+    "name": "UB-40委中",
+    "isActive": true
+  },
+  {
+    "id": "acu-350",
+    "name": "UB-41附分",
+    "isActive": true
+  },
+  {
+    "id": "acu-351",
+    "name": "UB-42魄户",
+    "isActive": true
+  },
+  {
+    "id": "acu-352",
+    "name": "UB-43膏肓",
+    "isActive": true
+  },
+  {
+    "id": "acu-353",
+    "name": "UB-44神堂",
+    "isActive": true
+  },
+  {
+    "id": "acu-354",
+    "name": "UB-45譩譆",
+    "isActive": true
+  },
+  {
+    "id": "acu-355",
+    "name": "UB-46膈关",
+    "isActive": true
+  },
+  {
+    "id": "acu-356",
+    "name": "UB-47魂门",
+    "isActive": true
+  },
+  {
+    "id": "acu-357",
+    "name": "UB-48阳纲",
+    "isActive": true
+  },
+  {
+    "id": "acu-358",
+    "name": "UB-49意舍",
+    "isActive": true
+  },
+  {
+    "id": "acu-359",
+    "name": "UB-4曲差",
+    "isActive": true
+  },
+  {
+    "id": "acu-360",
+    "name": "UB-50胃仓",
+    "isActive": true
+  },
+  {
+    "id": "acu-361",
+    "name": "UB-51肓门",
+    "isActive": true
+  },
+  {
+    "id": "acu-362",
+    "name": "UB-52志室",
+    "isActive": true
+  },
+  {
+    "id": "acu-363",
+    "name": "UB-53胞肓",
+    "isActive": true
+  },
+  {
+    "id": "acu-364",
+    "name": "UB-54秩边",
+    "isActive": true
+  },
+  {
+    "id": "acu-365",
+    "name": "UB-55合阳",
+    "isActive": true
+  },
+  {
+    "id": "acu-366",
+    "name": "UB-56承筋",
+    "isActive": true
+  },
+  {
+    "id": "acu-367",
+    "name": "UB-57承山",
+    "isActive": true
+  },
+  {
+    "id": "acu-368",
+    "name": "UB-58飞扬",
+    "isActive": true
+  },
+  {
+    "id": "acu-369",
+    "name": "UB-59跗阳",
+    "isActive": true
+  },
+  {
+    "id": "acu-370",
+    "name": "UB-5五处",
+    "isActive": true
+  },
+  {
+    "id": "acu-371",
+    "name": "UB-60昆仑",
+    "isActive": true
+  },
+  {
+    "id": "acu-372",
+    "name": "UB-61仆参",
+    "isActive": true
+  },
+  {
+    "id": "acu-373",
+    "name": "UB-62申脉",
+    "isActive": true
+  },
+  {
+    "id": "acu-374",
+    "name": "UB-63金门",
+    "isActive": true
+  },
+  {
+    "id": "acu-375",
+    "name": "UB-64京骨",
+    "isActive": true
+  },
+  {
+    "id": "acu-376",
+    "name": "UB-65束骨",
+    "isActive": true
+  },
+  {
+    "id": "acu-377",
+    "name": "UB-66足通谷",
+    "isActive": true
+  },
+  {
+    "id": "acu-378",
+    "name": "UB-67至阴",
+    "isActive": true
+  },
+  {
+    "id": "acu-379",
+    "name": "UB-6承光",
+    "isActive": true
+  },
+  {
+    "id": "acu-380",
+    "name": "UB-7通天",
+    "isActive": true
+  },
+  {
+    "id": "acu-381",
+    "name": "UB-8络却",
+    "isActive": true
+  },
+  {
+    "id": "acu-382",
+    "name": "UB-9玉枕",
+    "isActive": true
+  },
+  {
+    "id": "acu-383",
+    "name": "Wanhuai-GB(腕踝-GB)",
+    "isActive": true
+  },
+  {
+    "id": "acu-384",
+    "name": "Wanhuai-HT(腕踝-HT)",
+    "isActive": true
+  },
+  {
+    "id": "acu-385",
+    "name": "Wanhuai-KD(腕踝-KD)",
+    "isActive": true
+  },
+  {
+    "id": "acu-386",
+    "name": "Wanhuai-LI(腕踝-LI)",
+    "isActive": true
+  },
+  {
+    "id": "acu-387",
+    "name": "Wanhuai-LU(腕踝-LU)",
+    "isActive": true
+  },
+  {
+    "id": "acu-388",
+    "name": "Wanhuai-LV(腕踝-LV)",
+    "isActive": true
+  },
+  {
+    "id": "acu-389",
+    "name": "Wanhuai-PC(腕踝-PC)",
+    "isActive": true
+  },
+  {
+    "id": "acu-390",
+    "name": "Wanhuai-SI(腕踝-SI)",
+    "isActive": true
+  },
+  {
+    "id": "acu-391",
+    "name": "Wanhuai-SJ(腕踝-SJ)",
+    "isActive": true
+  },
+  {
+    "id": "acu-392",
+    "name": "Wanhuai-SP(腕踝-SP)",
+    "isActive": true
+  },
+  {
+    "id": "acu-393",
+    "name": "Wanhuai-ST(腕踝-ST)",
+    "isActive": true
+  },
+  {
+    "id": "acu-394",
+    "name": "Wanhuai-UB(腕踝-UB)",
+    "isActive": true
+  },
+  {
+    "id": "acu-395",
+    "name": "Wu Hu （五虎）",
+    "isActive": true
+  },
+  {
+    "id": "acu-396",
+    "name": "Yangbai(阳白）",
+    "isActive": true
+  },
+  {
+    "id": "acu-397",
+    "name": "Yintang（印堂）",
+    "isActive": true
+  },
+  {
+    "id": "acu-398",
+    "name": "Zhiwu Zhixian(至污，止涎）",
+    "isActive": true
+  },
+  {
+    "id": "acu-399",
+    "name": "Jin Shu(筋舒) - 阳明经踝伤上3寸",
+    "isActive": true
+  }
+]

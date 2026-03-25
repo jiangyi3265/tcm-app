@@ -16,6 +16,9 @@ export const useSettingsStore = defineStore('settings', () => {
   const clinicAddress = ref('')
   const clinicPhone = ref('')
   const priceLists = ref([])
+  const customChiefComplaints = ref([])
+  // 每个医师的预约间隔: { [practitionerId]: minutes }
+  const practitionerIntervals = ref({})
 
   function init() {
     const data = readStoredJson('tcm_settings', null)
@@ -28,6 +31,8 @@ export const useSettingsStore = defineStore('settings', () => {
     clinicAddress.value = data?.clinicAddress || ''
     clinicPhone.value = data?.clinicPhone || ''
     priceLists.value = data?.priceLists || []
+    customChiefComplaints.value = data?.customChiefComplaints || []
+    practitionerIntervals.value = data?.practitionerIntervals || {}
   }
 
   function saveState() {
@@ -41,7 +46,24 @@ export const useSettingsStore = defineStore('settings', () => {
       clinicAddress: clinicAddress.value,
       clinicPhone: clinicPhone.value,
       priceLists: priceLists.value,
+      customChiefComplaints: customChiefComplaints.value,
+      practitionerIntervals: practitionerIntervals.value,
     })
+  }
+
+  function addCustomChiefComplaint(complaint) {
+    if (!complaint || customChiefComplaints.value.includes(complaint)) return
+    customChiefComplaints.value.push(complaint)
+    saveState()
+  }
+
+  function getPractitionerInterval(practitionerId) {
+    return practitionerIntervals.value[practitionerId] ?? practitionerInterval.value
+  }
+
+  function setPractitionerInterval(practitionerId, minutes) {
+    practitionerIntervals.value[practitionerId] = minutes
+    saveState()
   }
 
   async function updateTaxRate(rate) {
@@ -133,12 +155,14 @@ export const useSettingsStore = defineStore('settings', () => {
     activeRooms,
     serviceTypes,
     practitionerInterval,
+    practitionerIntervals,
     profitRatio,
     clinicName,
     clinicAddress,
     clinicPhone,
     priceLists,
     activePriceLists,
+    customChiefComplaints,
     updateTaxRate,
     addRoom,
     updateRoom,
@@ -148,5 +172,8 @@ export const useSettingsStore = defineStore('settings', () => {
     addPriceList,
     updatePriceList,
     deletePriceList,
+    addCustomChiefComplaint,
+    getPractitionerInterval,
+    setPractitionerInterval,
   }
 })

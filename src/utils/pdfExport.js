@@ -65,13 +65,16 @@ function buildDiffSummary(diff = {}) {
     ['Tongue Color', diff.tongueColor],
     ['Tongue Body / Shape', diff.tongueBody],
     ['Tongue Coating', diff.tongueCoating],
-  ].filter(([, value]) => value)
+  ].filter(([, value]) => value && (Array.isArray(value) ? value.length > 0 : true))
 
   if (fields.length === 0) {
     return '<p class="muted">No differentiation summary recorded.</p>'
   }
 
-  return `<ul>${fields.map(([label, value]) => `<li><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</li>`).join('')}</ul>`
+  return `<ul>${fields.map(([label, value]) => {
+    const displayVal = Array.isArray(value) ? value.join(', ') : value
+    return `<li><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(displayVal))}</li>`
+  }).join('')}</ul>`
 }
 
 function buildPrescriptionTables(prescriptions = [], currency = 'CNY') {

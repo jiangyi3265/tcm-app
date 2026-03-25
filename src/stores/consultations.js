@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { emptyDiff } from '../utils/sampleData'
+import { emptyDiff, normalizeDiff } from '../utils/sampleData'
 import { consultationsApi } from '../utils/api'
 import { readStoredJson, writeStoredJson } from '../utils/storage'
 
@@ -14,7 +14,12 @@ export const useConsultationsStore = defineStore('consultations', () => {
   const consultations = ref([])
 
   function init() {
-    consultations.value = readStoredJson('tcm_consultations', []) || []
+    const stored = readStoredJson('tcm_consultations', []) || []
+    // 兼容旧数据：规范化所有 diff 字段
+    consultations.value = stored.map(c => ({
+      ...c,
+      diff: c.diff ? normalizeDiff(c.diff) : emptyDiff(),
+    }))
   }
 
   function saveState() {
@@ -32,7 +37,7 @@ export const useConsultationsStore = defineStore('consultations', () => {
   }
 
   function getPractitionerConsultations(practitionerId) {
-    return consultations.value.filter((c) => c.practitionerId === practitionerId)
+    return consultations.value.filter((c) => c.practitionerId === practitionerId && !c.deletedAt)
   }
 
   function getLastConsultation(patientId) {
@@ -42,6 +47,7 @@ export const useConsultationsStore = defineStore('consultations', () => {
 
   async function createConsultation(data) {
     const newConsult = {
+      id: 'consult-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
       consultationId: genConsultId(),
       patientId: data.patientId,
       practitionerId: data.practitionerId,
@@ -55,7 +61,7 @@ export const useConsultationsStore = defineStore('consultations', () => {
       progressOfDisease: data.progressOfDisease || '',
       summary: data.summary || '',
       // Differentiation
-      diff: data.diff || emptyDiff(),
+      diff: normalizeDiff(data.diff || {}),
       differentiation: data.differentiation || '',
       // Treatments
       acupuncture: data.acupuncture || [],
@@ -108,9 +114,20 @@ export const useConsultationsStore = defineStore('consultations', () => {
     const idx = consultations.value.findIndex((c) => c.id === id)
     if (idx === -1) return false
     const updated = await consultationsApi.update(id, updates)
-    consultations.value[idx] = updated
+    // 合并API返回和本地更新数据，确保处方等嵌套数据不丢失
+    consultations.value[idx] = {
+      ...consultations.value[idx],
+      ...updates,
+      ...updated,
+      // 优先使用本地传入的处方数据（API可能不返回完整的嵌套对象）
+      prescriptions: updates.prescriptions || updated.prescriptions || consultations.value[idx].prescriptions || [],
+      acupuncture: updates.acupuncture || updated.acupuncture || consultations.value[idx].acupuncture || [],
+      services: updates.services || updated.services || consultations.value[idx].services || [],
+      documents: updates.documents || updated.documents || consultations.value[idx].documents || [],
+      diff: updates.diff || updated.diff || consultations.value[idx].diff || {},
+    }
     saveState()
-    return updated
+    return consultations.value[idx]
   }
 
   function syncPatientHistorySnapshot(patientId, snapshot, sourceConsultationId, sourceDate) {

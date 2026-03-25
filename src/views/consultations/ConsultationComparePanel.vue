@@ -13,7 +13,7 @@ const props = defineProps({
   currentForm: { type: Object, required: true },
   visible: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:visible', 'copy-section'])
+const emit = defineEmits(['update:visible', 'copy-section', 'update-field'])
 
 const consultStore = useConsultationsStore()
 const authStore = useAuthStore()
@@ -55,7 +55,20 @@ function copySection(section) {
     data.differentiation = selected.value.differentiation
   } else if (section === 'treatment') {
     data.acupuncture = JSON.parse(JSON.stringify(selected.value.acupuncture || []))
-    data.prescriptions = JSON.parse(JSON.stringify(selected.value.prescriptions || []))
+    // 拷贝处方为全新的（不带库存扣减标记）
+    data.prescriptions = (selected.value.prescriptions || []).map(rx => ({
+      ...JSON.parse(JSON.stringify(rx)),
+      id: 'rx-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      dispensingCompleted: false,
+      items: (rx.items || []).map(i => ({
+        ...JSON.parse(JSON.stringify(i)),
+        inventoryId: null,
+        supplierId: null,
+        convertedQty: 0,
+        stockSufficient: null,
+        outOfStock: false,
+      })),
+    }))
     data.herbals = JSON.parse(JSON.stringify(selected.value.herbals || []))
     data.formulaName = selected.value.formulaName
     data.prescriptionType = selected.value.prescriptionType
@@ -72,6 +85,45 @@ function copySection(section) {
   emit('copy-section', data)
 }
 
+// 一键拷贝全部到当前（单次emit避免多条toast）
+function copyAll() {
+  if (!selected.value) return
+  const data = {}
+  // summary
+  data.chiefComplaint = selected.value.chiefComplaint
+  data.chiefComplaintDuration = selected.value.chiefComplaintDuration
+  data.chiefComplaintDescription = selected.value.chiefComplaintDescription
+  data.progressOfDisease = selected.value.progressOfDisease
+  data.summary = selected.value.summary
+  // differentiation
+  data.diff = JSON.parse(JSON.stringify(selected.value.diff || emptyDiff()))
+  data.differentiation = selected.value.differentiation
+  // treatment
+  data.acupuncture = JSON.parse(JSON.stringify(selected.value.acupuncture || []))
+  data.prescriptions = (selected.value.prescriptions || []).map(rx => ({
+    ...JSON.parse(JSON.stringify(rx)),
+    id: 'rx-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+    dispensingCompleted: false,
+    items: (rx.items || []).map(i => ({
+      ...JSON.parse(JSON.stringify(i)),
+      inventoryId: null, supplierId: null, convertedQty: 0, stockSufficient: null, outOfStock: false,
+    })),
+  }))
+  data.herbals = JSON.parse(JSON.stringify(selected.value.herbals || []))
+  data.formulaName = selected.value.formulaName
+  data.prescriptionType = selected.value.prescriptionType
+  data.prognosis = selected.value.prognosis
+  // pricing
+  data.services = JSON.parse(JSON.stringify(selected.value.services || []))
+  data.servicePriceList = selected.value.servicePriceList
+  data.consultationFee = selected.value.consultationFee
+  data.discountType = selected.value.discountType
+  data.discountValue = selected.value.discountValue
+  data.taxable = selected.value.taxable
+  data.currency = selected.value.currency
+  emit('copy-section', data)
+}
+
 function getPractitionerName(id) {
   const u = authStore.users.find((u) => u.id === id || u.id === String(id))
   return u ? u.name : id
@@ -79,40 +131,67 @@ function getPractitionerName(id) {
 
 // 辨证对比辅助
 const diffFields = computed(() => [
-  { key: 'coldHeat', label: t('compare.coldHeat') },
-  { key: 'sweat', label: t('compare.sweat') },
-  { key: 'headDiscomfort', label: t('compare.head') },
-  { key: 'sleep', label: t('compare.sleep') },
-  { key: 'appetite', label: t('compare.appetite') },
-  { key: 'thirst', label: t('compare.thirst') },
-  { key: 'bowelMovement', label: t('compare.bowel') },
-  { key: 'urine', label: t('compare.urine') },
-  { key: 'pulse', label: t('compare.pulse') },
-  { key: 'detailedPulse', label: t('compare.detailedPulse') },
-  { key: 'tongueColor', label: t('compare.tongueColor') },
-  { key: 'tongueBody', label: t('compare.tongueBody') },
-  { key: 'tongueCoating', label: t('compare.tongueCoating') },
+  { key: 'coldHeat', label: 'Cold/Heat 寒热' },
+  { key: 'sweat', label: 'Sweat 汗出' },
+  { key: 'headDiscomfort', label: 'Head 头部不适' },
+  { key: 'headPosition', label: 'Head Position 位置' },
+  { key: 'eye', label: 'Eye 眼睛' },
+  { key: 'ear', label: 'Ears 耳朵' },
+  { key: 'nose', label: 'Noses 鼻子' },
+  { key: 'mouth', label: 'Mouth 口' },
+  { key: 'taste', label: 'Taste 味道' },
+  { key: 'bodyDiscomforts', label: 'Body Discomforts 身体不适' },
+  { key: 'bodyDiscomfortsLocation', label: 'Body Location 位置' },
+  { key: 'skinIssues', label: 'Skin 皮肤' },
+  { key: 'chest', label: 'Chest 心胸' },
+  { key: 'hypochondriac', label: 'Hypochondriac 两胁' },
+  { key: 'sleep', label: 'Sleep 睡觉' },
+  { key: 'appetite', label: 'Appetite 胃口' },
+  { key: 'thirst', label: 'Thirst 口渴' },
+  { key: 'abdomen', label: 'Abdomen 腹部' },
+  { key: 'bowelMovement', label: 'Bowel 大便' },
+  { key: 'urine', label: 'Urine 小便' },
+  { key: 'bloodQuality', label: 'Blood Quality 经血' },
+  { key: 'pms', label: 'PMS 经期症状' },
+  { key: 'pulse', label: 'Pulse 脉' },
+  { key: 'detailedPulse', label: 'Detailed Pulse 脉详' },
+  { key: 'tongueColor', label: 'Tongue Color 舌色' },
+  { key: 'tongueBody', label: 'Tongue Body 舌体' },
+  { key: 'tongueCoating', label: 'Tongue Coating 舌苔' },
+  { key: 'pathologicalChannel', label: 'Channel 病变经络' },
 ])
 
+// 直接编辑当前记录的字段
+function updateCurrentField(field, value) {
+  emit('update-field', { [field]: value })
+}
+function updateCurrentDiffField(key, value) {
+  emit('update-field', { diff: { ...props.currentForm.diff, [key]: value } })
+}
+
 function getDiffVal(consult, key) {
-  return consult?.diff?.[key] || '-'
+  const val = consult?.diff?.[key]
+  if (Array.isArray(val)) return val.length > 0 ? val.join(', ') : '-'
+  return val != null && val !== '' ? String(val) : '-'
 }
 function isDiffChanged(key) {
   if (!selected.value || !props.currentForm) return false
   const a = selected.value.diff?.[key] || ''
   const b = props.currentForm.diff?.[key] || ''
-  return a !== b
+  const aStr = Array.isArray(a) ? a.join(',') : a
+  const bStr = Array.isArray(b) ? b.join(',') : b
+  return aStr !== bStr
 }
 </script>
 
 <template>
-  <el-drawer
+  <el-dialog
     :model-value="visible"
     @update:model-value="emit('update:visible', $event)"
     :title="t('compare.title')"
-    direction="rtl"
-    size="65%"
+    fullscreen
     :close-on-click-modal="true"
+    class="compare-fullscreen-dialog"
   >
     <template v-if="historyList.length === 0">
       <el-empty :description="t('compare.noHistory')" />
@@ -136,6 +215,9 @@ function isDiffChanged(key) {
         <el-button :disabled="selectedIdx >= historyList.length - 1" circle size="small" @click="nextHistory">
           <el-icon><arrow-right /></el-icon>
         </el-button>
+        <el-button size="small" type="primary" @click="copyAll" style="margin-left: 16px">
+          {{ t('compare.copyAllToCurrent') || '一键拷贝全部到当前' }}
+        </el-button>
       </div>
 
       <el-divider />
@@ -148,32 +230,30 @@ function isDiffChanged(key) {
             {{ t('compare.copyToCurrent') }}
           </el-button>
         </div>
-        <el-descriptions :column="2" border size="small">
-          <el-descriptions-item :label="t('compare.chiefComplaint')">
-            <div class="compare-cell-pair">
-              <div class="compare-old">{{ selected.chiefComplaint || '-' }}</div>
-              <div class="compare-new">{{ currentForm.chiefComplaint || '-' }}</div>
-            </div>
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('compare.duration')">
-            <div class="compare-cell-pair">
-              <div class="compare-old">{{ selected.chiefComplaintDuration || '-' }}</div>
-              <div class="compare-new">{{ currentForm.chiefComplaintDuration || '-' }}</div>
-            </div>
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('compare.description')" :span="2">
-            <div class="compare-cell-pair">
-              <div class="compare-old">{{ selected.chiefComplaintDescription || '-' }}</div>
-              <div class="compare-new">{{ currentForm.chiefComplaintDescription || '-' }}</div>
-            </div>
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('compare.prognosis')" :span="2">
-            <div class="compare-cell-pair">
-              <div class="compare-old">{{ selected.prognosis || '-' }}</div>
-              <div class="compare-new">{{ currentForm.prognosis || '-' }}</div>
-            </div>
-          </el-descriptions-item>
-        </el-descriptions>
+        <el-table :data="[
+          { field: 'Chief Complaint 主诉', key: 'chiefComplaint', old: selected.chiefComplaint, cur: currentForm.chiefComplaint },
+          { field: 'Duration 持续时间', key: 'chiefComplaintDuration', old: selected.chiefComplaintDuration, cur: currentForm.chiefComplaintDuration },
+          { field: 'Description 描述', key: 'chiefComplaintDescription', old: selected.chiefComplaintDescription, cur: currentForm.chiefComplaintDescription },
+          { field: 'Progress 病程', key: 'progressOfDisease', old: selected.progressOfDisease, cur: currentForm.progressOfDisease },
+          { field: 'Prognosis 预后', key: 'prognosis', old: selected.prognosis, cur: currentForm.prognosis },
+        ]" border size="small" style="width: 100%">
+          <el-table-column label="Field" prop="field" width="180" />
+          <el-table-column :label="'历史记录 History (' + formatDate(selected.date) + ')'">
+            <template #default="{ row }">
+              <span class="compare-old-text">{{ row.old || '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="当前记录 Current (可编辑)">
+            <template #default="{ row }">
+              <el-input
+                :model-value="row.cur || ''"
+                size="small"
+                @update:model-value="(val) => updateCurrentField(row.key, val)"
+                placeholder="---"
+              />
+            </template>
+          </el-table-column>
+        </el-table>
       </div>
 
       <!-- ── Differentiation 对比 ── -->
@@ -193,9 +273,17 @@ function isDiffChanged(key) {
               </span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('compare.currentRecord')">
+          <el-table-column :label="t('compare.currentRecord') + ' (可编辑)'">
             <template #default="{ row }">
-              <span :class="{ 'diff-changed': isDiffChanged(row.key) }">
+              <el-input
+                v-if="typeof currentForm.diff?.[row.key] === 'string' || currentForm.diff?.[row.key] == null"
+                :model-value="currentForm.diff?.[row.key] || ''"
+                size="small"
+                @update:model-value="(val) => updateCurrentDiffField(row.key, val)"
+                placeholder="---"
+                :class="{ 'diff-changed': isDiffChanged(row.key) }"
+              />
+              <span v-else :class="{ 'diff-changed': isDiffChanged(row.key) }">
                 {{ getDiffVal(currentForm, row.key) }}
               </span>
             </template>
@@ -307,7 +395,7 @@ function isDiffChanged(key) {
         </div>
       </div>
     </template>
-  </el-drawer>
+  </el-dialog>
 </template>
 
 <style scoped>
@@ -363,5 +451,11 @@ function isDiffChanged(key) {
 .service-item {
   font-size: 12px;
   line-height: 1.6;
+}
+.compare-old-text {
+  color: #c45656;
+}
+.compare-new-text {
+  color: #529b2e;
 }
 </style>

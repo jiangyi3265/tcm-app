@@ -2,12 +2,20 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { acupointsApi } from '../utils/api'
 import { readStoredJson, writeStoredJson } from '../utils/storage'
+import defaultAcupoints from '../utils/acupointsData.json'
 
 export const useAcupointsStore = defineStore('acupoints', () => {
   const acupoints = ref([])
 
   function init() {
-    acupoints.value = readStoredJson('tcm_acupoints', []) || []
+    const stored = readStoredJson('tcm_acupoints', []) || []
+    if (stored.length > 0) {
+      acupoints.value = stored
+    } else {
+      // 首次加载：使用Excel导入的穴位数据作为种子数据
+      acupoints.value = defaultAcupoints
+      saveState()
+    }
   }
 
   function saveState() {

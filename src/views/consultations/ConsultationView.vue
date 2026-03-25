@@ -14,7 +14,7 @@ import { useAcupointsStore } from '../../stores/acupoints'
 import { useHerbDictStore } from '../../stores/herbDict'
 import { hasPermission } from '../../utils/permissions'
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
-import { TCM_OPTIONS, CHIEF_COMPLAINTS, emptyDiff } from '../../utils/sampleData'
+import { TCM_OPTIONS, CHIEF_COMPLAINTS, emptyDiff, normalizeDiff } from '../../utils/sampleData'
 import { printConsultationReport, printPrescription } from '../../utils/pdfExport'
 import { useEmailSimulator } from '../../utils/emailSimulator'
 import { filesApi, consultationsApi } from '../../utils/api'
@@ -85,6 +85,7 @@ const defaultForm = () => ({
   services: [],
   consultationFee: 0,
   consultationFeeTaxable: true,
+  overrideTaxRate: null, // null=使用系统默认, 0=0%, 0.13=13%
   discountType: 'none',
   discountValue: 0,
   taxable: false,
@@ -100,6 +101,8 @@ const defaultForm = () => ({
   historyAndMedicationSourceConsultId: null,
   historyAndMedicationSourceConsultDate: '',
   version: 1, modifications: [], lockedAt: null, createdAt: '',
+  rateForLast: 0,
+  branchId: null,
 })
 
 const form = ref(defaultForm())
@@ -195,8 +198,22 @@ async function saveHistoryMed() {
 }
 
 function onCopySection(data) {
-  Object.assign(form.value, data)
+  if (data.diff) {
+    form.value.diff = { ...form.value.diff, ...data.diff }
+    const { diff, ...rest } = data
+    Object.assign(form.value, rest)
+  } else {
+    Object.assign(form.value, data)
+  }
   ElMessage.success(t('consultation.copiedToRecord'))
+}
+
+function onUpdateField(data) {
+  if (data.diff) {
+    form.value.diff = { ...form.value.diff, ...data.diff }
+  } else {
+    Object.assign(form.value, data)
+  }
 }
 
 async function refreshTongueImagePreview() {
@@ -259,7 +276,7 @@ onMounted(() => {
       form.value = {
         ...defaultForm(),
         ...existing,
-        diff: { ...emptyDiff(), ...(existing.diff || {}) },
+        diff: normalizeDiff(existing.diff || {}),
         acupuncture: [...(existing.acupuncture || [])],
         prescriptions: (existing.prescriptions || []).map((rx) => ({
           ...rx,
@@ -277,7 +294,7 @@ onMounted(() => {
       try {
         const copyData = JSON.parse(copyRaw)
         Object.assign(form.value, copyData)
-        if (copyData.diff) form.value.diff = { ...emptyDiff(), ...copyData.diff }
+        if (copyData.diff) form.value.diff = normalizeDiff(copyData.diff)
         if (copyData.acupuncture) form.value.acupuncture = [...copyData.acupuncture]
         if (copyData.prescriptions) {
           form.value.prescriptions = copyData.prescriptions.map((rx) => ({
@@ -588,11 +605,17 @@ function addService() { form.value.services.push({ name: '', price: 0, quantity:
 function removeService(i) { form.value.services.splice(i, 1) }
 
 // ============ Totals ============
+const effectiveTaxRate = computed(() => {
+  if (form.value.overrideTaxRate !== null && form.value.overrideTaxRate !== undefined) {
+    return form.value.overrideTaxRate
+  }
+  return settingsStore.taxRate
+})
 function getServiceExtended(sv) {
   return (sv.price || 0) * (sv.quantity || 1) - (sv.manualDiscount || 0)
 }
 function getServiceTax(sv) {
-  return sv.taxable ? getServiceExtended(sv) * settingsStore.taxRate : 0
+  return sv.taxable ? getServiceExtended(sv) * effectiveTaxRate.value : 0
 }
 const totalService = computed(() =>
   form.value.services.reduce((s, sv) => s + getServiceExtended(sv), 0),
@@ -600,11 +623,15 @@ const totalService = computed(() =>
 const totalServiceTax = computed(() =>
   form.value.services.reduce((s, sv) => s + getServiceTax(sv), 0),
 )
+// 处方总额：单剂价格 × 数量
+const totalRxAmount = computed(() =>
+  form.value.prescriptions.reduce((s, rx) => s + (rx.subtotal || 0) * (rx.quantity || 1), 0)
+)
 const totalWithoutTax = computed(() => {
   let base = (form.value.consultationFee || 0) + totalService.value
   // Optionally include prescription subtotals in the consultation total
   if (form.value.includeRxAmount) {
-    base += form.value.prescriptions.reduce((s, rx) => s + (rx.subtotal || 0), 0)
+    base += totalRxAmount.value
   }
   if (form.value.discountType === 'percentage') base *= (1 - (form.value.discountValue || 0) / 100)
   else if (form.value.discountType === 'amount') base -= (form.value.discountValue || 0)
@@ -612,13 +639,13 @@ const totalWithoutTax = computed(() => {
 })
 const discountFactor = computed(() => {
   const rawBase = (form.value.consultationFee || 0) + totalService.value
-    + (form.value.includeRxAmount ? form.value.prescriptions.reduce((s, rx) => s + (rx.subtotal || 0), 0) : 0)
+    + (form.value.includeRxAmount ? totalRxAmount.value : 0)
   if (rawBase <= 0) return 1
   if (form.value.discountType === 'percentage') return Math.max(0, 1 - (form.value.discountValue || 0) / 100)
   if (form.value.discountType === 'amount') return Math.max(0, (rawBase - (form.value.discountValue || 0)) / rawBase)
   return 1
 })
-const consultationFeeTax = computed(() => form.value.consultationFeeTaxable !== false ? (form.value.consultationFee || 0) * settingsStore.taxRate : 0)
+const consultationFeeTax = computed(() => form.value.consultationFeeTaxable !== false ? (form.value.consultationFee || 0) * effectiveTaxRate.value : 0)
 const taxAmount = computed(() => (totalServiceTax.value + consultationFeeTax.value) * discountFactor.value)
 const totalAmount = computed(() => totalWithoutTax.value + taxAmount.value)
 
@@ -973,8 +1000,9 @@ function handleSendReport() {
                     :placeholder="t('consultation.selectOrInputComplaint')"
                     style="width:100%"
                     :disabled="isReadOnly"
+                    @change="(val) => { if (val && !CHIEF_COMPLAINTS.includes(val) && !settingsStore.customChiefComplaints.includes(val)) settingsStore.addCustomChiefComplaint(val) }"
                   >
-                    <el-option v-for="c in CHIEF_COMPLAINTS" :key="c" :label="c" :value="c" />
+                    <el-option v-for="c in [...CHIEF_COMPLAINTS, ...settingsStore.customChiefComplaints]" :key="c" :label="c" :value="c" />
                   </el-select>
                 </el-form-item>
                 <el-form-item label="Chief Complaint Duration">
@@ -1029,228 +1057,280 @@ function handleSendReport() {
       <el-tab-pane :label="t('consultation.tabDifferentiation')" name="differentiation">
         <div class="diff-sections">
 
-          <!-- Section: Exterior & Head (image4) -->
+          <!-- Section: Exterior & Head 表&头部 -->
           <el-card class="diff-card">
-            <template #header><span class="diff-header">Exterior &amp; Head</span></template>
+            <template #header><span class="diff-header">Exterior &amp; Head 表&amp;头部</span></template>
             <el-row :gutter="24">
               <el-col :span="12">
-                <el-form label-width="180px" label-position="left" size="small">
-                  <el-form-item label="Cold/Heat">
-                    <el-select v-model="form.diff.coldHeat" clearable :disabled="isReadOnly" style="width:100%">
+                <el-form label-width="200px" label-position="left" size="small">
+                  <el-form-item label="Cold/Heat 寒热">
+                    <el-select v-model="form.diff.coldHeat" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
                       <el-option v-for="o in TCM_OPTIONS.coldHeat" :key="o" :label="o" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Sweat">
-                    <el-select v-model="form.diff.sweat" clearable :disabled="isReadOnly" style="width:100%">
+                  <el-form-item label="Sweat 汗出">
+                    <el-select v-model="form.diff.sweat" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
                       <el-option v-for="o in TCM_OPTIONS.sweat" :key="o" :label="o" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Head Discomfort">
-                    <el-input v-model="form.diff.headDiscomfort" :readonly="isReadOnly" placeholder="---" />
-                  </el-form-item>
-                  <el-form-item label="Eye">
-                    <el-input v-model="form.diff.eye" :readonly="isReadOnly" placeholder="---" />
-                  </el-form-item>
-                  <el-form-item label="Ear">
-                    <el-input v-model="form.diff.ear" :readonly="isReadOnly" placeholder="---" />
-                  </el-form-item>
-                  <el-form-item label="Nose">
-                    <el-input v-model="form.diff.nose" :readonly="isReadOnly" placeholder="---" />
-                  </el-form-item>
-                  <el-form-item label="Mouth">
-                    <el-input v-model="form.diff.mouth" :readonly="isReadOnly" placeholder="---" />
-                  </el-form-item>
-                  <el-form-item label="Taste">
-                    <el-select v-model="form.diff.taste" clearable :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.taste" :key="o" :label="o" :value="o" />
+                  <el-form-item label="Head Discomfort 头部不适">
+                    <el-select v-model="form.diff.headDiscomfort" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.headDiscomfort" :key="o" :label="o" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Body Discomforts">
-                    <el-input v-model="form.diff.bodyDiscomforts" :readonly="isReadOnly" placeholder="---" />
+                  <el-form-item label="Head Position 位置">
+                    <el-select v-model="form.diff.headPosition" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.headPosition" :key="o" :label="o" :value="o" />
+                    </el-select>
                   </el-form-item>
-                  <el-form-item label="Skin Issues">
-                    <el-input v-model="form.diff.skinIssues" :readonly="isReadOnly" placeholder="---" />
+                  <el-form-item label="Eye 眼睛">
+                    <el-select v-model="form.diff.eye" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.eye" :key="o" :label="o" :value="o" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item label="Ears 耳朵">
+                    <el-select v-model="form.diff.ear" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.ear" :key="o" :label="o" :value="o" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item label="Noses 鼻子">
+                    <el-select v-model="form.diff.nose" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.nose" :key="o" :label="o" :value="o" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item label="Mouth 口">
+                    <el-select v-model="form.diff.mouth" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.mouth" :key="o" :label="o" :value="o" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item label="Taste 味道">
+                    <el-select v-model="form.diff.taste" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.taste" :key="o" :label="o" :value="o" />
+                    </el-select>
                   </el-form-item>
                 </el-form>
               </el-col>
               <el-col :span="12">
-                <div class="diff-right-label">Other Exterior Symptom</div>
-                <el-input v-model="form.diff.otherExterior" type="textarea" :rows="12" :readonly="isReadOnly" placeholder="---" />
+                <el-form label-width="220px" label-position="left" size="small">
+                  <el-form-item label="Body Discomforts 身体不适">
+                    <el-select v-model="form.diff.bodyDiscomforts" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.bodyDiscomforts" :key="o" :label="o" :value="o" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item label="Body Discomforts Location 位置">
+                    <el-select v-model="form.diff.bodyDiscomfortsLocation" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.bodyDiscomfortsLocation" :key="o" :label="o" :value="o" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item label="Skin Issues 皮肤">
+                    <el-select v-model="form.diff.skinIssues" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.skinIssues" :key="o" :label="o" :value="o" />
+                    </el-select>
+                  </el-form-item>
+                </el-form>
+                <div class="diff-right-label">Other Exterior Symptom 其它表证</div>
+                <el-input v-model="form.diff.otherExterior" type="textarea" :rows="6" :readonly="isReadOnly" placeholder="---" />
               </el-col>
             </el-row>
           </el-card>
 
-          <!-- Section: Chest (image5) -->
+          <!-- Section: Chest 心胸 -->
           <el-card class="diff-card">
-            <template #header><span class="diff-header">Chest</span></template>
+            <template #header><span class="diff-header">Chest 心胸</span></template>
             <el-row :gutter="24">
               <el-col :span="12">
-                <el-form label-width="180px" label-position="left" size="small">
-                  <el-form-item label="Chest">
-                    <el-select v-model="form.diff.chest" clearable :disabled="isReadOnly" style="width:100%">
+                <el-form label-width="200px" label-position="left" size="small">
+                  <el-form-item label="Chest 心胸">
+                    <el-select v-model="form.diff.chest" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
                       <el-option v-for="o in TCM_OPTIONS.chest" :key="o" :label="o" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Heart">
-                    <el-select v-model="form.diff.heart" clearable :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.heart" :key="o" :label="o" :value="o" />
-                    </el-select>
-                  </el-form-item>
-                  <el-form-item label="Hypochondriac">
-                    <el-select v-model="form.diff.hypochondriac" clearable :disabled="isReadOnly" style="width:100%">
+                  <el-form-item label="Hypochondriac 两胁">
+                    <el-select v-model="form.diff.hypochondriac" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
                       <el-option v-for="o in TCM_OPTIONS.hypochondriac" :key="o" :label="o" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Sleep">
-                    <el-select v-model="form.diff.sleep" clearable :disabled="isReadOnly" style="width:100%">
+                  <el-form-item label="Sleep 睡觉">
+                    <el-select v-model="form.diff.sleep" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
                       <el-option v-for="o in TCM_OPTIONS.sleep" :key="o" :label="o" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Anxiety/Stress">
-                    <el-input v-model="form.diff.anxietyStress" :readonly="isReadOnly" placeholder="---" />
+                  <el-form-item label="Anxiety/Stress 心烦/压力 (1-10)">
+                    <el-input-number v-model="form.diff.anxietyStress" :min="1" :max="10" :disabled="isReadOnly" style="width:120px" />
                   </el-form-item>
                 </el-form>
               </el-col>
               <el-col :span="12">
-                <div class="diff-right-label">Other Chest Syndrome</div>
+                <div class="diff-right-label">Other Chest Syndrome 其它心胸症状</div>
                 <el-input v-model="form.diff.otherChest" type="textarea" :rows="8" :readonly="isReadOnly" placeholder="---" />
               </el-col>
             </el-row>
           </el-card>
 
-          <!-- Section: Abdomen (image6) -->
+          <!-- Section: Abdomen 腹部 -->
           <el-card class="diff-card">
-            <template #header><span class="diff-header">Abdomen</span></template>
+            <template #header><span class="diff-header">Abdomen 腹部</span></template>
             <el-row :gutter="24">
               <el-col :span="12">
-                <el-form label-width="180px" label-position="left" size="small">
-                  <el-form-item label="Appetite">
-                    <el-select v-model="form.diff.appetite" clearable :disabled="isReadOnly" style="width:100%">
+                <el-form label-width="200px" label-position="left" size="small">
+                  <el-form-item label="Appetite 胃口">
+                    <el-select v-model="form.diff.appetite" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
                       <el-option v-for="o in TCM_OPTIONS.appetite" :key="o" :label="o" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Thirst">
-                    <el-select v-model="form.diff.thirst" clearable :disabled="isReadOnly" style="width:100%">
+                  <el-form-item label="Thirst 口渴">
+                    <el-select v-model="form.diff.thirst" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
                       <el-option v-for="o in TCM_OPTIONS.thirst" :key="o" :label="o" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Abdomen">
-                    <el-select v-model="form.diff.abdomen" clearable :disabled="isReadOnly" style="width:100%">
+                  <el-form-item label="Abdomen 腹部">
+                    <el-select v-model="form.diff.abdomen" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
                       <el-option v-for="o in TCM_OPTIONS.abdomen" :key="o" :label="o" :value="o" />
                     </el-select>
                   </el-form-item>
                 </el-form>
               </el-col>
               <el-col :span="12">
-                <div class="diff-right-label">Other Abdominal Symptoms</div>
+                <div class="diff-right-label">Other Abdominal Symptoms 其它腹部症状</div>
                 <el-input v-model="form.diff.otherAbdomen" type="textarea" :rows="6" :readonly="isReadOnly" placeholder="---" />
               </el-col>
             </el-row>
           </el-card>
 
-          <!-- Section: Lower Abdomen (image6) -->
+          <!-- Section: Lower Abdomen 下腹 -->
           <el-card class="diff-card">
-            <template #header><span class="diff-header">Lower Abdomen</span></template>
+            <template #header><span class="diff-header">Lower Abdomen 下腹</span></template>
             <el-row :gutter="24">
               <el-col :span="12">
-                <el-form label-width="180px" label-position="left" size="small">
-                  <el-form-item label="Bowel Movement">
-                    <el-select v-model="form.diff.bowelMovement" clearable :disabled="isReadOnly" style="width:100%">
+                <el-form label-width="200px" label-position="left" size="small">
+                  <el-form-item label="Bowel Movement 大便">
+                    <el-select v-model="form.diff.bowelMovement" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
                       <el-option v-for="o in TCM_OPTIONS.bowelMovement" :key="o" :label="o" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Urine">
-                    <el-select v-model="form.diff.urine" clearable :disabled="isReadOnly" style="width:100%">
+                  <el-form-item label="Urine 小便">
+                    <el-select v-model="form.diff.urine" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
                       <el-option v-for="o in TCM_OPTIONS.urine" :key="o" :label="o" :value="o" />
                     </el-select>
                   </el-form-item>
                 </el-form>
               </el-col>
               <el-col :span="12">
-                <div class="diff-right-label">Other Lower Abdomen Symptoms</div>
+                <div class="diff-right-label">Other Lower Abdomen Symptoms 其它下腹症状</div>
                 <el-input v-model="form.diff.otherLowerAbdomen" type="textarea" :rows="5" :readonly="isReadOnly" placeholder="---" />
               </el-col>
             </el-row>
           </el-card>
 
-          <!-- Section: Female (image7) -->
+          <!-- Section: Female 妇科 -->
           <el-card class="diff-card">
-            <template #header><span class="diff-header">Female</span></template>
+            <template #header><span class="diff-header">FEMALE 妇科</span></template>
             <el-row :gutter="24">
               <el-col :span="12">
-                <el-form label-width="200px" label-position="left" size="small">
-                  <el-form-item label="Period Cycle (days)">
-                    <el-input v-model="form.diff.periodCircle" :readonly="isReadOnly" placeholder="---" style="width:100px" />
+                <el-form label-width="220px" label-position="left" size="small">
+                  <el-form-item label="Period Cycle 经期长 (days)">
+                    <el-input-number v-model="form.diff.periodCircle" :min="0" :disabled="isReadOnly" style="width:120px" />
                   </el-form-item>
-                  <el-form-item label="Period Duration (days)">
-                    <el-input v-model="form.diff.periodDuration" :readonly="isReadOnly" placeholder="---" style="width:100px" />
+                  <el-form-item label="Period Duration 每期持续 (days)">
+                    <el-input-number v-model="form.diff.periodDuration" :min="0" :disabled="isReadOnly" style="width:120px" />
                   </el-form-item>
-                  <el-form-item label="Blood Quality &amp; Quantity">
-                    <el-input v-model="form.diff.bloodQuality" :readonly="isReadOnly" placeholder="---" />
+                  <el-form-item label="Blood Quality 经血情况">
+                    <el-select v-model="form.diff.bloodQuality" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.bloodQuality" :key="o" :label="o" :value="o" />
+                    </el-select>
                   </el-form-item>
-                  <el-form-item label="PMS">
-                    <el-input v-model="form.diff.pms" :readonly="isReadOnly" placeholder="---" />
+                  <el-form-item label="PMS 经期相关症状">
+                    <el-select v-model="form.diff.pms" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.pms" :key="o" :label="o" :value="o" />
+                    </el-select>
                   </el-form-item>
                 </el-form>
               </el-col>
               <el-col :span="12">
-                <div class="diff-right-label">Other Female Symptoms</div>
+                <div class="diff-right-label">Other Female Symptoms 其它妇科症状</div>
                 <el-input v-model="form.diff.otherFemale" type="textarea" :rows="6" :readonly="isReadOnly" placeholder="---" />
               </el-col>
             </el-row>
           </el-card>
 
-          <!-- Section: Palpitation (image7) -->
+          <!-- Section: Pulse 脉 -->
           <el-card class="diff-card">
-            <template #header><span class="diff-header">Palpitation</span></template>
+            <template #header><span class="diff-header">Pulse 脉</span></template>
             <el-row :gutter="24">
               <el-col :span="12">
-                <el-form label-width="200px" label-position="left" size="small">
-                  <el-form-item label="Pathological Channel">
-                    <el-input v-model="form.diff.pathologicalChannel" :readonly="isReadOnly" placeholder="---" />
+                <el-form label-width="220px" label-position="left" size="small">
+                  <el-form-item label="All Position 六部">
+                    <el-select v-model="form.diff.pulse" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="o" :value="o" />
+                    </el-select>
                   </el-form-item>
-                  <el-form-item label="Pathological Changes">
-                    <el-input v-model="form.diff.pathologicalChanges" type="textarea" :rows="4" :readonly="isReadOnly" placeholder="---" />
+                  <el-form-item label="Right Hand 单右手脉">
+                    <el-select v-model="form.diff.pulseRightHand" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="o" :value="o" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item label="Left Hand 单左手脉">
+                    <el-select v-model="form.diff.pulseLeftHand" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="o" :value="o" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item label="Both Cun 双寸脉">
+                    <el-select v-model="form.diff.pulseBothCun" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="o" :value="o" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item label="Both Guan 双关脉">
+                    <el-select v-model="form.diff.pulseBothGuan" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="o" :value="o" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item label="Both Chi 双尺脉">
+                    <el-select v-model="form.diff.pulseBothChi" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="o" :value="o" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item label="Single Position 单部脉补充信息">
+                    <el-input v-model="form.diff.detailedPulse" type="textarea" :rows="3" :readonly="isReadOnly" placeholder="---" />
                   </el-form-item>
                 </el-form>
               </el-col>
               <el-col :span="12">
-                <el-form label-width="200px" label-position="left" size="small">
-                  <el-form-item label="Pulse">
-                    <el-select v-model="form.diff.pulse" filterable clearable :disabled="isReadOnly" style="width:100%">
-                      <el-option v-for="o in TCM_OPTIONS.pulse" :key="o" :label="o" :value="o" />
+                <el-form label-width="220px" label-position="left" size="small">
+                  <el-form-item label="Pathological Channel 病变经络">
+                    <el-select v-model="form.diff.pathologicalChannel" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
+                      <el-option v-for="o in TCM_OPTIONS.pathologicalChannel" :key="o" :label="o" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Detailed Pulse">
-                    <el-input v-model="form.diff.detailedPulse" type="textarea" :rows="4" :readonly="isReadOnly" placeholder="---" />
+                  <el-form-item label="Pathological Changes 病变详情">
+                    <el-input v-model="form.diff.pathologicalChanges" type="textarea" :rows="4" :readonly="isReadOnly" placeholder="---" />
                   </el-form-item>
                 </el-form>
               </el-col>
             </el-row>
           </el-card>
 
-          <!-- Section: Tongue (image8) -->
+          <!-- Section: Tongue 舌 -->
           <el-card class="diff-card">
-            <template #header><span class="diff-header">Tongue</span></template>
+            <template #header><span class="diff-header">Tongue 舌</span></template>
             <el-row :gutter="24">
               <el-col :span="12">
                 <el-form label-width="200px" label-position="left" size="small">
-                  <el-form-item label="Tongue Color">
-                    <el-select v-model="form.diff.tongueColor" clearable :disabled="isReadOnly" style="width:100%">
+                  <el-form-item label="Tongue Color 舌色">
+                    <el-select v-model="form.diff.tongueColor" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
                       <el-option v-for="o in TCM_OPTIONS.tongueColor" :key="o" :label="o" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Tongue Body/Shape">
-                    <el-select v-model="form.diff.tongueBody" clearable :disabled="isReadOnly" style="width:100%">
+                  <el-form-item label="Tongue Body/Shape 舌体/形">
+                    <el-select v-model="form.diff.tongueBody" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
                       <el-option v-for="o in TCM_OPTIONS.tongueBody" :key="o" :label="o" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Tongue Coating">
-                    <el-select v-model="form.diff.tongueCoating" clearable :disabled="isReadOnly" style="width:100%">
+                  <el-form-item label="Tongue Coating 舌苔">
+                    <el-select v-model="form.diff.tongueCoating" multiple clearable collapse-tags collapse-tags-tooltip :disabled="isReadOnly" style="width:100%">
                       <el-option v-for="o in TCM_OPTIONS.tongueCoating" :key="o" :label="o" :value="o" />
                     </el-select>
                   </el-form-item>
-                  <el-form-item label="Other Tongue Details">
+                  <el-form-item label="Other Tongue Details 其它舌头信息">
                     <el-input v-model="form.diff.otherTongue" type="textarea" :rows="3" :readonly="isReadOnly" placeholder="---" />
                   </el-form-item>
                 </el-form>
@@ -1537,6 +1617,13 @@ function handleSendReport() {
                   <el-input-number v-if="form.discountType !== 'none' && !isReadOnly"
                     v-model="form.discountValue" :min="0" size="small" style="width:120px; margin-left:8px" />
                 </el-form-item>
+                <el-form-item label="Tax Rate 税率">
+                  <el-radio-group v-model="form.overrideTaxRate" :disabled="isReadOnly" size="small">
+                    <el-radio-button :value="null">Default ({{ (settingsStore.taxRate * 100).toFixed(0) }}%)</el-radio-button>
+                    <el-radio-button :value="0">0% 免税</el-radio-button>
+                    <el-radio-button :value="0.13">13%</el-radio-button>
+                  </el-radio-group>
+                </el-form-item>
                 <el-form-item label="Consultation Fee Taxable">
                   <el-switch v-model="form.consultationFeeTaxable" :disabled="isReadOnly" active-text="Yes" inactive-text="No" />
                 </el-form-item>
@@ -1562,19 +1649,19 @@ function handleSendReport() {
                   <span class="price-lock">{{ cs }}{{ totalService.toFixed(2) }} <el-icon><Lock /></el-icon></span>
                 </div>
                 <div class="price-row" v-if="form.includeRxAmount && form.prescriptions.length">
-                  <span>Prescription Amount</span>
-                  <span class="price-lock">{{ cs }}{{ form.prescriptions.reduce((s, rx) => s + (rx.subtotal || 0) * (rx.quantity || 1), 0).toFixed(2) }} <el-icon><Lock /></el-icon></span>
+                  <span>Prescription Amount 处方金额</span>
+                  <span class="price-lock">{{ cs }}{{ totalRxAmount.toFixed(2) }} <el-icon><Lock /></el-icon></span>
                 </div>
                 <div class="price-row" v-if="form.discountType !== 'none'">
                   <span>Discount</span>
-                  <span style="color:#e63946">-{{ cs }}{{ form.discountType === 'percentage' ? ((form.consultationFee + totalService) * form.discountValue / 100).toFixed(2) : form.discountValue.toFixed(2) }}</span>
+                  <span style="color:#e63946">-{{ cs }}{{ form.discountType === 'percentage' ? ((form.consultationFee + totalService + (form.includeRxAmount ? totalRxAmount : 0)) * form.discountValue / 100).toFixed(2) : form.discountValue.toFixed(2) }}</span>
                 </div>
                 <div class="price-row total-before-tax">
                   <span>Total without Tax</span>
                   <span class="price-lock">{{ cs }}{{ totalWithoutTax.toFixed(2) }} <el-icon><Lock /></el-icon></span>
                 </div>
                 <div class="price-row tax-row">
-                  <span>Tax {{ (settingsStore.taxRate * 100).toFixed(0) }}% - {{ t('consultation.perItemTax') }}</span>
+                  <span>Tax {{ (effectiveTaxRate * 100).toFixed(0) }}% - {{ t('consultation.perItemTax') }}</span>
                   <span>{{ cs }}{{ taxAmount.toFixed(2) }}</span>
                 </div>
                 <div class="price-row grand-total">
@@ -1678,7 +1765,7 @@ function handleSendReport() {
             </table>
             <div class="pdf-totals">
               <div>SUBTOTAL: {{ cs }}{{ totalWithoutTax.toFixed(2) }}</div>
-              <div>TAX ({{ (settingsStore.taxRate*100).toFixed(0) }}%): {{ cs }}{{ taxAmount.toFixed(2) }}</div>
+              <div>TAX ({{ (effectiveTaxRate*100).toFixed(0) }}%): {{ cs }}{{ taxAmount.toFixed(2) }}</div>
               <div>GRAND TOTAL: <strong>{{ cs }}{{ totalAmount.toFixed(2) }}</strong></div>
               <div>BALANCE AMOUNT: <strong>{{ cs }}0</strong></div>
             </div>
@@ -1842,18 +1929,19 @@ function handleSendReport() {
               />
             </template>
           </el-table-column>
-          <el-table-column label="?g)" width="80">
+          <el-table-column label="Dosage(g) 剂量" width="110">
             <template #default="{ row }">
-              <el-input-number v-model="row.dosage" :min="0" :step="1" size="small" style="width:70px" />
+              <el-input-number v-model="row.dosage" :min="0" :step="1" size="small" style="width:95px" @change="recalcRxItems" />
             </template>
           </el-table-column>
-          <el-table-column label="Converted" width="100" v-if="rxForm.prescriptionType !== 'none'">
+          <el-table-column label="Converted 转换" width="140" v-if="rxForm.prescriptionType !== 'none'">
             <template #default="{ row }">
               <span v-if="row.outOfStock" style="color: #e63946; font-weight: 700">
                 0{{ row.convertedUnit || '-' }} <span style="font-size:11px">(Out of stock)</span>
               </span>
               <span v-else-if="row.convertedQty != null" :style="{ color: row.stockSufficient === false ? '#e63946' : '#2d6a4f', fontWeight: 600 }">
                 {{ row.convertedQty }}{{ row.convertedUnit }}
+                <span style="font-size:11px; color:#888; display:block">单剂 {{ row.dosage }}{{ row.unit || 'g' }} &times;{{ rxForm.quantity }}</span>
               </span>
               <span v-else style="color:#aaa">-</span>
             </template>
@@ -1887,9 +1975,9 @@ function handleSendReport() {
               <el-tag v-else type="info" size="small">N/A</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="Price" width="90">
+          <el-table-column label="Price 价格" width="110">
             <template #default="{ row }">
-              <el-input-number v-model="row.pricePerUnit" :min="0" :step="0.01" :precision="2" size="small" style="width:80px" />
+              <span style="font-size:13px; color:#555">{{ cs }}{{ (row.pricePerUnit || 0).toFixed(2) }}</span>
             </template>
           </el-table-column>
           <el-table-column width="45">
@@ -1937,6 +2025,7 @@ function handleSendReport() {
       :patient-id="patientId"
       :current-form="form"
       @copy-section="onCopySection"
+      @update-field="onUpdateField"
     />
   </div>
 

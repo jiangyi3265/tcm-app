@@ -142,7 +142,9 @@ const STATUS_MAP = {
 
 // ── 辨证寒热 ──
 function getColdHeat(consult) {
-  return consult.diff?.coldHeat || consult.coldHeat || '-'
+  const val = consult.diff?.coldHeat || consult.coldHeat
+  if (Array.isArray(val)) return val.length > 0 ? val.join(', ') : '-'
+  return val || '-'
 }
 
 // ── 就诊历史对比 ──
@@ -170,18 +172,31 @@ function quickCopyToNew(fields) {
   for (const f of fields) {
     if (f === 'chiefComplaint') copyData.chiefComplaint = src.chiefComplaint
     if (f === 'differentiation') {
-      copyData.diff = src.diff
+      copyData.diff = JSON.parse(JSON.stringify(src.diff || {}))
       copyData.differentiation = src.differentiation
     }
     if (f === 'treatment') {
-      copyData.acupuncture = src.acupuncture
-      copyData.prescriptions = src.prescriptions
-      copyData.herbals = src.herbals
+      copyData.acupuncture = JSON.parse(JSON.stringify(src.acupuncture || []))
+      // 拷贝处方为全新的，清除库存关联和配药状态
+      copyData.prescriptions = (src.prescriptions || []).map(rx => ({
+        ...JSON.parse(JSON.stringify(rx)),
+        id: 'rx-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+        dispensingCompleted: false,
+        items: (rx.items || []).map(i => ({
+          ...JSON.parse(JSON.stringify(i)),
+          inventoryId: null,
+          supplierId: null,
+          convertedQty: 0,
+          stockSufficient: null,
+          outOfStock: false,
+        })),
+      }))
+      copyData.herbals = JSON.parse(JSON.stringify(src.herbals || []))
       copyData.formulaName = src.formulaName
       copyData.prescriptionType = src.prescriptionType
     }
     if (f === 'pricing') {
-      copyData.services = src.services
+      copyData.services = JSON.parse(JSON.stringify(src.services || []))
       copyData.consultationFee = src.consultationFee
       copyData.discountType = src.discountType
       copyData.discountValue = src.discountValue
@@ -234,6 +249,31 @@ async function sendConsentByEmail() {
     ElMessage.error(e.message || t('patientDetail.consentEmailFailed'))
   } finally {
     sendingConsentEmail.value = false
+  }
+}
+
+// ── 发送问诊单 ──
+const sendingIntakeEmail = ref(false)
+
+async function sendIntakeByEmail() {
+  if (!patient.value?.emails?.[0] && !patient.value?.email) {
+    return ElMessage.warning(t('patientDetail.noEmailForConsent'))
+  }
+  sendingIntakeEmail.value = true
+  try {
+    const res = await patientsApi.sendConsentEmail(patientId, {
+      clinicName: settingsStore.clinicName || '',
+      includeIntakeForm: true,
+    })
+    if (res?.sent === false) {
+      ElMessage.warning(res.message || '问诊单发送失败')
+    } else {
+      ElMessage.success(res.message || '问诊单已发送')
+    }
+  } catch (e) {
+    ElMessage.error(e.message || '问诊单发送失败')
+  } finally {
+    sendingIntakeEmail.value = false
   }
 }
 
@@ -513,8 +553,11 @@ const fileTree = computed(() => {
                     <el-button v-if="!patient.consentSigned" size="small" type="primary" plain @click="sendConsent">
                       <el-icon><Document /></el-icon> {{ t('patientDetail.markAsSigned') }}
                     </el-button>
-                    <el-button v-if="!patient.consentSigned" size="small" type="success" plain :loading="sendingConsentEmail" @click="sendConsentByEmail">
-                      <el-icon><Message /></el-icon> {{ patient.consentSigned ? t('patientDetail.resendConsentEmail') : t('patientDetail.sendConsentEmail') }}
+                    <el-button size="small" type="success" plain :loading="sendingConsentEmail" @click="sendConsentByEmail">
+                      <el-icon><Message /></el-icon> {{ patient.consentSigned ? '重新发送知情同意书' : t('patientDetail.sendConsentEmail') }}
+                    </el-button>
+                    <el-button size="small" type="warning" plain :loading="sendingIntakeEmail" @click="sendIntakeByEmail">
+                      <el-icon><EditPen /></el-icon> 发送问诊单
                     </el-button>
                   </div>
                 </el-card>

@@ -77,12 +77,21 @@ function startEditUser(user) {
   const userRoles = Array.isArray(user.roles) && user.roles.length > 0
     ? [...user.roles]
     : user.role ? [user.role] : ['practitioner']
-  editUserForm.value = { ...user, roles: userRoles }
+  editUserForm.value = {
+    ...user,
+    roles: userRoles,
+    appointmentInterval: settingsStore.getPractitionerInterval(user.id),
+  }
 }
 
 async function saveEditUser() {
   try {
-    await authStore.updateUser(editingUserId.value, editUserForm.value)
+    // 保存预约间隔到settings
+    if (editUserForm.value.appointmentInterval !== undefined) {
+      settingsStore.setPractitionerInterval(editingUserId.value, editUserForm.value.appointmentInterval)
+    }
+    const { appointmentInterval, ...userData } = editUserForm.value
+    await authStore.updateUser(editingUserId.value, userData)
     editingUserId.value = null
     ElMessage.success(t('admin.saved'))
   } catch (e) {
@@ -566,14 +575,14 @@ async function deleteHerb(herb) {
 
 // ========== Meridian management ==========
 const showAddMeridianDialog = ref(false)
-const newMeridian = ref({ name: '', englishName: '', abbr: '', category: '姝ｇ粡', organ: '', pathway: '', acupointCount: 0, indication: '', notes: '' })
+const newMeridian = ref({ name: '', englishName: '', abbr: '', category: '正经', organ: '', pathway: '', acupointCount: 0, indication: '', notes: '' })
 
 async function handleAddMeridian() {
   if (!newMeridian.value.name) return ElMessage.warning(t('admin.fillMeridianName'))
   await meridiansStore.addMeridian({ ...newMeridian.value })
   ElMessage.success(t('admin.meridianCreated'))
   showAddMeridianDialog.value = false
-  newMeridian.value = { name: '', englishName: '', abbr: '', category: '姝ｇ粡', organ: '', pathway: '', acupointCount: 0, indication: '', notes: '' }
+  newMeridian.value = { name: '', englishName: '', abbr: '', category: '正经', organ: '', pathway: '', acupointCount: 0, indication: '', notes: '' }
 }
 
 const editingMeridianId = ref(null)
@@ -711,6 +720,17 @@ async function deleteTemplate(tmpl) {
                 :type="{ powder: 'warning', raw_herbs: 'success', pills: '' }[row.prescriptionPreference]">
                 {{ { powder: 'Powder', raw_herbs: 'Raw Herbs', pills: 'Pills' }[row.prescriptionPreference] || row.prescriptionPreference }}
               </el-tag>
+              <span v-else style="color:#bbb">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="预约间隔(min)" width="130">
+            <template #default="{ row }">
+              <div v-if="editingUserId === row.id && (row.role === 'practitioner' || (row.roles || []).includes('practitioner'))">
+                <el-input-number v-model="editUserForm.appointmentInterval" size="small" :min="5" :max="120" :step="5" style="width:100px" />
+              </div>
+              <span v-else-if="row.role === 'practitioner' || (row.roles || []).includes('practitioner')">
+                {{ settingsStore.getPractitionerInterval(row.id) }}min
+              </span>
               <span v-else style="color:#bbb">-</span>
             </template>
           </el-table-column>
@@ -1389,7 +1409,7 @@ async function deleteTemplate(tmpl) {
         <el-table :data="meridiansStore.activeMeridians" stripe>
           <el-table-column :label="t('admin.meridianName')" width="130"><template #default="{ row }"><span style="font-weight:600">{{ row.name }}</span></template></el-table-column>
           <el-table-column :label="t('admin.meridianAbbr')" width="60" prop="abbr" />
-          <el-table-column :label="t('admin.meridianCategory')" width="70"><template #default="{ row }"><el-tag :type="row.category === '濂囩粡' ? 'warning' : ''" size="small">{{ row.category }}</el-tag></template></el-table-column>
+          <el-table-column :label="t('admin.meridianCategory')" width="70"><template #default="{ row }"><el-tag :type="row.category === '奇经' ? 'warning' : ''" size="small">{{ row.category }}</el-tag></template></el-table-column>
           <el-table-column :label="t('admin.meridianOrgan')" width="80" prop="organ" />
           <el-table-column :label="t('admin.meridianAcupointCount')" width="70"><template #default="{ row }">{{ row.acupointCount }}</template></el-table-column>
           <el-table-column :label="t('admin.meridianIndication')" min-width="200"><template #default="{ row }"><span style="font-size:12px; color:#555">{{ row.indication || '-' }}</span></template></el-table-column>
@@ -1405,7 +1425,7 @@ async function deleteTemplate(tmpl) {
             <el-row :gutter="12"><el-col :span="12"><el-form-item :label="t('admin.meridianName')"><el-input v-model="editMeridianForm.name" /></el-form-item></el-col>
             <el-col :span="12"><el-form-item :label="t('admin.meridianEnglishName')"><el-input v-model="editMeridianForm.englishName" /></el-form-item></el-col></el-row>
             <el-row :gutter="12"><el-col :span="8"><el-form-item :label="t('admin.meridianAbbr')"><el-input v-model="editMeridianForm.abbr" /></el-form-item></el-col>
-            <el-col :span="8"><el-form-item :label="t('admin.meridianCategory')"><el-select v-model="editMeridianForm.category"><el-option :label="t('admin.meridianRegular')" value="姝ｇ粡" /><el-option :label="t('admin.meridianExtra')" value="濂囩粡" /></el-select></el-form-item></el-col>
+            <el-col :span="8"><el-form-item :label="t('admin.meridianCategory')"><el-select v-model="editMeridianForm.category"><el-option :label="t('admin.meridianRegular')" value="正经" /><el-option :label="t('admin.meridianExtra')" value="奇经" /></el-select></el-form-item></el-col>
             <el-col :span="8"><el-form-item :label="t('admin.meridianOrgan')"><el-input v-model="editMeridianForm.organ" /></el-form-item></el-col></el-row>
             <el-form-item :label="t('admin.meridianPathway')"><el-input v-model="editMeridianForm.pathway" type="textarea" :rows="3" /></el-form-item>
             <el-form-item :label="t('admin.meridianIndication')"><el-input v-model="editMeridianForm.indication" type="textarea" :rows="2" /></el-form-item>

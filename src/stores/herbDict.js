@@ -2,12 +2,20 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { herbDictApi } from '../utils/api'
 import { readStoredJson, writeStoredJson } from '../utils/storage'
+import defaultHerbs from '../utils/herbsData.json'
 
 export const useHerbDictStore = defineStore('herbDict', () => {
   const herbs = ref([])
 
   function init() {
-    herbs.value = readStoredJson('tcm_herb_dict', []) || []
+    const stored = readStoredJson('tcm_herb_dict', []) || []
+    if (stored.length > 0) {
+      herbs.value = stored
+    } else {
+      // 首次加载：使用Excel导入的草药数据作为种子数据
+      herbs.value = defaultHerbs
+      saveState()
+    }
   }
   function saveState() { writeStoredJson('tcm_herb_dict', herbs.value) }
 
