@@ -7,7 +7,7 @@ import { useSuppliersStore } from '../../stores/suppliers'
 import { calculatePrescription } from '../../utils/prescriptionCalc'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const formulasStore = useFormulasStore()
 const inventoryStore = useInventoryStore()
 const suppliersStore = useSuppliersStore()
@@ -85,6 +85,21 @@ const previewResult = computed(() => {
     null
   )
 })
+
+function formatConvertedPreview(row) {
+  if (previewType.value === 'powder' && row.packetsPerDose != null) {
+    return `${row.packetsPerDose}${row.convertedUnit || ''}`
+  }
+  return `${row.convertedQty}${row.convertedUnit || ''}`
+}
+
+function formatConvertedSummary(row) {
+  if (previewType.value !== 'powder' || row.convertedQty == null || !row.convertedUnit) return ''
+  if (locale.value === 'zh-CN') {
+    return `共 ${row.convertedQty}${row.convertedUnit} / ${previewQty.value} 剂`
+  }
+  return `Total ${row.convertedQty}${row.convertedUnit} / ${previewQty.value} doses`
+}
 
 function toggleExpand(formula) {
   if (expandedId.value === formula.id) {
@@ -182,6 +197,30 @@ async function deleteFormula(formula) {
     ElMessage.success(t('admin.formulaDeleted'))
   } catch (e) {
     if (e !== 'cancel') ElMessage.error(e.message || t('formulaView.deleteFailed'))
+  }
+}
+
+// ── 复制方剂 ──
+async function duplicateFormula(formula) {
+  try {
+    const copyData = {
+      name: formula.name + t('formulaView.copySuffix'),
+      category: formula.category || '',
+      source: formula.source || '',
+      description: formula.description || '',
+      items: (formula.items || []).map(i => ({
+        herbName: i.herbName,
+        herbDictId: i.herbDictId || null,
+        dosage: i.dosage,
+        unit: i.unit || 'g',
+        sortOrder: i.sortOrder,
+        notes: i.notes || '',
+      })),
+    }
+    await formulasStore.addFormula(copyData)
+    ElMessage.success(t('formulaView.duplicateSuccess'))
+  } catch (e) {
+    ElMessage.error(e.message || t('formulaView.createFailed'))
   }
 }
 
@@ -359,7 +398,10 @@ const categoryCountEntries = computed(() => {
                     <el-table-column :label="t('formulaView.converted')" width="80">
                       <template #default="{ row }">
                         <span :style="{ color: row.stockSufficient === false ? '#e63946' : '#2d6a4f', fontWeight: 600 }">
-                          {{ row.convertedQty }}{{ row.convertedUnit }}
+                          {{ formatConvertedPreview(row) }}
+                          <span v-if="formatConvertedSummary(row)" style="font-size:11px; color:#888; display:block">
+                            {{ formatConvertedSummary(row) }}
+                          </span>
                         </span>
                       </template>
                     </el-table-column>
@@ -384,6 +426,9 @@ const categoryCountEntries = computed(() => {
               <div class="fv-card-actions">
                 <el-button size="small" type="primary" @click.stop="startEdit(formula)">
                   <el-icon><Edit /></el-icon> {{ t('formulaView.editFormula') }}
+                </el-button>
+                <el-button size="small" @click.stop="duplicateFormula(formula)">
+                  <el-icon><CopyDocument /></el-icon> {{ t('formulaView.duplicateFormula') }}
                 </el-button>
                 <el-button size="small" type="danger" text @click.stop="deleteFormula(formula)">{{ t('common.delete') }}</el-button>
               </div>

@@ -88,7 +88,7 @@ async function saveEditUser() {
   try {
     // 保存预约间隔到settings
     if (editUserForm.value.appointmentInterval !== undefined) {
-      settingsStore.setPractitionerInterval(editingUserId.value, editUserForm.value.appointmentInterval)
+      await settingsStore.setPractitionerInterval(editingUserId.value, editUserForm.value.appointmentInterval)
     }
     const { appointmentInterval, ...userData } = editUserForm.value
     await authStore.updateUser(editingUserId.value, userData)
@@ -298,6 +298,41 @@ async function deletePriceList(pl) {
 async function enablePriceList(pl) {
   await settingsStore.updatePriceList(pl.id, { isActive: true })
   ElMessage.success(t('admin.enabled'))
+}
+
+// Edit existing price list
+const editingPriceListId = ref(null)
+const editPriceListForm = ref({ name: '', effectiveDate: '', items: [] })
+const editPriceItem = ref({ name: '', price: 0, taxable: true })
+
+function startEditPriceList(pl) {
+  editingPriceListId.value = pl.id
+  editPriceListForm.value = {
+    name: pl.name,
+    effectiveDate: pl.effectiveDate || '',
+    items: [...(pl.items || []).map(i => ({ ...i }))],
+  }
+}
+
+function addEditPriceItem() {
+  if (!editPriceItem.value.name) return ElMessage.warning(t('admin.fillItemName'))
+  editPriceListForm.value.items.push({ ...editPriceItem.value })
+  editPriceItem.value = { name: '', price: 0, taxable: true }
+}
+
+function removeEditPriceItem(idx) {
+  editPriceListForm.value.items.splice(idx, 1)
+}
+
+async function saveEditPriceList() {
+  if (!editPriceListForm.value.name) return ElMessage.warning(t('admin.fillPriceListName'))
+  await settingsStore.updatePriceList(editingPriceListId.value, { ...editPriceListForm.value })
+  editingPriceListId.value = null
+  ElMessage.success(t('admin.priceListUpdated'))
+}
+
+function cancelEditPriceList() {
+  editingPriceListId.value = null
 }
 
 // ========== 已删除数据管理（回收站）==========
@@ -982,26 +1017,103 @@ async function deleteTemplate(tmpl) {
             <el-icon><Plus /></el-icon> {{ t('admin.addPriceList') }}
           </el-button>
         </div>
-        <el-table :data="settingsStore.priceLists" stripe>
-          <el-table-column prop="name" :label="t('admin.priceListName')" min-width="160" />
-          <el-table-column :label="t('admin.effectiveDate')" width="130">
-            <template #default="{ row }">{{ formatDate(row.effectiveDate) || '-' }}</template>
+        <el-table :data="settingsStore.priceLists" stripe row-key="id">
+          <el-table-column type="expand">
+            <template #default="{ row }">
+            <div style="padding: 12px 20px;">
+              <!-- If editing this price list, show editable items -->
+              <template v-if="editingPriceListId === row.id">
+                <div style="margin-bottom:8px; font-weight:600; color:#555">{{ t('admin.priceItems') }}</div>
+                <el-table :data="editPriceListForm.items" size="small" max-height="300" :empty-text="t('admin.noItems')">
+                  <el-table-column :label="t('admin.item')" min-width="180">
+                    <template #default="{ row: item }">
+                      <el-input v-model="item.name" size="small" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('admin.price')" width="130">
+                    <template #default="{ row: item }">
+                      <el-input-number v-model="item.price" :min="0" :step="10" size="small" style="width:110px" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('admin.taxable')" width="80" align="center">
+                    <template #default="{ row: item }">
+                      <el-checkbox v-model="item.taxable" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column width="60">
+                    <template #default="{ $index }">
+                      <el-button size="small" text type="danger" @click="removeEditPriceItem($index)">{{ t('common.delete') }}</el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <el-row :gutter="8" style="margin-top:8px">
+                  <el-col :span="10">
+                    <el-input v-model="editPriceItem.name" :placeholder="t('admin.itemNamePlaceholder')" size="small" />
+                  </el-col>
+                  <el-col :span="6">
+                    <el-input-number v-model="editPriceItem.price" :min="0" :step="10" size="small" style="width:100%" />
+                  </el-col>
+                  <el-col :span="4">
+                    <el-checkbox v-model="editPriceItem.taxable" size="small">{{ t('admin.taxable') }}</el-checkbox>
+                  </el-col>
+                  <el-col :span="4">
+                    <el-button size="small" type="primary" @click="addEditPriceItem">{{ t('common.add') }}</el-button>
+                  </el-col>
+                </el-row>
+              </template>
+              <!-- If not editing, show read-only items -->
+              <template v-else>
+                <div style="margin-bottom:8px; font-weight:600; color:#555">{{ t('admin.priceItems') }}</div>
+                <el-table :data="row.items || []" size="small" max-height="300" :empty-text="t('admin.noItems')">
+                  <el-table-column prop="name" :label="t('admin.item')" min-width="180" />
+                  <el-table-column :label="t('admin.price')" width="130">
+                    <template #default="{ row: item }">CNY {{ item.price }}</template>
+                  </el-table-column>
+                  <el-table-column :label="t('admin.taxable')" width="80" align="center">
+                    <template #default="{ row: item }">
+                      <el-tag :type="item.taxable ? '' : 'info'" size="small">{{ item.taxable ? t('common.yes') : t('common.no') }}</el-tag>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </template>
+            </div>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('admin.priceListName')" min-width="160">
+            <template #default="{ row }">
+              <div v-if="editingPriceListId === row.id">
+                <el-input v-model="editPriceListForm.name" size="small" />
+              </div>
+              <span v-else style="font-weight:600">{{ row.name }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('admin.effectiveDate')" width="160">
+            <template #default="{ row }">
+              <div v-if="editingPriceListId === row.id">
+                <el-date-picker v-model="editPriceListForm.effectiveDate" type="date" value-format="YYYY-MM-DD" size="small" style="width:140px" />
+              </div>
+              <span v-else>{{ formatDate(row.effectiveDate) || '-' }}</span>
+            </template>
           </el-table-column>
           <el-table-column :label="t('admin.itemCount')" width="80">
-            <template #default="{ row }">{{ row.items?.length || 0 }}</template>
+            <template #default="{ row }">{{ (editingPriceListId === row.id ? editPriceListForm.items : row.items)?.length || 0 }}</template>
           </el-table-column>
           <el-table-column :label="t('admin.status')" width="90">
             <template #default="{ row }">
               <el-tag :type="row.isActive ? 'success' : 'info'" size="small">{{ row.isActive ? t('admin.active') : t('admin.inactive') }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column :label="t('admin.createdDate')" width="130">
-            <template #default="{ row }">{{ formatDate(row.createdAt) }}</template>
-          </el-table-column>
-          <el-table-column :label="t('admin.operation')" width="120">
+          <el-table-column :label="t('admin.operation')" width="200" fixed="right">
             <template #default="{ row }">
-              <el-button v-if="row.isActive" size="small" text type="danger" @click="deletePriceList(row)">{{ t('admin.disable') }}</el-button>
-              <el-button v-else size="small" text type="success" @click="enablePriceList(row)">{{ t('admin.enable') }}</el-button>
+              <div v-if="editingPriceListId === row.id">
+                <el-button size="small" text type="primary" @click="saveEditPriceList">{{ t('common.save') }}</el-button>
+                <el-button size="small" text @click="cancelEditPriceList">{{ t('common.cancel') }}</el-button>
+              </div>
+              <div v-else>
+                <el-button size="small" text type="primary" @click="startEditPriceList(row)">{{ t('common.edit') }}</el-button>
+                <el-button v-if="row.isActive" size="small" text type="danger" @click="deletePriceList(row)">{{ t('admin.disable') }}</el-button>
+                <el-button v-else size="small" text type="success" @click="enablePriceList(row)">{{ t('admin.enable') }}</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>

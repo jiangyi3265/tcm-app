@@ -61,9 +61,25 @@ export const useSettingsStore = defineStore('settings', () => {
     return practitionerIntervals.value[practitionerId] ?? practitionerInterval.value
   }
 
-  function setPractitionerInterval(practitionerId, minutes) {
-    practitionerIntervals.value[practitionerId] = minutes
-    saveState()
+  async function setPractitionerInterval(practitionerId, minutes) {
+    const previous = { ...practitionerIntervals.value }
+    const parsedMinutes = Number(minutes)
+    try {
+      if (!practitionerId || !Number.isFinite(parsedMinutes) || parsedMinutes <= 0) {
+        delete practitionerIntervals.value[practitionerId]
+      } else {
+        practitionerIntervals.value[practitionerId] = parsedMinutes
+      }
+      const updated = await settingsApi.updateBase({ practitionerIntervals: practitionerIntervals.value })
+      if (updated?.practitionerIntervals && typeof updated.practitionerIntervals === 'object') {
+        practitionerIntervals.value = updated.practitionerIntervals
+      }
+      saveState()
+      return practitionerIntervals.value
+    } catch (error) {
+      practitionerIntervals.value = previous
+      throw error
+    }
   }
 
   async function updateTaxRate(rate) {
@@ -140,8 +156,8 @@ export const useSettingsStore = defineStore('settings', () => {
   async function deletePriceList(id) {
     const idx = priceLists.value.findIndex((priceList) => priceList.id === id)
     if (idx === -1) return
-    await settingsApi.deletePriceList(id)
-    priceLists.value.splice(idx, 1)
+    const updated = await settingsApi.deletePriceList(id)
+    priceLists.value[idx] = updated
     saveState()
   }
 

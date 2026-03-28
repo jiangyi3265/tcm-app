@@ -52,6 +52,23 @@ function buildRows(items, renderRow, emptyMessage, columnCount) {
   return items.map(renderRow).join('')
 }
 
+function getServiceExtended(service) {
+  const quantity = Number(service?.quantity || 0)
+  const price = Number(service?.price || 0)
+  const discount = Number(service?.manualDiscount || 0)
+  return Math.max(0, price * quantity - discount)
+}
+
+function getConsultationServiceTotal(consultation = {}) {
+  const services = Array.isArray(consultation?.services) ? consultation.services : []
+  return services.reduce((sum, service) => sum + getServiceExtended(service), 0)
+}
+
+function getConsultationPrescriptionTotal(consultation = {}) {
+  const prescriptions = Array.isArray(consultation?.prescriptions) ? consultation.prescriptions : []
+  return prescriptions.reduce((sum, rx) => sum + Number(rx?.subtotal || 0), 0)
+}
+
 function buildDiffSummary(diff = {}) {
   const fields = [
     ['Cold / Heat', diff.coldHeat],
@@ -108,7 +125,7 @@ function buildPrescriptionTables(prescriptions = [], currency = 'CNY') {
         <div><strong>Type:</strong> ${escapeHtml(rx.prescriptionType || '-')}</div>
         <div><strong>Source:</strong> ${escapeHtml(rx.whereToGet || '-')}</div>
         <div><strong>Quantity:</strong> ${escapeHtml(rx.quantity || '-')}</div>
-        <div><strong>Total:</strong> ${formatMoney(rx.totalPrice || 0, currency)}</div>
+        <div><strong>Total:</strong> ${formatMoney(rx.subtotal || 0, currency)}</div>
         <table>
           <tr><th>Herb</th><th>Dose</th><th>Supplier</th><th>Notes</th></tr>
           ${rows}
@@ -208,13 +225,15 @@ export function printInvoice(consultation, patient, practitioner, clinicName, ta
   const clinic = clinicName || 'TCM Clinic Management System'
   const currency = consultation?.currency || 'CNY'
   const services = Array.isArray(consultation?.services) ? consultation.services : []
+  const totalServiceAmount = getConsultationServiceTotal(consultation)
+  const prescriptionAmount = getConsultationPrescriptionTotal(consultation)
   const serviceRows = buildRows(
     services,
     (service) => {
       const quantity = Number(service.quantity || 0)
       const price = Number(service.price || 0)
       const discount = Number(service.manualDiscount || 0)
-      const extended = Math.max(0, price * quantity - discount)
+      const extended = getServiceExtended(service)
       const taxableRate = service.taxable ? Number(taxRate || 0) : 0
       const tax = extended * taxableRate
       return `<tr>
@@ -262,8 +281,8 @@ export function printInvoice(consultation, patient, practitioner, clinicName, ta
       <table>
         <tr><th>Field</th><th>Value</th></tr>
         <tr><td>Consultation Fee</td><td>${formatMoney(consultation?.consultationFee, currency)}</td></tr>
-        <tr><td>Total Service</td><td>${formatMoney(consultation?.totalServiceAmount, currency)}</td></tr>
-        <tr><td>Prescription Amount</td><td>${formatMoney(consultation?.prescriptionAmount, currency)}</td></tr>
+        <tr><td>Total Service</td><td>${formatMoney(totalServiceAmount, currency)}</td></tr>
+        <tr><td>Prescription Amount</td><td>${formatMoney(prescriptionAmount, currency)}</td></tr>
         <tr><td>Total Without Tax</td><td>${formatMoney(consultation?.totalWithoutTax, currency)}</td></tr>
         <tr><td>Tax Amount</td><td>${formatMoney(consultation?.taxAmount, currency)}</td></tr>
         <tr><td>Grand Total</td><td>${formatMoney(consultation?.totalAmount, currency)}</td></tr>

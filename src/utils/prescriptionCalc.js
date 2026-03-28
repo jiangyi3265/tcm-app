@@ -229,10 +229,12 @@ export function convertSingleHerb(
 
   return {
     name: item.herbName || item.name,
+    herbDictId: item.herbDictId || null,
     originalDosage: item.dosage || 0,
     originalUnit: item.unit || 'g',
     convertedQty,
     convertedUnit,
+    packetsPerDose: prescriptionType === 'powder' ? (convertedQty && quantity ? Math.round(convertedQty / quantity) : 0) : null,
     totalGrams,
     gramsPerPacket: matched?.gramsPerPacket || null,
     supplierId: matched?.supplierId || null,
@@ -342,6 +344,7 @@ export function recalcWithSupplier(
     ...currentItem,
     convertedQty,
     convertedUnit,
+    packetsPerDose: prescriptionType === 'powder' ? (convertedQty && quantity ? Math.round(convertedQty / quantity) : 0) : null,
     totalGrams,
     gramsPerPacket: newInventoryItem.gramsPerPacket || null,
     supplierId: newInventoryItem.supplierId || null,

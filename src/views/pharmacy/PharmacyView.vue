@@ -65,21 +65,53 @@ async function markDispensed(consult) {
 // 根据处方类型匹配库存项（与后端 deductFromPrescription 逻辑一致）
 const CATEGORY_MAP = { raw_herbs: 'raw_herbs', powder: 'powder', pills: 'pills' }
 
-function matchInventory(herbName, prescriptionType) {
-  if (!herbName) return null
+function getConsultPrescriptionItems(consult) {
+  const items = consult?.prescriptions?.[0]?.items
+  if (Array.isArray(items) && items.length > 0) return items
+  return Array.isArray(consult?.herbals) ? consult.herbals : []
+}
+
+function matchInventory(item, prescriptionType) {
+  if (!item) return null
   const category = CATEGORY_MAP[prescriptionType] || 'raw_herbs'
-  const q = herbName.toLowerCase()
-  // 先按分类精确匹配
-  const byCategory = inventoryStore.items.filter(
-    i => i.isActive && !i.deletedAt && i.name.toLowerCase().includes(q) && i.category === category
-  )
-  if (byCategory.length > 0) {
-    // 按库存量降序，和后端一致
-    return byCategory.sort((a, b) => (b.quantity || 0) - (a.quantity || 0))[0]
+  const activeItems = inventoryStore.items
+    .filter((inventoryItem) => inventoryItem.isActive && !inventoryItem.deletedAt && inventoryItem.category === category)
+
+  if (item.inventoryId) {
+    const byInventoryId = activeItems.find((inventoryItem) => inventoryItem.id === item.inventoryId)
+    if (byInventoryId) return byInventoryId
   }
-  // 兜底：不限分类
-  const all = inventoryStore.findByName(herbName)
-  return all.length > 0 ? all[0] : null
+
+  if (item.herbDictId) {
+    const byHerbDict = activeItems
+      .filter((inventoryItem) => inventoryItem.herbDictId === item.herbDictId)
+      .sort((a, b) => Number(b.quantity || 0) - Number(a.quantity || 0))
+    if (byHerbDict.length > 0) return byHerbDict[0]
+  }
+
+  const herbName = String(item.name || item.herbName || '').trim().toLowerCase()
+  if (!herbName) return null
+
+  const exactName = activeItems
+    .filter((inventoryItem) => String(inventoryItem.name || '').trim().toLowerCase() === herbName)
+    .sort((a, b) => Number(b.quantity || 0) - Number(a.quantity || 0))
+  if (exactName.length > 0) return exactName[0]
+
+  const fuzzyName = activeItems
+    .filter((inventoryItem) => String(inventoryItem.name || '').toLowerCase().includes(herbName))
+    .sort((a, b) => Number(b.quantity || 0) - Number(a.quantity || 0))
+  return fuzzyName[0] || null
+}
+
+function getRequiredQuantity(item, consult) {
+  if (item?.convertedQty != null) return Number(item.convertedQty || 0)
+  return Number(item?.dosage || 0) * Number(consult?.prescriptions?.[0]?.quantity || 1)
+}
+
+function getRequiredUnit(item, prescriptionType) {
+  if (item?.convertedUnit) return item.convertedUnit
+  if (item?.unit) return item.unit
+  return { raw_herbs: 'g', powder: '包', pills: '盒' }[prescriptionType] || 'g'
 }
 </script>
 
@@ -172,32 +204,34 @@ function matchInventory(herbName, prescriptionType) {
           <el-tag type="success">{{ selectedConsult.formulaName }}</el-tag>
         </div>
 
-        <el-table :data="selectedConsult.herbals" size="small" style="margin-top: 12px">
+        <el-table :data="getConsultPrescriptionItems(selectedConsult)" size="small" style="margin-top: 12px">
           <el-table-column prop="name" :label="t('pharmacy.herb')" />
           <el-table-column :label="t('pharmacy.dosageCol')" width="140">
             <template #default="{ row }">
-              <span>{{ row.dosage }} {{ row.unit }}</span>
-              <span v-if="(selectedConsult.prescriptions?.[0]?.quantity || 1) > 1"
-                    style="color:#888; font-size:12px">
-                × {{ selectedConsult.prescriptions?.[0]?.quantity || 1 }}{{ t('pharmacy.doses') }}
-              </span>
+              <span>{{ getRequiredQuantity(row, selectedConsult) }} {{ getRequiredUnit(row, selectedConsult.prescriptionType) }}</span>
+              <div
+                v-if="row.packetsPerDose != null && (selectedConsult.prescriptions?.[0]?.quantity || 1) > 1"
+                style="color:#888; font-size:12px"
+              >
+                {{ row.packetsPerDose }}{{ getRequiredUnit(row, selectedConsult.prescriptionType) }} / {{ t('pharmacy.doses') }}
+              </div>
             </template>
           </el-table-column>
           <el-table-column :label="t('pharmacy.stockStatus')" width="180">
             <template #default="{ row }">
               <span>
-                <template v-if="matchInventory(row.name, selectedConsult.prescriptionType)">
+                <template v-if="matchInventory(row, selectedConsult.prescriptionType)">
                   <el-tag
-                    :type="matchInventory(row.name, selectedConsult.prescriptionType).quantity >= row.dosage * (selectedConsult.prescriptions?.[0]?.quantity || 1) ? 'success' : 'danger'"
+                    :type="Number(matchInventory(row, selectedConsult.prescriptionType).quantity || 0) >= getRequiredQuantity(row, selectedConsult) ? 'success' : 'danger'"
                     size="small"
                   >
-                    {{ matchInventory(row.name, selectedConsult.prescriptionType).quantity }}{{ row.unit }}
+                    {{ matchInventory(row, selectedConsult.prescriptionType).quantity }}{{ getRequiredUnit(row, selectedConsult.prescriptionType) }}
                   </el-tag>
                   <div style="font-size:11px; color:#888; margin-top:2px">
-                    {{ matchInventory(row.name, selectedConsult.prescriptionType).supplier ? matchInventory(row.name, selectedConsult.prescriptionType).supplier + ' · ' : '' }}{{ { raw_herbs: t('pharmacy.prescriptionType.raw_herbs'), powder: t('pharmacy.prescriptionType.powder'), pills: t('pharmacy.prescriptionType.pills') }[matchInventory(row.name, selectedConsult.prescriptionType).category] || '' }}
+                    {{ matchInventory(row, selectedConsult.prescriptionType).supplier ? matchInventory(row, selectedConsult.prescriptionType).supplier + ' · ' : '' }}{{ { raw_herbs: t('pharmacy.prescriptionType.raw_herbs'), powder: t('pharmacy.prescriptionType.powder'), pills: t('pharmacy.prescriptionType.pills') }[matchInventory(row, selectedConsult.prescriptionType).category] || '' }}
                   </div>
-                  <div v-if="(selectedConsult.prescriptions?.[0]?.quantity || 1) > 1" style="font-size:11px; color:#888">
-                    {{ t('pharmacy.totalNeed') }}{{ row.dosage * (selectedConsult.prescriptions?.[0]?.quantity || 1) }}{{ row.unit }}
+                  <div v-if="(selectedConsult.prescriptions?.[0]?.quantity || 1) > 1 || row.convertedQty != null" style="font-size:11px; color:#888">
+                    {{ t('pharmacy.totalNeed') }}{{ getRequiredQuantity(row, selectedConsult) }}{{ getRequiredUnit(row, selectedConsult.prescriptionType) }}
                   </div>
                 </template>
                 <el-tag v-else type="info" size="small">{{ t('pharmacy.noStock') }}</el-tag>

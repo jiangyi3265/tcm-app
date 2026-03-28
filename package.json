@@ -8,6 +8,7 @@
     "dev:client": "vite",
     "dev:server": "node ./scripts/run-server.mjs spring-boot:run",
     "dev:full": "concurrently -k \"npm run dev:server\" \"npm run dev:client\"",
+    "test": "node --test",
     "build": "vite build",
     "build:server": "node ./scripts/run-server.mjs -DskipTests package",
     "build:full": "npm run build && npm run build:server",

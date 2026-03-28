@@ -227,9 +227,6 @@ function isDiffChanged(key) {
       <div class="compare-section">
         <div class="compare-section-header">
           <h4>{{ t('compare.summary') }}</h4>
-          <el-button size="small" type="primary" text @click="copySection('summary')">
-            {{ t('compare.copyToCurrent') }}
-          </el-button>
         </div>
         <el-table :data="[
           { field: t('compare.chiefComplaint'), key: 'chiefComplaint', old: selected.chiefComplaint, cur: currentForm.chiefComplaint },
@@ -261,9 +258,6 @@ function isDiffChanged(key) {
       <div class="compare-section">
         <div class="compare-section-header">
           <h4>{{ t('compare.differentiation') }}</h4>
-          <el-button size="small" type="primary" text @click="copySection('differentiation')">
-            {{ t('compare.copyToCurrent') }}
-          </el-button>
         </div>
         <el-table :data="diffFields" border size="small" style="width: 100%">
           <el-table-column :label="t('compare.field')" prop="label" width="80" />
@@ -303,9 +297,6 @@ function isDiffChanged(key) {
       <div class="compare-section">
         <div class="compare-section-header">
           <h4>{{ t('compare.treatment') }}</h4>
-          <el-button size="small" type="primary" text @click="copySection('treatment')">
-            {{ t('compare.copyToCurrent') }}
-          </el-button>
         </div>
         <!-- 针灸穴位 -->
         <p><strong>{{ t('compare.acuPoints') }}</strong></p>
@@ -361,9 +352,6 @@ function isDiffChanged(key) {
       <div class="compare-section">
         <div class="compare-section-header">
           <h4>{{ t('compare.pricing') }}</h4>
-          <el-button size="small" type="primary" text @click="copySection('pricing')">
-            {{ t('compare.copyToCurrent') }}
-          </el-button>
         </div>
         <el-descriptions :column="2" border size="small">
           <el-descriptions-item :label="t('compare.totalAmount')">

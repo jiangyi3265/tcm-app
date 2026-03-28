@@ -38,6 +38,27 @@ const showPasswordDialog = ref(false)
 const passwordForm = ref({ oldPassword: '', newPassword: '', confirmPassword: '' })
 const changingPwd = ref(false)
 
+// Prescription preference
+const showPreferenceDialog = ref(false)
+const preferenceForm = ref({ prescriptionPreference: '' })
+
+function openPreferenceDialog() {
+  preferenceForm.value.prescriptionPreference = authStore.currentUser?.prescriptionPreference || ''
+  showPreferenceDialog.value = true
+}
+
+async function savePreference() {
+  try {
+    await authStore.updateUser(authStore.currentUser.id, {
+      prescriptionPreference: preferenceForm.value.prescriptionPreference,
+    })
+    showPreferenceDialog.value = false
+    ElMessage.success(t('header.preferenceSaved'))
+  } catch (e) {
+    ElMessage.error(e?.message || t('header.preferenceSaveFailed'))
+  }
+}
+
 async function handleChangePassword() {
   if (!passwordForm.value.oldPassword || !passwordForm.value.newPassword) {
     return ElMessage.warning(t('header.fillOldAndNew'))
@@ -92,6 +113,7 @@ function toggleLang() {
 function handleCommand(command) {
   if (command === 'logout') handleLogout()
   if (command === 'change-password') showPasswordDialog.value = true
+  if (command === 'preference') openPreferenceDialog()
 }
 </script>
 
@@ -154,6 +176,9 @@ function handleCommand(command) {
         </div>
         <template #dropdown>
           <el-dropdown-menu>
+            <el-dropdown-item command="preference">
+              <el-icon><Setting /></el-icon> {{ t('header.rxPreference') }}
+            </el-dropdown-item>
             <el-dropdown-item command="change-password">
               <el-icon><Lock /></el-icon> {{ t('header.changePassword') }}
             </el-dropdown-item>
@@ -180,6 +205,23 @@ function handleCommand(command) {
         <template #footer>
           <el-button @click="showPasswordDialog = false">{{ t('common.cancel') }}</el-button>
           <el-button type="primary" :loading="changingPwd" @click="handleChangePassword">{{ t('header.confirmChange') }}</el-button>
+        </template>
+      </el-dialog>
+
+      <!-- 处方偏好设置对话框 -->
+      <el-dialog v-model="showPreferenceDialog" :title="t('header.rxPreferenceTitle')" width="380px" :close-on-click-modal="false">
+        <el-form :model="preferenceForm" label-width="120px">
+          <el-form-item :label="t('header.defaultRxType')">
+            <el-radio-group v-model="preferenceForm.prescriptionPreference">
+              <el-radio-button value="powder">Powder</el-radio-button>
+              <el-radio-button value="raw_herbs">Raw Herbs</el-radio-button>
+              <el-radio-button value="pills">Pills</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="showPreferenceDialog = false">{{ t('common.cancel') }}</el-button>
+          <el-button type="primary" @click="savePreference">{{ t('common.save') }}</el-button>
         </template>
       </el-dialog>
     </div>

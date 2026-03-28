@@ -20,6 +20,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function loadUsers() {
     users.value = readStoredJson(USERS_KEY, []) || []
+    mergeCurrentUserFromUsers()
 
     const token = getStoredItem(TOKEN_KEY)
     if (!token) return
@@ -28,6 +29,7 @@ export const useAuthStore = defineStore('auth', () => {
       const payload = await bootstrapApi.fetch()
       applyBootstrapToLocalStorage(payload)
       users.value = readStoredJson(USERS_KEY, []) || []
+      mergeCurrentUserFromUsers()
     } catch {
       // Keep the cached user list if the bootstrap refresh fails.
     }
@@ -44,6 +46,14 @@ export const useAuthStore = defineStore('auth', () => {
 
   function saveUsers() {
     writeStoredJson(USERS_KEY, users.value)
+  }
+
+  function mergeCurrentUserFromUsers() {
+    if (!currentUser.value?.id) return
+    const matched = users.value.find((user) => String(user.id) === String(currentUser.value.id))
+    if (!matched) return
+    currentUser.value = { ...currentUser.value, ...matched }
+    saveState()
   }
 
   const isLoggedIn = computed(() => !!currentUser.value)

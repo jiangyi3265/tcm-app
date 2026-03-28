@@ -65,6 +65,14 @@ function getToxicityTagType(value) {
   return 'danger'
 }
 
+function formatHistoryTime(value) {
+  if (!value) return '-'
+  const normalized = typeof value === 'string' ? value.replace(' ', 'T') : value
+  const date = new Date(normalized)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return date.toLocaleString(locale.value === 'zh-CN' ? 'zh-CN' : 'en-US')
+}
+
 const newItem = ref({
   name: '',
   aliases: '',
@@ -134,10 +142,14 @@ function getStockStatus(item) {
 
 async function handleAddItem() {
   if (!newItem.value.name) return ElMessage.warning(t('inventory.fillName'))
-  await inventoryStore.addItem({ ...newItem.value, category: activeTab.value, branchId: branchesStore.currentBranchId || null })
-  ElMessage.success(t('inventory.added'))
-  showAddDialog.value = false
-  resetNewItem()
+  try {
+    await inventoryStore.addItem({ ...newItem.value, category: activeTab.value, branchId: branchesStore.currentBranchId || null })
+    ElMessage.success(t('inventory.added'))
+    showAddDialog.value = false
+    resetNewItem()
+  } catch (e) {
+    ElMessage.error(e.message || t('inventory.saveFailed'))
+  }
 }
 
 function resetNewItem() {
@@ -197,9 +209,13 @@ function startEdit(item) {
 }
 
 async function saveEdit(id) {
-  await inventoryStore.updateItem(id, editForm.value)
-  editingId.value = null
-  ElMessage.success(t('inventory.saved'))
+  try {
+    await inventoryStore.updateItem(id, editForm.value)
+    editingId.value = null
+    ElMessage.success(t('inventory.saved'))
+  } catch (e) {
+    ElMessage.error(e.message || t('inventory.saveFailed'))
+  }
 }
 
 async function handleBatchImport() {
@@ -216,12 +232,13 @@ async function handleBatchImport() {
         quantity: parseFloat(parts[3]) || 0,
         pricePerUnit: parseFloat(parts[4]) || 0,
         supplier: parts[5] || '',
+        branchId: branchesStore.currentBranchId || null,
       }
     })
     const result = await inventoryStore.batchImport(items)
     ElMessage.success(t('inventory.batchImportSuccess', {
-      created: result.created?.length || 0,
-      updated: result.updated?.length || 0,
+      created: Number(result.created || 0),
+      updated: Number(result.updated || 0),
     }))
     if (result.errors?.length) {
       ElMessage.warning(result.errors.join('\n'))
@@ -315,10 +332,10 @@ async function openAdjustmentHistory(item) {
                   <el-select v-model="editForm.nature" size="small" :placeholder="t('inventory.nature')" style="width: 100%; margin-bottom: 4px">
                     <el-option v-for="n in HERB_NATURES" :key="n" :label="localizeInventoryValue('natureOptions', n)" :value="n" />
                   </el-select>
-                  <el-select v-model="editForm.taste" size="small" multiple :placeholder="t('inventory.taste')" style="width: 100%; margin-bottom: 4px" collapse-tags>
+                  <el-select v-model="editForm.taste" size="small" multiple :placeholder="t('inventory.taste')" style="width: 100%; margin-bottom: 4px">
                     <el-option v-for="taste in HERB_TASTES" :key="taste" :label="localizeInventoryValue('tasteOptions', taste)" :value="taste" />
                   </el-select>
-                  <el-select v-model="editForm.guijing" size="small" multiple :placeholder="t('inventory.channel')" style="width: 100%" collapse-tags>
+                  <el-select v-model="editForm.guijing" size="small" multiple :placeholder="t('inventory.channel')" style="width: 100%">
                     <el-option v-for="c in HERB_CHANNELS" :key="c" :label="localizeInventoryValue('channelOptions', c)" :value="c" />
                   </el-select>
                 </div>
@@ -497,14 +514,14 @@ async function openAdjustmentHistory(item) {
           </el-col>
           <el-col :span="12">
             <el-form-item :label="t('inventory.taste')">
-              <el-select v-model="newItem.taste" multiple :placeholder="t('inventory.multiSelect')" style="width:100%" collapse-tags>
+              <el-select v-model="newItem.taste" multiple :placeholder="t('inventory.multiSelect')" style="width:100%">
                 <el-option v-for="taste in HERB_TASTES" :key="taste" :label="localizeInventoryValue('tasteOptions', taste)" :value="taste" />
               </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item :label="t('inventory.channel')">
-              <el-select v-model="newItem.guijing" multiple :placeholder="t('inventory.multiSelect')" style="width:100%" collapse-tags>
+              <el-select v-model="newItem.guijing" multiple :placeholder="t('inventory.multiSelect')" style="width:100%">
                 <el-option v-for="c in HERB_CHANNELS" :key="c" :label="localizeInventoryValue('channelOptions', c)" :value="c" />
               </el-select>
             </el-form-item>
@@ -610,7 +627,7 @@ async function openAdjustmentHistory(item) {
     <el-drawer v-model="showHistoryDialog" :title="t('inventory.adjustHistory') + (historyItemName ? ' - ' + historyItemName : '')" size="700px" direction="rtl">
       <el-table :data="adjustmentHistory" v-loading="historyLoading" stripe max-height="400">
         <el-table-column prop="createdAt" :label="t('inventory.historyTime')" width="180">
-          <template #default="{ row }">{{ row.createdAt ? new Date(row.createdAt).toLocaleString(locale === 'zh-CN' ? 'zh-CN' : 'en-US') : '-' }}</template>
+          <template #default="{ row }">{{ formatHistoryTime(row.createdAt) }}</template>
         </el-table-column>
         <el-table-column prop="targetName" :label="t('inventory.historyItem')" width="120" />
         <el-table-column prop="userName" :label="t('inventory.historyOperator')" width="100" />

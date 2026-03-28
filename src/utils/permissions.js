@@ -79,6 +79,7 @@ export function canAccess(roleOrRoles, module) {
 export function canAccessPatientRecords(roleOrRoles, userId, patient, consultations) {
   const userRoles = Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles]
   if (userRoles.includes('admin')) return true
+  if (!patient || !userId) return false
   if (patient.practitionerId === userId) return true
 
   if (userRoles.includes('pharmacist')) {
@@ -97,21 +98,17 @@ export function canAccessPatientRecords(roleOrRoles, userId, patient, consultati
     if (hasCompleted) return true
   }
 
-  const userConsultations = consultations.filter(
-    (consultation) => consultation.practitionerId === userId && !consultation.deletedAt,
-  )
-  if (userConsultations.length === 0) {
-    return true
-  }
-
-  const lastConsultDate = userConsultations.reduce((latest, consultation) => {
-    const current = new Date(consultation.date)
-    return current > latest ? current : latest
-  }, new Date(0))
-
-  const oneWeekAgo = new Date()
-  oneWeekAgo.setDate(oneWeekAgo.getDate() - 7)
-  return lastConsultDate >= oneWeekAgo
+  const now = Date.now()
+  return consultations.some((consultation) => {
+    if (consultation.patientId !== patient.id || consultation.deletedAt) return false
+    if (consultation.practitionerId === userId && consultation.status !== 'completed' && consultation.status !== 'paid') {
+      return true
+    }
+    if (!consultation.date) return true
+    const consultDate = new Date(consultation.date).getTime()
+    if (Number.isNaN(consultDate)) return true
+    return now - consultDate <= 7 * 24 * 60 * 60 * 1000
+  })
 }
 
 export function isAccessExpired(dateStr) {

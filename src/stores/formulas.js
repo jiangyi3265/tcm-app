@@ -58,6 +58,8 @@ export const useFormulasStore = defineStore('formulas', () => {
     const created = await formulasApi.create(data)
     formulas.value.push(created)
     saveState()
+    // 从后端重新刷新确保数据一致性
+    refreshFromApi().catch(() => {})
     return created
   }
 
@@ -66,6 +68,8 @@ export const useFormulasStore = defineStore('formulas', () => {
     const idx = formulas.value.findIndex((f) => f.id === id)
     if (idx !== -1) formulas.value[idx] = updated
     saveState()
+    // 从后端重新刷新确保数据一致性
+    refreshFromApi().catch(() => {})
     return updated
   }
 
@@ -89,6 +93,16 @@ export const useFormulasStore = defineStore('formulas', () => {
     saveState()
   }
 
+  async function refreshFromApi() {
+    try {
+      const list = await formulasApi.list()
+      formulas.value = list
+      saveState()
+    } catch (e) {
+      console.warn('方剂刷新失败:', e.message)
+    }
+  }
+
   const deletedFormulas = computed(() => formulas.value.filter((f) => f.deletedAt))
 
   init()
@@ -104,5 +118,6 @@ export const useFormulasStore = defineStore('formulas', () => {
     deleteFormula,
     restoreFormula,
     hardDeleteFormula,
+    refreshFromApi,
   }
 })

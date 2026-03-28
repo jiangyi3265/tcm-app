@@ -42,9 +42,7 @@ export const useInventoryStore = defineStore('inventory', () => {
 
   async function addItem(data) {
     const newItem = {
-      name: data.name,
-      category: data.category,
-      unit: data.unit,
+      ...data,
       quantity: data.quantity || 0,
       pricePerUnit: data.pricePerUnit || 0,
       supplier: data.supplier || '',
@@ -57,6 +55,8 @@ export const useInventoryStore = defineStore('inventory', () => {
     const created = await inventoryApi.create(newItem)
     items.value.push(created)
     saveState()
+    // 从后端重新刷新确保数据一致性
+    refreshFromApi().catch(() => {})
     return created
   }
 
@@ -66,6 +66,8 @@ export const useInventoryStore = defineStore('inventory', () => {
       const updated = await inventoryApi.update(id, updates)
       items.value[idx] = updated
       saveState()
+      // 从后端重新刷新确保数据一致性
+      refreshFromApi().catch(() => {})
       return updated
     }
     return null
