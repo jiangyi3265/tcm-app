@@ -23,9 +23,9 @@ export const ROLE_COLORS = {
 }
 
 export const MENU_ACCESS = {
-  admin: ['dashboard', 'patients', 'appointments', 'inventory', 'formulas', 'pharmacy', 'cashier', 'statistics', 'audit-logs', 'admin'],
-  practitioner: ['dashboard', 'patients', 'appointments', 'inventory', 'formulas', 'statistics'],
-  apprentice: ['dashboard', 'patients', 'appointments'],
+  admin: ['dashboard', 'patients', 'consultations', 'appointments', 'inventory', 'formulas', 'pharmacy', 'cashier', 'statistics', 'audit-logs', 'admin'],
+  practitioner: ['dashboard', 'patients', 'consultations', 'appointments', 'inventory', 'formulas', 'statistics'],
+  apprentice: ['dashboard', 'patients', 'consultations', 'appointments'],
   pharmacist: ['dashboard', 'pharmacy', 'inventory'],
   cashier: ['dashboard', 'cashier'],
 }

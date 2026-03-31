@@ -13,6 +13,13 @@ function genConsultId() {
 export const useConsultationsStore = defineStore('consultations', () => {
   const consultations = ref([])
 
+  function hasDispensingCompleted(consultation) {
+    if (!consultation) return false
+    if (consultation.dispensingCompleted) return true
+    return Array.isArray(consultation.prescriptions)
+      && consultation.prescriptions.some((prescription) => prescription?.dispensingCompleted)
+  }
+
   function init() {
     const stored = readStoredJson('tcm_consultations', []) || []
     // 兼容旧数据：规范化所有 diff 字段
@@ -197,7 +204,7 @@ export const useConsultationsStore = defineStore('consultations', () => {
 
   const pendingPrescriptions = computed(() =>
     consultations.value.filter(
-      (c) => c.status === 'paid' && c.prescriptionType !== 'none' && !c.dispensingCompleted && !c.deletedAt,
+      (c) => c.status === 'paid' && c.prescriptionType !== 'none' && !hasDispensingCompleted(c) && !c.deletedAt,
     ),
   )
 
@@ -218,6 +225,7 @@ export const useConsultationsStore = defineStore('consultations', () => {
   return {
     consultations, todayConsultations, pendingPrescriptions, pendingPayments,
     deletedConsultations,
+    hasDispensingCompleted,
     getConsultation, getPatientConsultations, getPractitionerConsultations, getLastConsultation,
     createConsultation, updateConsultation, completeConsultation, markAsPaid,
     deleteConsultation, restoreConsultation, physicalDeleteConsultation,

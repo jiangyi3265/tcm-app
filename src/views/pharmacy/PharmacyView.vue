@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConsultationsStore } from '../../stores/consultations'
 import { usePatientsStore } from '../../stores/patients'
@@ -15,6 +15,7 @@ const patientsStore = usePatientsStore()
 const authStore = useAuthStore()
 const inventoryStore = useInventoryStore()
 const branchesStore = useBranchesStore()
+const isMobile = inject('isMobile', ref(false))
 
 const activeTab = ref('pending')
 
@@ -33,7 +34,7 @@ const pendingPrescriptions = computed(() => {
 const completedPrescriptions = computed(() => {
   const branchId = branchesStore.currentBranchId
   return consultationsStore.consultations
-    .filter((c) => c.dispensingCompleted && c.prescriptionType !== 'none' && (!branchId || c.branchId === branchId || !c.branchId))
+    .filter((c) => consultationsStore.hasDispensingCompleted(c) && c.prescriptionType !== 'none' && (!branchId || c.branchId === branchId || !c.branchId))
     .map((c) => ({
       ...c,
       patient: patientsStore.getPatient(c.patientId),
@@ -44,6 +45,7 @@ const completedPrescriptions = computed(() => {
 
 const selectedConsult = ref(null)
 const showDetailDialog = ref(false)
+const drawerSize = computed(() => (isMobile.value ? '100%' : '520px'))
 
 function viewDetail(consult) {
   selectedConsult.value = consult
@@ -53,7 +55,7 @@ function viewDetail(consult) {
 async function markDispensed(consult) {
   await ElMessageBox.confirm(t('pharmacy.confirmDispenseMsg', { name: consult.patient?.name }), t('pharmacy.confirmDispenseTitle'), { type: 'success' })
   try {
-    // Bug 8: 库存已在处方保存时扣减，发药时 skipDeduct=true（默认值），不再重复扣减
+    // 库存在收款时已预扣，发药台只负责完成发药状态流转。
     await consultationsStore.markDispensingComplete(consult.id)
     showDetailDialog.value = false
     ElMessage.success(t('pharmacy.dispensed'))
@@ -169,28 +171,30 @@ function getRequiredUnit(item, prescriptionType) {
       </el-tab-pane>
 
       <el-tab-pane :label="t('pharmacy.completedTab')" name="completed">
-        <el-table :data="completedPrescriptions" stripe>
-          <el-table-column :label="t('pharmacy.patient')" min-width="100">
-            <template #default="{ row }">{{ row.patient?.name }}</template>
-          </el-table-column>
-          <el-table-column :label="t('pharmacy.date')" width="120">
-            <template #default="{ row }">{{ formatDate(row.date) }}</template>
-          </el-table-column>
-          <el-table-column :label="t('pharmacy.formula')" min-width="120">
-            <template #default="{ row }">{{ row.formulaName || t('common.customFormula') }}</template>
-          </el-table-column>
-          <el-table-column :label="t('pharmacy.type')" width="80">
-            <template #default="{ row }">{{ t('pharmacy.prescriptionType.' + (row.prescriptionType || 'raw_herbs')) }}</template>
-          </el-table-column>
-          <el-table-column :label="t('pharmacy.practitioner')" min-width="80">
-            <template #default="{ row }">{{ row.practitioner?.name }}</template>
-          </el-table-column>
-        </el-table>
+        <div class="wide-table-wrap">
+          <el-table :data="completedPrescriptions" stripe>
+            <el-table-column :label="t('pharmacy.patient')" min-width="100">
+              <template #default="{ row }">{{ row.patient?.name }}</template>
+            </el-table-column>
+            <el-table-column :label="t('pharmacy.date')" width="120">
+              <template #default="{ row }">{{ formatDate(row.date) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('pharmacy.formula')" min-width="120">
+              <template #default="{ row }">{{ row.formulaName || t('common.customFormula') }}</template>
+            </el-table-column>
+            <el-table-column :label="t('pharmacy.type')" width="80">
+              <template #default="{ row }">{{ t('pharmacy.prescriptionType.' + (row.prescriptionType || 'raw_herbs')) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('pharmacy.practitioner')" min-width="80">
+              <template #default="{ row }">{{ row.practitioner?.name }}</template>
+            </el-table-column>
+          </el-table>
+        </div>
       </el-tab-pane>
     </el-tabs>
 
     <!-- 处方详情 -->
-    <el-drawer v-model="showDetailDialog" :title="t('pharmacy.prescriptionDetail')" size="520px" direction="rtl">
+    <el-drawer v-model="showDetailDialog" :title="t('pharmacy.prescriptionDetail')" :size="drawerSize" direction="rtl">
       <div v-if="selectedConsult" class="rx-detail">
         <div class="rx-detail-header">
           <div>
@@ -204,41 +208,43 @@ function getRequiredUnit(item, prescriptionType) {
           <el-tag type="success">{{ selectedConsult.formulaName }}</el-tag>
         </div>
 
-        <el-table :data="getConsultPrescriptionItems(selectedConsult)" size="small" style="margin-top: 12px">
-          <el-table-column prop="name" :label="t('pharmacy.herb')" />
-          <el-table-column :label="t('pharmacy.dosageCol')" width="140">
-            <template #default="{ row }">
-              <span>{{ getRequiredQuantity(row, selectedConsult) }} {{ getRequiredUnit(row, selectedConsult.prescriptionType) }}</span>
-              <div
-                v-if="row.packetsPerDose != null && (selectedConsult.prescriptions?.[0]?.quantity || 1) > 1"
-                style="color:#888; font-size:12px"
-              >
-                {{ row.packetsPerDose }}{{ getRequiredUnit(row, selectedConsult.prescriptionType) }} / {{ t('pharmacy.doses') }}
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('pharmacy.stockStatus')" width="180">
-            <template #default="{ row }">
-              <span>
-                <template v-if="matchInventory(row, selectedConsult.prescriptionType)">
-                  <el-tag
-                    :type="Number(matchInventory(row, selectedConsult.prescriptionType).quantity || 0) >= getRequiredQuantity(row, selectedConsult) ? 'success' : 'danger'"
-                    size="small"
-                  >
-                    {{ matchInventory(row, selectedConsult.prescriptionType).quantity }}{{ getRequiredUnit(row, selectedConsult.prescriptionType) }}
-                  </el-tag>
-                  <div style="font-size:11px; color:#888; margin-top:2px">
-                    {{ matchInventory(row, selectedConsult.prescriptionType).supplier ? matchInventory(row, selectedConsult.prescriptionType).supplier + ' · ' : '' }}{{ { raw_herbs: t('pharmacy.prescriptionType.raw_herbs'), powder: t('pharmacy.prescriptionType.powder'), pills: t('pharmacy.prescriptionType.pills') }[matchInventory(row, selectedConsult.prescriptionType).category] || '' }}
-                  </div>
-                  <div v-if="(selectedConsult.prescriptions?.[0]?.quantity || 1) > 1 || row.convertedQty != null" style="font-size:11px; color:#888">
-                    {{ t('pharmacy.totalNeed') }}{{ getRequiredQuantity(row, selectedConsult) }}{{ getRequiredUnit(row, selectedConsult.prescriptionType) }}
-                  </div>
-                </template>
-                <el-tag v-else type="info" size="small">{{ t('pharmacy.noStock') }}</el-tag>
-              </span>
-            </template>
-          </el-table-column>
-        </el-table>
+        <div class="wide-table-wrap">
+          <el-table :data="getConsultPrescriptionItems(selectedConsult)" size="small" style="margin-top: 12px">
+            <el-table-column prop="name" :label="t('pharmacy.herb')" />
+            <el-table-column :label="t('pharmacy.dosageCol')" width="140">
+              <template #default="{ row }">
+                <span>{{ getRequiredQuantity(row, selectedConsult) }} {{ getRequiredUnit(row, selectedConsult.prescriptionType) }}</span>
+                <div
+                  v-if="row.packetsPerDose != null && (selectedConsult.prescriptions?.[0]?.quantity || 1) > 1"
+                  style="color:#888; font-size:12px"
+                >
+                  {{ row.packetsPerDose }}{{ getRequiredUnit(row, selectedConsult.prescriptionType) }} / {{ t('pharmacy.doses') }}
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('pharmacy.stockStatus')" width="180">
+              <template #default="{ row }">
+                <span>
+                  <template v-if="matchInventory(row, selectedConsult.prescriptionType)">
+                    <el-tag
+                      :type="Number(matchInventory(row, selectedConsult.prescriptionType).quantity || 0) >= getRequiredQuantity(row, selectedConsult) ? 'success' : 'danger'"
+                      size="small"
+                    >
+                      {{ matchInventory(row, selectedConsult.prescriptionType).quantity }}{{ getRequiredUnit(row, selectedConsult.prescriptionType) }}
+                    </el-tag>
+                    <div style="font-size:11px; color:#888; margin-top:2px">
+                      {{ matchInventory(row, selectedConsult.prescriptionType).supplier ? matchInventory(row, selectedConsult.prescriptionType).supplier + ' · ' : '' }}{{ { raw_herbs: t('pharmacy.prescriptionType.raw_herbs'), powder: t('pharmacy.prescriptionType.powder'), pills: t('pharmacy.prescriptionType.pills') }[matchInventory(row, selectedConsult.prescriptionType).category] || '' }}
+                    </div>
+                    <div v-if="(selectedConsult.prescriptions?.[0]?.quantity || 1) > 1 || row.convertedQty != null" style="font-size:11px; color:#888">
+                      {{ t('pharmacy.totalNeed') }}{{ getRequiredQuantity(row, selectedConsult) }}{{ getRequiredUnit(row, selectedConsult.prescriptionType) }}
+                    </div>
+                  </template>
+                  <el-tag v-else type="info" size="small">{{ t('pharmacy.noStock') }}</el-tag>
+                </span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
 
         <div style="margin-top: 12px; font-size: 13px; color: #666">
           <strong>{{ t('pharmacy.diagnosis') }}</strong>{{ selectedConsult.differentiation }}
@@ -288,6 +294,7 @@ function getRequiredUnit(item, prescriptionType) {
 .rx-date { font-size: 12px; color: #888; }
 .rx-formula { margin-bottom: 6px; }
 .rx-formula-name { font-weight: 600; color: #2d6a4f; }
+.wide-table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 .rx-herbs {
   font-size: 13px;
@@ -309,4 +316,25 @@ function getRequiredUnit(item, prescriptionType) {
 }
 
 .rx-detail-formula { margin-bottom: 6px; }
+
+@media (max-width: 767px) {
+  .pharmacy-header,
+  .rx-card-header,
+  .rx-detail-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .rx-patient-info {
+    width: 100%;
+  }
+
+  .rx-actions {
+    text-align: left;
+  }
+
+  .wide-table-wrap :deep(.el-table) {
+    min-width: 560px;
+  }
+}
 </style>

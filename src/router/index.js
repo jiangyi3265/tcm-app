@@ -43,6 +43,12 @@ const router = createRouter({
           meta: { roles: ['admin', 'practitioner', 'apprentice'] },
         },
         {
+          path: 'consultations',
+          name: 'consultation-list',
+          component: () => import('../views/consultations/ConsultationListView.vue'),
+          meta: { roles: ['admin', 'practitioner', 'apprentice'] },
+        },
+        {
           path: 'patients/:id',
           name: 'patient-detail',
           component: () => import('../views/patients/PatientDetailView.vue'),

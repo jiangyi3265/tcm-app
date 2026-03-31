@@ -23,7 +23,8 @@ const user = computed(() => authStore.currentUser)
 
 const menuItems = [
   { path: '/dashboard', icon: 'Odometer', labelKey: 'nav.dashboard', module: 'dashboard' },
-  { path: '/patients', icon: 'User', labelKey: 'nav.patients', module: 'patients' },
+  { path: '/patients', icon: 'User', labelKey: 'nav.patients', module: 'patients', inactiveNames: ['consultation-new', 'consultation-detail'] },
+  { path: '/consultations', icon: 'Memo', labelKey: 'nav.consultations', module: 'consultations', activeNames: ['consultation-list', 'consultation-new', 'consultation-detail'] },
   { path: '/appointments', icon: 'Calendar', labelKey: 'nav.appointments', module: 'appointments' },
   { path: '/inventory', icon: 'Box', labelKey: 'nav.inventory', module: 'inventory' },
   { path: '/formulas', icon: 'Collection', labelKey: 'nav.formulas', module: 'formulas' },
@@ -38,11 +39,16 @@ const visibleMenus = computed(() =>
   menuItems.filter((item) => canAccess(roles.value, item.module)),
 )
 
-const activeMenu = computed(() => route.path)
-
 function navigate(path) {
   router.push(path)
   if (props.mobile) toggleSidebar()
+}
+
+function isActive(item) {
+  const currentName = route.name ? String(route.name) : ''
+  if (Array.isArray(item.inactiveNames) && item.inactiveNames.includes(currentName)) return false
+  if (Array.isArray(item.activeNames) && item.activeNames.includes(currentName)) return true
+  return route.path.startsWith(item.path)
 }
 </script>
 
@@ -58,7 +64,7 @@ function navigate(path) {
         v-for="item in visibleMenus"
         :key="item.path"
         class="nav-item"
-        :class="{ active: activeMenu.startsWith(item.path) }"
+        :class="{ active: isActive(item) }"
         @click="navigate(item.path)"
       >
         <el-icon class="nav-icon"><component :is="item.icon" /></el-icon>

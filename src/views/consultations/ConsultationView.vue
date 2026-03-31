@@ -1,7 +1,7 @@
 ﻿<script setup>
-import { ref, computed, onMounted, reactive } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, reactive, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useConsultationsStore } from '../../stores/consultations'
 import { usePatientsStore } from '../../stores/patients'
 import { useAuthStore } from '../../stores/auth'
@@ -19,6 +19,7 @@ import { printConsultationReport, printPrescription } from '../../utils/pdfExpor
 import { useEmailSimulator } from '../../utils/emailSimulator'
 import { filesApi, consultationsApi } from '../../utils/api'
 import { calculatePrescription, recalcWithSupplier } from '../../utils/prescriptionCalc'
+import { rehydrateCopiedPrescriptions } from '../../utils/consultationCopy'
 import { localizeMixedText } from '../../utils/localizeMixedText'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ConsultationComparePanel from './ConsultationComparePanel.vue'
@@ -39,6 +40,7 @@ const appointmentsStore = useAppointmentsStore()
 const formulasStore = useFormulasStore()
 const acupointsStore = useAcupointsStore()
 const herbDictStore = useHerbDictStore()
+const isMobile = inject('isMobile', ref(false))
 
 const patientId = route.params.patientId
 const consultId = route.params.id
@@ -135,6 +137,105 @@ const consultation = ref(null)
 const activeTab = ref('summary')
 const saving = ref(false)
 const showCompare = ref(false)
+const lastSavedSnapshot = ref('')
+const unsavedTrackingReady = ref(false)
+const rxEditorSnapshot = ref('')
+const bypassUnsavedPrompt = ref(false)
+
+function cloneJson(value, fallback = null) {
+  if (value === undefined) return fallback
+  return JSON.parse(JSON.stringify(value))
+}
+
+function buildFormFromConsultation(record = {}) {
+  const nextForm = {
+    ...defaultForm(),
+    ...record,
+    diff: normalizeDiff(record.diff || {}),
+    acupuncture: [...(record.acupuncture || [])],
+    prescriptions: (record.prescriptions || []).map((rx) => ({
+      ...rx,
+      items: (rx.items || []).map((item) => ({ ...item })),
+    })),
+    herbals: (record.herbals || []).map((item) => ({ ...item })),
+    services: [...(record.services || [])],
+    documents: [...(record.documents || [])],
+    modifications: [...(record.modifications || [])],
+  }
+  nextForm.servicePriceList = normalizeServicePriceListSelection(nextForm.servicePriceList)
+  if (nextForm.diff?.tongueImage && !nextForm.diff?.tongueImageResource) {
+    nextForm.diff.tongueImageResource = nextForm.diff.tongueImage
+  }
+  return nextForm
+}
+
+function applySavedConsultation(record) {
+  consultation.value = record
+  form.value = buildFormFromConsultation(record)
+}
+
+function buildPersistPayload(source = form.value) {
+  const nextDiff = cloneJson(source.diff || {}, {})
+  if (nextDiff.tongueImageResource) {
+    nextDiff.tongueImage = nextDiff.tongueImageResource
+  }
+  return cloneJson({
+    ...source,
+    diff: nextDiff,
+    summary: source.chiefComplaintDescription || source.summary,
+    totalWithoutTax: totalWithoutTax.value,
+    taxAmount: taxAmount.value,
+    totalAmount: totalAmount.value,
+    branchId: source.branchId || branchesStore.currentBranchId || null,
+  }, {})
+}
+
+function buildFormSnapshot() {
+  return JSON.stringify(buildPersistPayload())
+}
+
+function buildRxDraftSnapshot() {
+  return JSON.stringify(cloneJson({
+    ...rxForm.value,
+    items: (rxForm.value.items || []).map((item) => ({ ...item })),
+  }, {}))
+}
+
+function syncSavedSnapshot() {
+  lastSavedSnapshot.value = buildFormSnapshot()
+  unsavedTrackingReady.value = true
+}
+
+const hasUnsavedConsultationChanges = computed(() =>
+  unsavedTrackingReady.value && buildFormSnapshot() !== lastSavedSnapshot.value,
+)
+
+const hasUnsavedRxDialogChanges = computed(() =>
+  showRxDialog.value && buildRxDraftSnapshot() !== rxEditorSnapshot.value,
+)
+
+const hasPendingUnsavedChanges = computed(() =>
+  hasUnsavedConsultationChanges.value || hasUnsavedRxDialogChanges.value,
+)
+
+function syncRxBaseline() {
+  rxEditorSnapshot.value = buildRxDraftSnapshot()
+}
+
+function resetRxEditorState() {
+  rxEditorSnapshot.value = ''
+  editingRxIdx.value = -1
+  formulaSearch.value = ''
+}
+
+async function navigateWithoutUnsavedPrompt(navigate) {
+  bypassUnsavedPrompt.value = true
+  try {
+    return await navigate()
+  } finally {
+    bypassUnsavedPrompt.value = false
+  }
+}
 
 function localizeMixedLabel(text = '') {
   return localizeMixedText(text, locale.value)
@@ -268,12 +369,13 @@ async function saveHistoryMed() {
 }
 
 function onCopySection(data) {
-  if (data.diff) {
-    form.value.diff = { ...form.value.diff, ...data.diff }
-    const { diff, ...rest } = data
-    Object.assign(form.value, rest)
-  } else {
-    Object.assign(form.value, data)
+  const { diff, prescriptions, ...rest } = data || {}
+  if (diff) {
+    form.value.diff = { ...form.value.diff, ...diff }
+  }
+  Object.assign(form.value, rest)
+  if (Array.isArray(prescriptions)) {
+    applyCopiedPrescriptions(prescriptions)
   }
   form.value.servicePriceList = normalizeServicePriceListSelection(form.value.servicePriceList)
   ElMessage.success(t('consultation.copiedToRecord'))
@@ -388,22 +490,7 @@ onMounted(() => {
   if (!isNew && consultId) {
     const existing = consultStore.getConsultation(consultId)
     if (existing) {
-      consultation.value = existing
-      form.value = {
-        ...defaultForm(),
-        ...existing,
-        diff: normalizeDiff(existing.diff || {}),
-        acupuncture: [...(existing.acupuncture || [])],
-        prescriptions: (existing.prescriptions || []).map((rx) => ({
-          ...rx,
-          items: [...(rx.items || [])],
-        })),
-        services: [...(existing.services || [])],
-      }
-      form.value.servicePriceList = normalizeServicePriceListSelection(form.value.servicePriceList)
-      if (form.value.diff?.tongueImage && !form.value.diff?.tongueImageResource) {
-        form.value.diff.tongueImageResource = form.value.diff.tongueImage
-      }
+      applySavedConsultation(existing)
     }
   } else if (isNew) {
     const copyRaw = sessionStorage.getItem('tcm_copy_consult')
@@ -414,10 +501,7 @@ onMounted(() => {
         if (copyData.diff) form.value.diff = normalizeDiff(copyData.diff)
         if (copyData.acupuncture) form.value.acupuncture = [...copyData.acupuncture]
         if (copyData.prescriptions) {
-          form.value.prescriptions = copyData.prescriptions.map((rx) => ({
-            ...rx,
-            items: [...(rx.items || [])],
-          }))
+          applyCopiedPrescriptions(copyData.prescriptions)
         }
         if (copyData.services) form.value.services = [...copyData.services]
         form.value.servicePriceList = normalizeServicePriceListSelection(form.value.servicePriceList)
@@ -450,6 +534,13 @@ onMounted(() => {
   }
 
   refreshTongueImagePreview()
+  applyHistorySnapshotToForm()
+  syncSavedSnapshot()
+  window.addEventListener('beforeunload', handleBeforeUnload)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
 })
 const showRxDialog = ref(false)
 const editingRxIdx = ref(-1)
@@ -483,6 +574,7 @@ function openNewRx() {
     items: [],
     comments: '',
   }
+  syncRxBaseline()
   showRxDialog.value = true
 }
 
@@ -493,6 +585,7 @@ function openEditRx(idx) {
     ...oldRx,
     items: (oldRx.items || []).map(i => ({ ...i }))
   }
+  syncRxBaseline()
   showRxDialog.value = true
 }
 
@@ -505,10 +598,129 @@ function getPrescriptionTypeLabel(type) {
   return labels[type] || type || '-'
 }
 
+function formatSupplierDisplay(supplierName, gramsPerPacket) {
+  const supplier = String(supplierName || '').trim()
+  if (!supplier) return '-'
+
+  const grams = Number(gramsPerPacket)
+  if (Number.isFinite(grams) && grams > 0) {
+    return `${supplier}(${grams}g)`
+  }
+  return supplier
+}
+
 function formatSupplierOption(candidate) {
-  const supplier = candidate?.supplier || 'Supplier'
-  const unit = candidate?.category === 'powder' ? 'bag' : (candidate?.unit || 'g')
-  return `${supplier} (${candidate?.quantity ?? 0}${unit})`
+  return formatSupplierDisplay(candidate?.supplier || 'Supplier', candidate?.gramsPerPacket)
+}
+
+function hasDispensingCompleted(source = form.value) {
+  if (!source) return false
+  if (source.dispensingCompleted) return true
+  return Array.isArray(source.prescriptions)
+    && source.prescriptions.some((prescription) => prescription?.dispensingCompleted)
+}
+
+function resetDispensingState(target = form.value) {
+  if (!target) return
+  target.dispensingCompleted = false
+  target.dispensingCompletedAt = null
+  target.dispensedBy = null
+  target.inventoryDeductedAt = null
+  target.inventoryDeductedBy = null
+
+  if (Object.prototype.hasOwnProperty.call(target, 'inventoryDeductedAtPayment')) {
+    target.inventoryDeductedAtPayment = false
+  }
+  if (Object.prototype.hasOwnProperty.call(target, 'inventoryDeductedAtSave')) {
+    target.inventoryDeductedAtSave = false
+  }
+  if (Array.isArray(target.prescriptions)) {
+    target.prescriptions.forEach((prescription) => {
+      prescription.dispensingCompleted = false
+    })
+  }
+}
+
+function isPrescriptionDispensed(row) {
+  return hasDispensingCompleted(form.value) || Boolean(row?.dispensingCompleted)
+}
+
+function syncFormFromPrimaryPrescription() {
+  const first = form.value.prescriptions[0]
+  if (first) {
+    form.value.herbals = (first.items || []).map(i => ({
+      name: i.name,
+      dosage: i.dosage,
+      unit: i.unit,
+      herbDictId: i.herbDictId || null,
+      inventoryId: i.inventoryId || null,
+      convertedQty: i.convertedQty ?? null,
+      convertedUnit: i.convertedUnit || '',
+      packetsPerDose: i.packetsPerDose ?? null,
+      supplierId: i.supplierId || null,
+      supplierName: i.supplierName || '',
+    }))
+    form.value.formulaName = first.formulaName
+    form.value.prescriptionType = first.prescriptionType || 'raw_herbs'
+    return
+  }
+  form.value.herbals = []
+  form.value.formulaName = ''
+  form.value.prescriptionType = 'none'
+}
+
+function applyCopiedPrescriptions(sourcePrescriptions = []) {
+  form.value.prescriptions = rehydrateCopiedPrescriptions(sourcePrescriptions, inventoryStore.items)
+  syncFormFromPrimaryPrescription()
+  resetDispensingState(form.value)
+}
+
+const rxDrawerSize = computed(() => (isMobile.value ? '100%' : '640px'))
+const sideDrawerSize = computed(() => (isMobile.value ? '100%' : '520px'))
+
+async function persistConsultationDraft({ silent = false, syncRoute = true } = {}) {
+  saving.value = true
+  try {
+    applyHistorySnapshotToForm()
+    if (form.value.status === 'paid' && form.value.prescriptionType !== 'none' && form.value.prescriptions.length > 0) {
+      resetDispensingState(form.value)
+    }
+    const data = buildPersistPayload()
+    const targetId = currentConsultationId.value
+
+    if (!targetId) {
+      const created = await consultStore.createConsultation(data)
+      applySavedConsultation(created)
+      refreshTongueImagePreview()
+      syncSavedSnapshot()
+      if (syncRoute) {
+        await navigateWithoutUnsavedPrompt(() => router.replace(`/patients/${patientId}/consultations/${created.id}`))
+      }
+      if (!silent) {
+        ElMessage.success(t('consultation.draftSaved'))
+      }
+      return created
+    }
+
+    const updated = await consultStore.updateConsultation(targetId, data)
+    if (!updated) {
+      throw new Error(t('common.operationFailed'))
+    }
+    applySavedConsultation(updated)
+    refreshTongueImagePreview()
+    syncSavedSnapshot()
+    if (!silent) {
+      ElMessage.success(t('consultation.saved'))
+    }
+    return updated
+  } catch (e) {
+    if (!silent) {
+      ElMessage.error(e.message || t('common.operationFailed'))
+    }
+    throw e
+  } finally {
+    saving.value = false
+  }
 }
 
 async function saveRx() {
@@ -523,87 +735,38 @@ async function saveRx() {
     dispensingCompleted: false,
   }
 
-  if (oldRx && oldRx.prescriptionType && oldRx.prescriptionType !== 'none') {
-    const oldHerbals = (oldRx.items || []).filter(i => i.inventoryId && i.convertedQty > 0)
-    if (oldHerbals.length > 0) {
-      try {
-        await inventoryStore.restoreFromPrescription(
-          oldHerbals.map(i => ({ inventoryId: i.inventoryId, supplierId: i.supplierId, quantity: i.convertedQty, name: i.name })),
-          oldRx.prescriptionType
-        )
-      } catch (e) {
-        console.warn('Failed to restore previous inventory before updating prescription', e)
-      }
-    }
-  }
-
   if (isEditing) {
     form.value.prescriptions.splice(editingRxIdx.value, 1, rx)
   } else {
     form.value.prescriptions.push(rx)
   }
-  showRxDialog.value = false
-  if (form.value.prescriptions.length > 0) {
-    const first = form.value.prescriptions[0]
-    form.value.herbals = first.items.map(i => ({
-      name: i.name,
-      dosage: i.dosage,
-      unit: i.unit,
-      herbDictId: i.herbDictId || null,
-      inventoryId: i.inventoryId || null,
-      convertedQty: i.convertedQty ?? null,
-      convertedUnit: i.convertedUnit || '',
-      packetsPerDose: i.packetsPerDose ?? null,
-      supplierId: i.supplierId || null,
-      supplierName: i.supplierName || '',
-    }))
-    form.value.formulaName = first.formulaName
-    form.value.prescriptionType = first.prescriptionType || 'raw_herbs'
+  if (form.value.status === 'paid' || hasDispensingCompleted(form.value) || oldRx?.dispensingCompleted) {
+    resetDispensingState(form.value)
   }
+  syncFormFromPrimaryPrescription()
 
-  // Update inventory after saving the prescription
   if (rx.prescriptionType && rx.prescriptionType !== 'none') {
-    const deductHerbals = rx.items.filter(i => i.inventoryId && i.convertedQty > 0 && !i.outOfStock)
-    if (deductHerbals.length > 0) {
-      try {
-        await inventoryStore.deductFromPrescription(
-          deductHerbals.map(i => ({ inventoryId: i.inventoryId, supplierId: i.supplierId, quantity: i.convertedQty, name: i.name })),
-          rx.prescriptionType
-        )
-        ElMessage.success(t('consultation.inventoryDeducted'))
-      } catch (e) {
-        console.warn('Failed to deduct inventory after saving prescription', e)
-        ElMessage.warning(t('consultation.inventoryDeductFailed'))
-      }
-    }
     const insufficientItems = rx.items.filter(i => i.stockSufficient === false)
     if (insufficientItems.length > 0) {
       const names = insufficientItems.map(i => i.name).join(', ')
       ElMessage.warning(t('consultation.stockInsufficient', { names }))
     }
   }
+
+  try {
+    await persistConsultationDraft({ silent: true })
+    showRxDialog.value = false
+  } catch (e) {
+    ElMessage.error(e.message || t('common.operationFailed'))
+  }
 }
 
 async function deleteRx(idx) {
-  const rx = form.value.prescriptions[idx]
-
-  if (rx?.prescriptionType && rx.prescriptionType !== 'none') {
-    const herbals = (rx.items || []).filter(i => i.inventoryId && i.convertedQty > 0)
-    if (herbals.length > 0) {
-      try {
-        await inventoryStore.restoreFromPrescription(
-          herbals.map(i => ({ inventoryId: i.inventoryId, supplierId: i.supplierId, quantity: i.convertedQty, name: i.name })),
-          rx.prescriptionType
-        )
-        ElMessage.info(t('consultation.stockRestored'))
-      } catch (e) {
-        console.warn('Failed to restore inventory after deleting prescription', e)
-        ElMessage.warning(t('consultation.stockRestoreFailed'))
-      }
-    }
-  }
-
   form.value.prescriptions.splice(idx, 1)
+  if (form.value.status === 'paid' || hasDispensingCompleted(form.value)) {
+    resetDispensingState(form.value)
+  }
+  syncFormFromPrimaryPrescription()
 }
 
 function handlePrintRx(idx) {
@@ -832,38 +995,14 @@ const totalAmount = computed(() => totalWithoutTax.value + taxAmount.value)
 
 // ============ Save / Finalize ============
 async function saveDraft() {
-  saving.value = true
-  try {
-    applyHistorySnapshotToForm()
-    const data = {
-      ...form.value,
-      summary: form.value.chiefComplaintDescription || form.value.summary,
-      totalWithoutTax: totalWithoutTax.value,
-      taxAmount: taxAmount.value,
-      totalAmount: totalAmount.value,
-      branchId: form.value.branchId || branchesStore.currentBranchId || null,
-    }
-    if (isNew && !consultation.value?.id) {
-      const created = await consultStore.createConsultation(data)
-      router.replace(`/patients/${patientId}/consultations/${created.id}`)
-      consultation.value = created
-      ElMessage.success(t('consultation.draftSaved'))
-    } else {
-      await consultStore.updateConsultation(consultId || consultation.value?.id, data)
-      ElMessage.success(t('consultation.saved'))
-    }
-  } catch (e) {
-    ElMessage.error(e.message || t('common.operationFailed'))
-  } finally {
-    saving.value = false
-  }
+  await persistConsultationDraft()
 }
 
 async function completeConsultation() {
   if (!form.value.chiefComplaint) return ElMessage.warning(t('consultation.fillChiefComplaint'))
   try {
-    await saveDraft()
-    const id = consultId || consultation.value?.id
+    const saved = await persistConsultationDraft({ silent: true })
+    const id = saved?.id || currentConsultationId.value
     if (id) {
       await consultStore.completeConsultation(id)
       if (form.value.appointmentId) {
@@ -875,7 +1014,7 @@ async function completeConsultation() {
       }
       ElMessage.success(t('consultation.completed'))
       consultationsApi.generateReport(id).catch(() => {})
-      router.push(`/patients/${patientId}`)
+      await navigateWithoutUnsavedPrompt(() => router.push(`/patients/${patientId}`))
     }
   } catch (e) {
     ElMessage.error(e.message)
@@ -885,11 +1024,17 @@ async function completeConsultation() {
 async function markPaid() {
   try {
     await ElMessageBox.confirm(t('consultation.confirmPayLock'), t('consultation.confirmPayTitle'), { type: 'warning' })
-    const id = consultId || consultation.value?.id
+    const saved = await persistConsultationDraft({ silent: true })
+    const id = saved?.id || currentConsultationId.value
     if (id) {
-      await consultStore.markAsPaid(id, { paymentMethod: 'manual' })
+      const updated = await consultStore.markAsPaid(id, { paymentMethod: 'manual' })
+      if (updated) {
+        applySavedConsultation(updated)
+        syncSavedSnapshot()
+      }
+      await inventoryStore.refreshFromApi()
       ElMessage.success(t('consultation.paidAndLocked'))
-      router.push(`/patients/${patientId}`)
+      await navigateWithoutUnsavedPrompt(() => router.push(`/patients/${patientId}`))
     }
   } catch (e) {
     if (e !== 'cancel') ElMessage.error(e.message)
@@ -902,13 +1047,68 @@ async function deleteConsultation() {
     const id = consultId || consultation.value?.id
     if (id) {
       const ok = await consultStore.deleteConsultation(id)
-      if (ok) { ElMessage.success(t('consultation.deleted')); router.push(`/patients/${patientId}`) }
+      if (ok) { ElMessage.success(t('consultation.deleted')); await navigateWithoutUnsavedPrompt(() => router.push(`/patients/${patientId}`)) }
       else ElMessage.error(t('consultation.cannotDeletePaid'))
     }
   } catch (e) {
     if (e !== 'cancel') ElMessage.error(e.message)
   }
 }
+
+function getUnsavedLeaveMessageKey() {
+  if (hasUnsavedRxDialogChanges.value && !hasUnsavedConsultationChanges.value) {
+    return 'consultation.unsavedPrescriptionLeaveMessage'
+  }
+  return 'consultation.unsavedLeaveMessage'
+}
+
+async function confirmUnsavedChanges(messageKey = getUnsavedLeaveMessageKey()) {
+  try {
+    await ElMessageBox.confirm(
+      t(messageKey),
+      t('consultation.unsavedLeaveTitle'),
+      {
+        type: 'warning',
+        confirmButtonText: t('common.confirm'),
+        cancelButtonText: t('common.cancel'),
+      },
+    )
+    return true
+  } catch (e) {
+    return false
+  }
+}
+
+async function requestCloseRxDialog() {
+  if (hasUnsavedRxDialogChanges.value) {
+    const confirmed = await confirmUnsavedChanges('consultation.unsavedPrescriptionLeaveMessage')
+    if (!confirmed) return
+  }
+  showRxDialog.value = false
+}
+
+async function handleRxDrawerBeforeClose(done) {
+  if (hasUnsavedRxDialogChanges.value) {
+    const confirmed = await confirmUnsavedChanges('consultation.unsavedPrescriptionLeaveMessage')
+    if (!confirmed) return
+  }
+  done()
+}
+
+function handleRxDialogClosed() {
+  resetRxEditorState()
+}
+
+function handleBeforeUnload(event) {
+  if (bypassUnsavedPrompt.value || !hasPendingUnsavedChanges.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+onBeforeRouteLeave(async () => {
+  if (bypassUnsavedPrompt.value || !hasPendingUnsavedChanges.value) return true
+  return confirmUnsavedChanges()
+})
 
 
 async function handleExportPdf() {
@@ -1664,49 +1864,51 @@ function handleSendReport() {
               </el-button>
             </div>
           </template>
-          <el-table :data="form.prescriptions" size="small" empty-text="We didn't find anything to show here">
-            <el-table-column label="Name" min-width="200">
-              <template #default="{ row }">
-                <span class="rx-name-cell">{{ row.formulaName || t('common.customFormula') }} - {{ row.items?.length || 0 }}{{ t('consultation.herbCount') }}</span>
-                <el-tag v-if="row.prescriptionType && row.prescriptionType !== 'none'" size="small" :type="row.prescriptionType === 'powder' ? 'warning' : row.prescriptionType === 'pills' ? '' : 'success'" style="margin-left:4px">
-                  {{ getPrescriptionTypeLabel(row.prescriptionType) }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="Direction" width="140">
-              <template #default="{ row }">{{ row.direction }}</template>
-            </el-table-column>
-            <el-table-column label="Where To" width="120">
-              <template #default="{ row }">{{ row.whereToGet?.split(' ')[0] }}</template>
-            </el-table-column>
-            <el-table-column label="Single Prescription" width="130" align="right">
-              <template #default="{ row }">
-                <span style="font-weight:600">{{ cs }}{{ (row.subtotal || 0).toFixed(2) }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="Quantity" width="80">
-              <template #default="{ row }">{{ row.quantity }}</template>
-            </el-table-column>
-            <el-table-column label="Dispensed" width="90">
-              <template #default="{ row }">
-                <el-tag :type="row.dispensingCompleted ? 'success' : 'warning'" size="small">
-                  {{ row.dispensingCompleted ? t('consultation.dispensed') : t('consultation.pendingDispense') }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column v-if="!isReadOnly" width="160">
-              <template #default="{ row, $index }">
-                <el-button size="small" text type="success" @click="handlePrintRx($index)"><el-icon><Printer /></el-icon> Print</el-button>
-                <el-button size="small" text type="primary" @click="openEditRx($index)">{{ t('common.edit') }}</el-button>
-                <el-button size="small" text type="danger" @click="deleteRx($index)">{{ t('common.delete') }}</el-button>
-              </template>
-            </el-table-column>
-            <el-table-column v-else width="80">
-              <template #default="{ row, $index }">
-                <el-button size="small" text type="success" @click="handlePrintRx($index)"><el-icon><Printer /></el-icon> Print</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
+          <div class="wide-table-wrap">
+            <el-table :data="form.prescriptions" size="small" empty-text="We didn't find anything to show here">
+              <el-table-column label="Name" min-width="200">
+                <template #default="{ row }">
+                  <span class="rx-name-cell">{{ row.formulaName || t('common.customFormula') }} - {{ row.items?.length || 0 }}{{ t('consultation.herbCount') }}</span>
+                  <el-tag v-if="row.prescriptionType && row.prescriptionType !== 'none'" size="small" :type="row.prescriptionType === 'powder' ? 'warning' : row.prescriptionType === 'pills' ? '' : 'success'" style="margin-left:4px">
+                    {{ getPrescriptionTypeLabel(row.prescriptionType) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="Direction" width="140">
+                <template #default="{ row }">{{ row.direction }}</template>
+              </el-table-column>
+              <el-table-column label="Where To" width="120">
+                <template #default="{ row }">{{ row.whereToGet?.split(' ')[0] }}</template>
+              </el-table-column>
+              <el-table-column label="Single Prescription" width="130" align="right">
+                <template #default="{ row }">
+                  <span style="font-weight:600">{{ cs }}{{ (row.subtotal || 0).toFixed(2) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="Quantity" width="80">
+                <template #default="{ row }">{{ row.quantity }}</template>
+              </el-table-column>
+              <el-table-column label="Dispensed" width="90">
+                <template #default="{ row }">
+                  <el-tag :type="isPrescriptionDispensed(row) ? 'success' : 'warning'" size="small">
+                    {{ isPrescriptionDispensed(row) ? t('consultation.dispensed') : t('consultation.pendingDispense') }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="!isReadOnly" width="160">
+                <template #default="{ row, $index }">
+                  <el-button size="small" text type="success" @click="handlePrintRx($index)"><el-icon><Printer /></el-icon> Print</el-button>
+                  <el-button size="small" text type="primary" @click="openEditRx($index)">{{ t('common.edit') }}</el-button>
+                  <el-button size="small" text type="danger" @click="deleteRx($index)">{{ t('common.delete') }}</el-button>
+                </template>
+              </el-table-column>
+              <el-table-column v-else width="80">
+                <template #default="{ row, $index }">
+                  <el-button size="small" text type="success" @click="handlePrintRx($index)"><el-icon><Printer /></el-icon> Print</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
           <div class="table-rows-count">Rows: {{ form.prescriptions.length }}</div>
         </el-card>
 
@@ -2112,7 +2314,16 @@ function handleSendReport() {
     </el-tabs>
 
     <!-- Prescription Drawer -->
-    <el-drawer v-model="showRxDialog" title="New Prescription" size="860px" direction="rtl" :close-on-press-escape="true" :destroy-on-close="false">
+    <el-drawer
+      v-model="showRxDialog"
+      title="New Prescription"
+      :size="rxDrawerSize"
+      direction="rtl"
+      :close-on-press-escape="true"
+      :destroy-on-close="false"
+      :before-close="handleRxDrawerBeforeClose"
+      @closed="handleRxDialogClosed"
+    >
       <div class="rx-dialog-body">
         <el-form :model="rxForm" label-width="160px" size="small" style="margin-bottom:12px">
           <el-row :gutter="16">
@@ -2172,7 +2383,8 @@ function handleSendReport() {
             <el-button size="small" @click="addRxItem"><el-icon><Plus /></el-icon> {{ t('consultation.addHerb') }}</el-button>
           </div>
         </div>
-        <el-table :data="rxForm.items" size="small" max-height="360" style="margin-bottom:8px">
+        <div class="wide-table-wrap">
+          <el-table :data="rxForm.items" size="small" max-height="360" style="margin-bottom:8px">
           <el-table-column label="?Herb" min-width="110">
             <template #default="{ row }">
               <el-autocomplete
@@ -2219,7 +2431,9 @@ function handleSendReport() {
                   :value="c.id"
                 />
               </el-select>
-              <span v-else-if="row.supplierName" style="font-size:12px; color:#888">{{ row.supplierName }}</span>
+              <span v-else-if="row.supplierName" style="font-size:12px; color:#888">
+                {{ formatSupplierDisplay(row.supplierName, row.gramsPerPacket) }}
+              </span>
               <span v-else style="color:#ccc; font-size:12px">-</span>
             </template>
           </el-table-column>
@@ -2242,7 +2456,8 @@ function handleSendReport() {
               <el-button type="danger" text size="small" :icon="'Delete'" @click="removeRxItem($index)" />
             </template>
           </el-table-column>
-        </el-table>
+          </el-table>
+        </div>
         <div style="text-align:right; font-size:13px; color:#555; padding:8px">
           Prescription Amount:
           <strong style="color:#2d6a4f; font-size:15px">{{ cs }}{{ rxSubtotal.toFixed(2) }}</strong>
@@ -2255,13 +2470,13 @@ function handleSendReport() {
         </div>
       </div>
       <template #footer>
-        <el-button @click="showRxDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="saveRx">{{ t('consultation.saveRx') }}</el-button>
+        <el-button @click="requestCloseRxDialog">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="saving" @click="saveRx">{{ t('consultation.saveRx') }}</el-button>
       </template>
     </el-drawer>
 
     <!-- Email Preview Drawer -->
-    <el-drawer v-model="showEmailDialog" :title="t('email.preview')" size="520px" direction="rtl">
+    <el-drawer v-model="showEmailDialog" :title="t('email.preview')" :size="sideDrawerSize" direction="rtl">
       <el-form label-width="60px" size="small">
         <el-form-item :label="t('email.recipient')">
           <el-input v-model="emailData.to" />
@@ -2331,6 +2546,7 @@ function handleSendReport() {
 
 .subsection-header { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; }
 .subsec-label { font-size: 13px; font-weight: 600; color: #444; }
+.wide-table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 .discount-btns { display: flex; gap: 4px; }
 
@@ -2401,6 +2617,55 @@ function handleSendReport() {
 .history-med-body {
   overflow: hidden;
   transition: all 0.3s ease;
+}
+
+@media (max-width: 767px) {
+  .cv-wrap {
+    padding-bottom: 12px;
+  }
+
+  .cv-header {
+    padding: 10px 12px;
+  }
+
+  .cv-header-left,
+  .cv-header-right,
+  .diff-card-header,
+  .subsection-header,
+  .price-row,
+  .pdf-header,
+  .pdf-meta,
+  .history-med-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .cv-header-right {
+    width: 100%;
+  }
+
+  .cv-header-right :deep(.el-button),
+  .subsection-header :deep(.el-button) {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .wide-table-wrap :deep(.el-table) {
+    min-width: 720px;
+  }
+
+  .section-card :deep(.el-card__body) {
+    padding: 12px;
+  }
+
+  .price-summary {
+    padding: 12px;
+  }
+
+  .doc-upload-area,
+  .not-found {
+    padding: 24px 12px;
+  }
 }
 </style>
 

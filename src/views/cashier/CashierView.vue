@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useConsultationsStore } from '../../stores/consultations'
 import { usePatientsStore } from '../../stores/patients'
 import { useAuthStore } from '../../stores/auth'
+import { useInventoryStore } from '../../stores/inventory'
 import { useSettingsStore } from '../../stores/settings'
 import { useBranchesStore } from '../../stores/branches'
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
@@ -15,6 +16,7 @@ const { t } = useI18n()
 const consultationsStore = useConsultationsStore()
 const patientsStore = usePatientsStore()
 const authStore = useAuthStore()
+const inventoryStore = useInventoryStore()
 const settingsStore = useSettingsStore()
 const branchesStore = useBranchesStore()
 const { showEmailDialog, emailData, openEmailPreview, sendEmail, buildInvoiceEmail } = useEmailSimulator()
@@ -91,6 +93,7 @@ async function processPayment(consult) {
   }
   try {
     const updated = await consultationsStore.markAsPaid(consult.id, { paymentMethod: selectedPaymentMethod.value })
+    await inventoryStore.refreshFromApi()
     ElMessage.success(t('cashier.paymentSuccess'))
     showInvoiceDialog.value = false
     // 发票邮件预览

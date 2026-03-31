@@ -9,6 +9,7 @@ import { hasPermission, canAccessPatientRecords } from '../../utils/permissions'
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
 import { filesApi, patientsApi } from '../../utils/api'
 import { useSettingsStore } from '../../stores/settings'
+import { buildCopiedTreatmentData } from '../../utils/consultationCopy'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
@@ -176,24 +177,7 @@ function quickCopyToNew(fields) {
       copyData.differentiation = src.differentiation
     }
     if (f === 'treatment') {
-      copyData.acupuncture = JSON.parse(JSON.stringify(src.acupuncture || []))
-      // 拷贝处方为全新的，清除库存关联和配药状态
-      copyData.prescriptions = (src.prescriptions || []).map(rx => ({
-        ...JSON.parse(JSON.stringify(rx)),
-        id: 'rx-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
-        dispensingCompleted: false,
-        items: (rx.items || []).map(i => ({
-          ...JSON.parse(JSON.stringify(i)),
-          inventoryId: null,
-          supplierId: null,
-          convertedQty: 0,
-          stockSufficient: null,
-          outOfStock: false,
-        })),
-      }))
-      copyData.herbals = JSON.parse(JSON.stringify(src.herbals || []))
-      copyData.formulaName = src.formulaName
-      copyData.prescriptionType = src.prescriptionType
+      Object.assign(copyData, buildCopiedTreatmentData(src))
     }
     if (f === 'pricing') {
       copyData.services = JSON.parse(JSON.stringify(src.services || []))

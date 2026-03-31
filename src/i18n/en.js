@@ -63,6 +63,7 @@ export default {
   nav: {
     dashboard: 'Dashboard',
     patients: 'Patients',
+    consultations: 'Consultations',
     appointments: 'Appointments',
     inventory: 'Inventory',
     formulas: 'Formulas',
@@ -157,6 +158,18 @@ export default {
     draft: 'Draft',
     completed: 'Completed',
     paid: 'Paid',
+  },
+
+  consultationList: {
+    title: 'Consultations',
+    searchPlaceholder: 'Search patient, consultation ID, complaint...',
+    statusPlaceholder: 'Status',
+    patient: 'Patient',
+    consultationId: 'Consultation ID',
+    chiefComplaint: 'Chief Complaint',
+    practitioner: 'Practitioner',
+    totalCount: '{count} consultations',
+    empty: 'No consultations',
   },
 
   // ── Patients ──
@@ -730,6 +743,9 @@ export default {
     fileUploaded: 'File uploaded',
     storageWarning: 'localStorage used {size}MB, nearing limit. Avoid uploading too many large files',
     saveBefore: 'Please save the consultation first',
+    unsavedLeaveTitle: 'Unsaved Changes',
+    unsavedLeaveMessage: 'This consultation has unsaved changes. Leave and discard them?',
+    unsavedPrescriptionLeaveMessage: 'This prescription has not been saved yet. Close or leave and discard it?',
     pdfNoLink: 'PDF generated but no download link returned',
     pdfFailed: 'PDF generation failed: ',
 

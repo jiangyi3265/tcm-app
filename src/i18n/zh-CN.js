@@ -63,6 +63,7 @@ export default {
   nav: {
     dashboard: '仪表盘',
     patients: '病人档案',
+    consultations: '诊疗记录',
     appointments: '预约管理',
     inventory: '库存管理',
     formulas: '方剂管理',
@@ -157,6 +158,18 @@ export default {
     draft: '草稿',
     completed: '已完成',
     paid: '已付款',
+  },
+
+  consultationList: {
+    title: '诊疗记录',
+    searchPlaceholder: '搜索病人名、诊疗单号或主诉',
+    statusPlaceholder: '状态',
+    patient: '病人',
+    consultationId: '诊疗单号',
+    chiefComplaint: '主诉',
+    practitioner: '医师',
+    totalCount: '共 {count} 条诊疗记录',
+    empty: '暂无诊疗记录',
   },
 
   // ── 病人管理 ──
@@ -731,6 +744,9 @@ export default {
     fileUploaded: '文件上传成功',
     storageWarning: 'localStorage 已使用 {size}MB，接近上限，请避免上传过多大文件',
     saveBefore: '请先保存诊疗记录',
+    unsavedLeaveTitle: '未保存内容',
+    unsavedLeaveMessage: '当前诊疗有未保存内容，离开后将丢失，确定继续吗？',
+    unsavedPrescriptionLeaveMessage: '当前方剂尚未保存，关闭或离开后将丢失，确定继续吗？',
     pdfNoLink: 'PDF 生成成功但未返回下载链接',
     pdfFailed: 'PDF 生成失败：',
 

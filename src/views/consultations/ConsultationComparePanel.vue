@@ -6,6 +6,7 @@ import { useAuthStore } from '../../stores/auth'
 import { formatDate } from '../../utils/dateUtils'
 import { emptyDiff } from '../../utils/sampleData'
 import { localizeMixedJoinedValue, localizeMixedText } from '../../utils/localizeMixedText'
+import { buildCopiedTreatmentData } from '../../utils/consultationCopy'
 
 const { t, locale } = useI18n()
 
@@ -55,25 +56,7 @@ function copySection(section) {
     data.diff = JSON.parse(JSON.stringify(selected.value.diff || emptyDiff()))
     data.differentiation = selected.value.differentiation
   } else if (section === 'treatment') {
-    data.acupuncture = JSON.parse(JSON.stringify(selected.value.acupuncture || []))
-    // 拷贝处方为全新的（不带库存扣减标记）
-    data.prescriptions = (selected.value.prescriptions || []).map(rx => ({
-      ...JSON.parse(JSON.stringify(rx)),
-      id: 'rx-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
-      dispensingCompleted: false,
-      items: (rx.items || []).map(i => ({
-        ...JSON.parse(JSON.stringify(i)),
-        inventoryId: null,
-        supplierId: null,
-        convertedQty: 0,
-        stockSufficient: null,
-        outOfStock: false,
-      })),
-    }))
-    data.herbals = JSON.parse(JSON.stringify(selected.value.herbals || []))
-    data.formulaName = selected.value.formulaName
-    data.prescriptionType = selected.value.prescriptionType
-    data.prognosis = selected.value.prognosis
+    Object.assign(data, buildCopiedTreatmentData(selected.value))
   } else if (section === 'pricing') {
     data.services = JSON.parse(JSON.stringify(selected.value.services || []))
     data.servicePriceList = selected.value.servicePriceList
@@ -100,20 +83,7 @@ function copyAll() {
   data.diff = JSON.parse(JSON.stringify(selected.value.diff || emptyDiff()))
   data.differentiation = selected.value.differentiation
   // treatment
-  data.acupuncture = JSON.parse(JSON.stringify(selected.value.acupuncture || []))
-  data.prescriptions = (selected.value.prescriptions || []).map(rx => ({
-    ...JSON.parse(JSON.stringify(rx)),
-    id: 'rx-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
-    dispensingCompleted: false,
-    items: (rx.items || []).map(i => ({
-      ...JSON.parse(JSON.stringify(i)),
-      inventoryId: null, supplierId: null, convertedQty: 0, stockSufficient: null, outOfStock: false,
-    })),
-  }))
-  data.herbals = JSON.parse(JSON.stringify(selected.value.herbals || []))
-  data.formulaName = selected.value.formulaName
-  data.prescriptionType = selected.value.prescriptionType
-  data.prognosis = selected.value.prognosis
+  Object.assign(data, buildCopiedTreatmentData(selected.value))
   // pricing
   data.services = JSON.parse(JSON.stringify(selected.value.services || []))
   data.servicePriceList = selected.value.servicePriceList
