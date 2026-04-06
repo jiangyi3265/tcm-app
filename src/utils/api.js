@@ -432,6 +432,14 @@ export const publicBookingApi = {
   options() {
     return request('/api/public-booking/options', { auth: false })
   },
+  schedule(params = {}) {
+    const normalizedParams = {
+      ...params,
+      weekStart: params.weekStart || params.date,
+      date: params.date || params.weekStart,
+    }
+    return request(`/api/public-booking/schedule${buildQuery(normalizedParams)}`, { auth: false })
+  },
   availability(params = {}) {
     return request(`/api/public-booking/availability${buildQuery(params)}`, { auth: false })
   },

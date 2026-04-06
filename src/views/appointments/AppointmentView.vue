@@ -8,6 +8,13 @@ import { useSettingsStore } from '../../stores/settings'
 import { useBranchesStore } from '../../stores/branches'
 import { hasPermission, canPractitionerProvideService } from '../../utils/permissions'
 import { formatDate, formatTime, formatDateTime, dayjs } from '../../utils/dateUtils'
+import {
+  WEEKDAYS,
+  createEmptyWorkingRange,
+  normalizeWorkingHoursForForm,
+  buildWorkingHoursPayload,
+  validateWorkingHours,
+} from '../../utils/workingHours'
 import { SERVICE_TYPES } from '../../utils/sampleData'
 import { useEmailSimulator } from '../../utils/emailSimulator'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -16,7 +23,6 @@ const { t, te } = useI18n()
 
 const SLOT_MINUTES = 30
 const WEEKDAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
-const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
 const WEEKDAY_LABELS = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' }
 
 const appointmentsStore = useAppointmentsStore()
@@ -34,7 +40,6 @@ const canEditOwnSchedule = computed(() => roles.value.includes('practitioner') |
 const currentDate = ref(new Date())
 const weekStart = computed(() => dayjs(currentDate.value).startOf('week'))
 const weekDays = computed(() => Array.from({ length: 7 }, (_, index) => weekStart.value.add(index, 'day').toDate()))
-
 function prevWeek() { currentDate.value = dayjs(currentDate.value).subtract(7, 'day').toDate() }
 function nextWeek() { currentDate.value = dayjs(currentDate.value).add(7, 'day').toDate() }
 function goToday() { currentDate.value = new Date() }
@@ -60,32 +65,6 @@ function buildSlotDateTime(date, totalMinutes) {
   return dayjs(date).startOf('day').add(totalMinutes, 'minute').format('YYYY-MM-DD HH:mm:ss')
 }
 
-function createEmptyWorkingRange() {
-  return { start: '', end: '' }
-}
-
-function normalizeWorkingHoursForForm(workingHours = {}) {
-  const normalized = {}
-  WEEKDAYS.forEach((day) => {
-    const ranges = Array.isArray(workingHours?.[day]) ? workingHours[day] : []
-    normalized[day] = ranges.length > 0
-      ? ranges.map((range) => ({ start: range?.start || '', end: range?.end || '' }))
-      : [createEmptyWorkingRange()]
-  })
-  return normalized
-}
-
-function buildWorkingHoursPayload(workingHours = {}) {
-  const cleanHours = {}
-  WEEKDAYS.forEach((day) => {
-    const ranges = (workingHours?.[day] || [])
-      .map((range) => ({ start: range?.start || '', end: range?.end || '' }))
-      .filter((range) => range.start && range.end)
-    if (ranges.length) cleanHours[day] = ranges
-  })
-  return cleanHours
-}
-
 function addWorkingRangeTo(workingHours, day) {
   if (!Array.isArray(workingHours[day])) workingHours[day] = []
   workingHours[day].push(createEmptyWorkingRange())
@@ -95,6 +74,22 @@ function removeWorkingRangeFrom(workingHours, day, index) {
   if (!Array.isArray(workingHours[day])) return
   workingHours[day].splice(index, 1)
   if (workingHours[day].length === 0) workingHours[day] = [createEmptyWorkingRange()]
+}
+
+function getWorkingHoursValidationMessage(result) {
+  if (!result || result.ok) return ''
+  switch (result.code) {
+    case 'incomplete':
+      return t('admin.workingHoursIncomplete')
+    case 'granularity':
+      return t('admin.workingHoursGranularity')
+    case 'order':
+      return t('admin.workingHoursInvalidRange')
+    case 'overlap':
+      return t('admin.workingHoursOverlap')
+    default:
+      return t('admin.workingHoursInvalid')
+  }
 }
 
 function getServiceTypeConfig(serviceType) {
@@ -405,7 +400,13 @@ function openMyScheduleDrawer() {
 
 async function saveMySchedule() {
   try {
-    const updated = await authStore.updateUser(authStore.userId, { workingHours: buildWorkingHoursPayload(myScheduleForm.value.workingHours) })
+    const validation = validateWorkingHours(myScheduleForm.value.workingHours)
+    if (!validation.ok) {
+      return ElMessage.warning(getWorkingHoursValidationMessage(validation))
+    }
+    const updated = await authStore.updateUser(authStore.userId, {
+      workingHours: buildWorkingHoursPayload(myScheduleForm.value.workingHours),
+    })
     authStore.syncUser(updated)
     showScheduleDrawer.value = false
     ElMessage.success(t('appointments.scheduleSaved'))
@@ -637,10 +638,10 @@ const STATUS_COLORS = { booked: '#409eff', confirmed: '#2d6a4f', completed: '#88
           <el-button size="small" text type="primary" @click="addWorkingRangeTo(myScheduleForm.workingHours, day)">{{ t('admin.addWorkingRange') }}</el-button>
         </div>
         <div class="schedule-editor-list">
-          <div v-for="(range, index) in myScheduleForm.workingHours[day]" :key="`${day}-${index}`" class="schedule-editor-row">
-            <el-time-picker v-model="range.start" format="HH:mm" value-format="HH:mm" :placeholder="t('admin.profileStartTime')" size="small" style="width:140px" />
+        <div v-for="(range, index) in myScheduleForm.workingHours[day]" :key="`${day}-${index}`" class="schedule-editor-row">
+            <el-time-select v-model="range.start" start="00:00" end="23:30" step="00:30" :placeholder="t('admin.profileStartTime')" size="small" style="width:140px" />
             <span>{{ t('admin.profileRangeSeparator') }}</span>
-            <el-time-picker v-model="range.end" format="HH:mm" value-format="HH:mm" :placeholder="t('admin.profileEndTime')" size="small" style="width:140px" />
+            <el-time-select v-model="range.end" start="00:00" end="23:30" step="00:30" :placeholder="t('admin.profileEndTime')" size="small" style="width:140px" />
             <el-button size="small" text type="danger" @click="removeWorkingRangeFrom(myScheduleForm.workingHours, day, index)">{{ t('common.delete') }}</el-button>
           </div>
         </div>

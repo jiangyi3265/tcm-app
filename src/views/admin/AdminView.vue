@@ -16,6 +16,13 @@ import { useMeridiansStore } from '../../stores/meridians'
 import { useTemplatesStore } from '../../stores/templates'
 import { ROLE_LABELS, ROLE_COLORS } from '../../utils/permissions'
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
+import {
+  WEEKDAYS,
+  createEmptyWorkingRange,
+  normalizeWorkingHoursForForm,
+  buildWorkingHoursPayload,
+  validateWorkingHours,
+} from '../../utils/workingHours'
 import { bindHerbSelection } from '../../utils/herbBinding'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { authApi, bootstrapApi, usersApi } from '../../utils/api'
@@ -152,7 +159,6 @@ const profileForm = ref({
   homeAddress: { street: '', city: '', province: '', postalCode: '', country: '' },
   workingHours: {}
 })
-const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
 const WEEKDAY_LABELS = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' }
 
 function getUserRoles(user) {
@@ -167,44 +173,6 @@ function isPractitionerUser(user) {
 
 function isApprenticeUser(user) {
   return getUserRoles(user).includes('apprentice')
-}
-
-function createEmptyWorkingRange() {
-  return { start: '', end: '' }
-}
-
-function normalizeWorkingHoursForForm(workingHours = {}) {
-  const normalized = {}
-  WEEKDAYS.forEach((day) => {
-    const dayRanges = Array.isArray(workingHours?.[day])
-      ? workingHours[day]
-      : workingHours?.[day]?.start || workingHours?.[day]?.end
-        ? [workingHours[day]]
-        : []
-    normalized[day] = dayRanges.length > 0
-      ? dayRanges.map((range) => ({
-        start: range?.start || '',
-        end: range?.end || '',
-      }))
-      : [createEmptyWorkingRange()]
-  })
-  return normalized
-}
-
-function buildWorkingHoursPayload() {
-  const cleanHours = {}
-  WEEKDAYS.forEach((day) => {
-    const ranges = (profileForm.value.workingHours?.[day] || [])
-      .map((range) => ({
-        start: range?.start || '',
-        end: range?.end || '',
-      }))
-      .filter((range) => range.start && range.end)
-    if (ranges.length > 0) {
-      cleanHours[day] = ranges
-    }
-  })
-  return cleanHours
 }
 
 function addWorkingHourRange(day) {
@@ -229,6 +197,22 @@ const servicePermissionOptions = computed(() =>
     label: config?.label || key,
   })),
 )
+
+function getWorkingHoursValidationMessage(result) {
+  if (!result || result.ok) return ''
+  switch (result.code) {
+    case 'incomplete':
+      return t('admin.workingHoursIncomplete')
+    case 'granularity':
+      return t('admin.workingHoursGranularity')
+    case 'order':
+      return t('admin.workingHoursInvalidRange')
+    case 'overlap':
+      return t('admin.workingHoursOverlap')
+    default:
+      return t('admin.workingHoursInvalid')
+  }
+}
 
 const profileTargetRoles = computed(() => getUserRoles(profileTarget.value))
 const profileSupportsScheduling = computed(() => profileTargetRoles.value.includes('practitioner') || profileTargetRoles.value.includes('doctor'))
@@ -258,9 +242,13 @@ function openProfileDrawer(user) {
 
 async function saveProfile() {
   try {
+    const validation = validateWorkingHours(profileForm.value.workingHours)
+    if (!validation.ok) {
+      return ElMessage.warning(getWorkingHoursValidationMessage(validation))
+    }
     const payload = {
       ...profileForm.value,
-      workingHours: buildWorkingHoursPayload(),
+      workingHours: buildWorkingHoursPayload(profileForm.value.workingHours),
       serviceKeys: [...(profileForm.value.serviceKeys || [])],
       internshipDates: [...(profileForm.value.internshipDates || [])],
     }
@@ -1036,9 +1024,9 @@ async function deleteTemplate(tmpl) {
               </div>
               <div class="schedule-range-list">
                 <div v-for="(range, index) in profileForm.workingHours[day]" :key="`${day}-${index}`" class="schedule-range-row">
-                  <el-time-picker v-model="range.start" format="HH:mm" value-format="HH:mm" :placeholder="t('admin.profileStartTime')" size="small" style="width:140px" />
+                  <el-time-select v-model="range.start" start="00:00" end="23:30" step="00:30" :placeholder="t('admin.profileStartTime')" size="small" style="width:140px" />
                   <span style="color:#999">{{ t('admin.profileRangeSeparator') }}</span>
-                  <el-time-picker v-model="range.end" format="HH:mm" value-format="HH:mm" :placeholder="t('admin.profileEndTime')" size="small" style="width:140px" />
+                  <el-time-select v-model="range.end" start="00:00" end="23:30" step="00:30" :placeholder="t('admin.profileEndTime')" size="small" style="width:140px" />
                   <el-button size="small" text type="danger" @click="removeWorkingHourRange(day, index)">{{ t('common.delete') }}</el-button>
                 </div>
               </div>

@@ -51,9 +51,29 @@ test('pharmacist 对 paid 问诊患者有访问权限', () => {
   assert.equal(allowed, true)
 })
 
-test('一周内完成的问诊仍允许访问', () => {
-  const recentDate = new Date()
-  recentDate.setDate(recentDate.getDate() - 3)
+test('三天内完成的问诊仍允许访问', () => {
+  const allowed = canAccessPatientRecords(
+    ['practitioner'],
+    'u-3',
+    { id: 'p-3', practitionerId: 'u-9' },
+    [
+      {
+        patientId: 'p-3',
+        practitionerId: 'u-9',
+        status: 'completed',
+        date: '2026-04-03',
+        deletedAt: null,
+      },
+    ],
+    { now: '2026-04-06' },
+  )
+
+  assert.equal(allowed, true)
+})
+
+test('超过三天的近期问诊不再允许非主治 practitioner 访问', () => {
+  const oldDate = new Date()
+  oldDate.setDate(oldDate.getDate() - 4)
 
   const allowed = canAccessPatientRecords(
     ['practitioner'],
@@ -64,13 +84,13 @@ test('一周内完成的问诊仍允许访问', () => {
         patientId: 'p-3',
         practitionerId: 'u-9',
         status: 'completed',
-        date: recentDate.toISOString().slice(0, 10),
+        date: oldDate.toISOString().slice(0, 10),
         deletedAt: null,
       },
     ],
   )
 
-  assert.equal(allowed, true)
+  assert.equal(allowed, false)
 })
 
 test('实习生在有效实习窗口内可访问该窗口内预约患者', () => {

@@ -25,6 +25,8 @@ export const ROLE_COLORS = {
   cashier: '',
 }
 
+const RECENT_RECORD_WINDOW_DAYS = 3
+
 export const MENU_ACCESS = {
   admin: ['dashboard', 'patients', 'consultations', 'appointments', 'inventory', 'formulas', 'pharmacy', 'cashier', 'statistics', 'audit-logs', 'admin'],
   practitioner: ['dashboard', 'patients', 'consultations', 'appointments', 'inventory', 'formulas', 'statistics'],
@@ -225,14 +227,14 @@ export function canAccessPatientRecords(roleOrRoles, userId, patient, consultati
     if (!consultation.date) return true
     const consultDate = parseDateValue(consultation.date)
     if (!consultDate) return true
-    return now.diff(consultDate, 'day', true) <= 7
+    return now.diff(consultDate, 'day', true) <= RECENT_RECORD_WINDOW_DAYS
   })
 }
 
-export function isAccessExpired(dateStr) {
+export function isAccessExpired(dateStr, days = RECENT_RECORD_WINDOW_DAYS) {
   if (!dateStr) return false
   const date = new Date(dateStr)
   const oneWeekAgo = new Date()
-  oneWeekAgo.setDate(oneWeekAgo.getDate() - 7)
+  oneWeekAgo.setDate(oneWeekAgo.getDate() - days)
   return date < oneWeekAgo
 }
