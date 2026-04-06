@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  shouldApplyRxAutosaveResult,
   shouldQueueRxAutosave,
   shouldSkipRxAutosaveAfterSync,
 } from '../src/utils/rxAutosaveGuard.js'
@@ -36,5 +37,38 @@ test('草稿快照发生变化时，仍允许继续自动同步', () => {
       baselineSnapshot: '{"id":"rx-1","items":[{"name":"人参","convertedQty":14}]}',
     }),
     false,
+  )
+})
+
+test('关闭抽屉后，旧 autosave 结果不再回写', () => {
+  assert.equal(
+    shouldApplyRxAutosaveResult({
+      requestSessionId: 4,
+      activeSessionId: 5,
+      showDialog: false,
+    }),
+    false,
+  )
+})
+
+test('完成动作使会话失效后，旧 autosave 结果不再回写', () => {
+  assert.equal(
+    shouldApplyRxAutosaveResult({
+      requestSessionId: 7,
+      activeSessionId: 8,
+      showDialog: true,
+    }),
+    false,
+  )
+})
+
+test('同一会话且抽屉仍打开时，允许 autosave 回写', () => {
+  assert.equal(
+    shouldApplyRxAutosaveResult({
+      requestSessionId: 9,
+      activeSessionId: 9,
+      showDialog: true,
+    }),
+    true,
   )
 })

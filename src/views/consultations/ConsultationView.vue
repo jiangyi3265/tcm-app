@@ -26,6 +26,7 @@ import {
   shouldSyncPrescriptionDraft,
 } from '../../utils/consultationInventorySync'
 import {
+  shouldApplyRxAutosaveResult,
   shouldQueueRxAutosave,
   shouldSkipRxAutosaveAfterSync,
 } from '../../utils/rxAutosaveGuard'
@@ -252,11 +253,14 @@ function syncRxBaseline() {
   rxEditorSnapshot.value = buildRxDraftSnapshot()
 }
 
+function clearRxAutosaveTimer() {
+  if (!rxAutosaveTimer) return
+  clearTimeout(rxAutosaveTimer)
+  rxAutosaveTimer = null
+}
+
 function resetRxEditorState() {
-  if (rxAutosaveTimer) {
-    clearTimeout(rxAutosaveTimer)
-    rxAutosaveTimer = null
-  }
+  clearRxAutosaveTimer()
   pendingRxAutosave.value = false
   rxCompleting.value = false
   rxEditorSnapshot.value = ''
@@ -607,6 +611,7 @@ const editingRxIdx = ref(-1)
 const formulaSearch = ref('')
 const rxAutosaving = ref(false)
 const rxCompleting = ref(false)
+const rxEditingSessionId = ref(0)
 const suspendRxAutosave = ref(false)
 const pendingRxAutosave = ref(false)
 let rxAutosaveTimer = null
@@ -633,6 +638,16 @@ function buildRxId() {
   return `rx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
+function beginRxEditingSession() {
+  rxEditingSessionId.value += 1
+  return rxEditingSessionId.value
+}
+
+function invalidateRxEditingSession() {
+  rxEditingSessionId.value += 1
+  return rxEditingSessionId.value
+}
+
 function openNewRx() {
   editingRxIdx.value = -1
   const defaultPreference = normalizePrescriptionPreference(authStore.currentUser?.prescriptionPreference)
@@ -649,6 +664,7 @@ function openNewRx() {
     comments: '',
     rxStatus: 'editing',
   }
+  beginRxEditingSession()
   suspendRxAutosave.value = false
   syncRxBaseline()
   showRxDialog.value = true
@@ -672,6 +688,7 @@ function openEditRx(target) {
     items: (oldRx.items || []).map(i => ({ ...i })),
     rxStatus: oldRx?.rxStatus || getPrescriptionStatus(oldRx),
   }
+  beginRxEditingSession()
   suspendRxAutosave.value = false
   syncRxBaseline()
   showRxDialog.value = true
@@ -854,6 +871,15 @@ async function ensureConsultationForPrescription() {
   return created?.id || currentConsultationId.value
 }
 
+async function persistRxDraftPayload(payload) {
+  const consultationId = await ensureConsultationForPrescription()
+  if (!consultationId) throw new Error(t('consultation.saveBefore'))
+  return consultStore.syncPrescription(consultationId, {
+    prescription: payload,
+    totals: buildRxTotals(),
+  })
+}
+
 async function syncPrescriptionDraft({ silent = true } = {}) {
   if (isReadOnly.value || suspendRxAutosave.value || !showRxDialog.value) return null
   const currentSnapshot = buildRxDraftSnapshot()
@@ -871,24 +897,23 @@ async function syncPrescriptionDraft({ silent = true } = {}) {
   const payload = buildPrescriptionPayload(rxForm.value, 'editing')
   if (!shouldPersistRxDraft(payload)) return null
 
-  const consultationId = await ensureConsultationForPrescription()
-  if (!consultationId) throw new Error(t('consultation.saveBefore'))
-
+  const requestSessionId = rxEditingSessionId.value
   pendingRxAutosave.value = false
   rxAutosaving.value = true
-  const autosaveTask = (async () => {
-    const updated = await consultStore.syncPrescription(consultationId, {
-      prescription: payload,
-      totals: buildRxTotals(),
-    })
-    applySavedConsultation(updated)
-    syncSavedSnapshot()
-    syncRxFormFromConsultation(payload.id)
-    return updated
-  })()
+  const autosaveTask = persistRxDraftPayload(payload)
   rxAutosavePromise = autosaveTask
   try {
-    return await autosaveTask
+    const updated = await autosaveTask
+    if (shouldApplyRxAutosaveResult({
+      requestSessionId,
+      activeSessionId: rxEditingSessionId.value,
+      showDialog: showRxDialog.value,
+    })) {
+      applySavedConsultation(updated)
+      syncSavedSnapshot()
+      syncRxFormFromConsultation(payload.id)
+    }
+    return updated
   } finally {
     if (rxAutosavePromise === autosaveTask) {
       rxAutosavePromise = null
@@ -901,13 +926,17 @@ async function syncPrescriptionDraft({ silent = true } = {}) {
   }
 }
 
-async function waitForRxAutosaveToFinish() {
+async function waitForRxAutosaveToFinish({ ignoreErrors = false } = {}) {
   if (!rxAutosavePromise) return
-  await rxAutosavePromise
+  try {
+    await rxAutosavePromise
+  } catch (error) {
+    if (!ignoreErrors) throw error
+  }
 }
 
 function scheduleRxAutosave() {
-  if (rxAutosaveTimer) clearTimeout(rxAutosaveTimer)
+  clearRxAutosaveTimer()
   if (!showRxDialog.value || suspendRxAutosave.value || isReadOnly.value) return
   rxAutosaveTimer = setTimeout(async () => {
     try {
@@ -1011,12 +1040,20 @@ async function saveRx() {
   }
 
   rxCompleting.value = true
+  clearRxAutosaveTimer()
+  pendingRxAutosave.value = false
+  suspendRxAutosave.value = true
+  invalidateRxEditingSession()
   try {
-    await waitForRxAutosaveToFinish()
-    await syncPrescriptionDraft({ silent: true })
-    const consultationId = currentConsultationId.value
+    await waitForRxAutosaveToFinish({ ignoreErrors: true })
+    const editingPayload = buildPrescriptionPayload(rxForm.value, 'editing')
+    const synced = await persistRxDraftPayload(editingPayload)
+    applySavedConsultation(synced)
+    syncSavedSnapshot()
+    syncRxFormFromConsultation(editingPayload.id)
+    const consultationId = synced?.id || currentConsultationId.value
     if (!consultationId) throw new Error(t('consultation.saveBefore'))
-    const updated = await consultStore.completePrescription(consultationId, rx.id, {
+    const updated = await consultStore.completePrescription(consultationId, editingPayload.id, {
       totals: buildRxTotals(),
     })
     applySavedConsultation(updated)
@@ -1025,6 +1062,7 @@ async function saveRx() {
   } catch (e) {
     ElMessage.error(e.message || t('common.operationFailed'))
   } finally {
+    suspendRxAutosave.value = false
     rxCompleting.value = false
   }
 }
@@ -1053,11 +1091,22 @@ async function deleteRx(target) {
 async function completeRxRow(row) {
   if (!row?.id || !currentConsultationId.value) return
   try {
+    const shouldDrainRxAutosave = Boolean(showRxDialog.value || rxAutosavePromise)
+    const isEditingSameRx = showRxDialog.value && rxForm.value.id === row.id
+    if (shouldDrainRxAutosave) {
+      clearRxAutosaveTimer()
+      pendingRxAutosave.value = false
+      invalidateRxEditingSession()
+      await waitForRxAutosaveToFinish({ ignoreErrors: true })
+    }
     const updated = await consultStore.completePrescription(currentConsultationId.value, row.id, {
       totals: buildRxTotals(),
     })
     applySavedConsultation(updated)
     syncSavedSnapshot()
+    if (isEditingSameRx) {
+      showRxDialog.value = false
+    }
     ElMessage.success(t('consultation.rxCompleted'))
   } catch (error) {
     ElMessage.error(error.message || t('common.operationFailed'))
@@ -1512,6 +1561,9 @@ async function requestCloseRxDialog() {
     const confirmed = await confirmUnsavedChanges('consultation.unsavedPrescriptionLeaveMessage')
     if (!confirmed) return
   }
+  clearRxAutosaveTimer()
+  pendingRxAutosave.value = false
+  invalidateRxEditingSession()
   showRxDialog.value = false
 }
 
@@ -1520,10 +1572,16 @@ async function handleRxDrawerBeforeClose(done) {
     const confirmed = await confirmUnsavedChanges('consultation.unsavedPrescriptionLeaveMessage')
     if (!confirmed) return
   }
+  clearRxAutosaveTimer()
+  pendingRxAutosave.value = false
+  invalidateRxEditingSession()
   done()
 }
 
 function handleRxDialogClosed() {
+  clearRxAutosaveTimer()
+  pendingRxAutosave.value = false
+  invalidateRxEditingSession()
   resetRxEditorState()
 }
 
