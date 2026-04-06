@@ -7,6 +7,13 @@ import { formatDate } from '../../utils/dateUtils'
 import { emptyDiff } from '../../utils/sampleData'
 import { localizeMixedJoinedValue, localizeMixedText } from '../../utils/localizeMixedText'
 import { buildCopiedTreatmentData } from '../../utils/consultationCopy'
+import {
+  canSelectNewerHistory,
+  canSelectOlderHistory,
+  getHistoryDisplayOrder,
+  getNewerHistoryIndex,
+  getOlderHistoryIndex,
+} from '../../utils/historyCompareNavigation'
 
 const { t, locale } = useI18n()
 
@@ -28,6 +35,7 @@ const historyList = computed(() =>
 
 const selectedIdx = ref(0)
 const selected = computed(() => historyList.value[selectedIdx.value] || null)
+const selectedOrder = computed(() => getHistoryDisplayOrder(selectedIdx.value, historyList.value.length))
 
 watch(
   () => props.visible,
@@ -37,10 +45,10 @@ watch(
 )
 
 function prevHistory() {
-  if (selectedIdx.value > 0) selectedIdx.value--
+  selectedIdx.value = getOlderHistoryIndex(selectedIdx.value, historyList.value.length)
 }
 function nextHistory() {
-  if (selectedIdx.value < historyList.value.length - 1) selectedIdx.value++
+  selectedIdx.value = getNewerHistoryIndex(selectedIdx.value)
 }
 
 function copySection(section) {
@@ -171,7 +179,7 @@ function isDiffChanged(key) {
     <template v-else-if="selected">
       <!-- 历史记录切换 -->
       <div class="compare-nav">
-        <el-button :disabled="selectedIdx <= 0" circle size="small" @click="prevHistory">
+        <el-button :disabled="!canSelectOlderHistory(selectedIdx, historyList.length)" circle size="small" @click="prevHistory">
           <el-icon><arrow-left /></el-icon>
         </el-button>
         <span class="compare-nav-info">
@@ -180,10 +188,10 @@ function isDiffChanged(key) {
             {{ getPractitionerName(selected.practitionerId) }}
           </el-tag>
           <span style="color: #999; margin-left: 8px">
-            ({{ selectedIdx + 1 }} / {{ historyList.length }})
+            ({{ selectedOrder }} / {{ historyList.length }})
           </span>
         </span>
-        <el-button :disabled="selectedIdx >= historyList.length - 1" circle size="small" @click="nextHistory">
+        <el-button :disabled="!canSelectNewerHistory(selectedIdx)" circle size="small" @click="nextHistory">
           <el-icon><arrow-right /></el-icon>
         </el-button>
         <el-button size="small" type="primary" @click="copyAll" style="margin-left: 16px">

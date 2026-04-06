@@ -139,6 +139,49 @@ export const usePatientsStore = defineStore('patients', () => {
     return activePatients.value.filter((p) => p.practitionerId === practitionerId)
   }
 
+  /**
+   * 通过关联的 staffUserId 查找是否已存在员工病人档案
+   */
+  function getPatientByStaffUserId(userId) {
+    if (!userId) return null
+    return patients.value.find((p) => p.staffUserId === String(userId) && !p.deletedAt) || null
+  }
+
+  /**
+   * 为员工自动建立病人档案（如果尚未建档）。
+   * 用户创建时自动调用，确保所有工作人员都在病人列表里有记录。
+   */
+  async function ensureStaffPatient(user) {
+    if (!user?.id) return null
+    // 已有关联档案则跳过
+    const existing = getPatientByStaffUserId(user.id)
+    if (existing) return existing
+    // 按 email 去重 — 避免同一邮箱创建两条病人
+    const email = (user.email || '').trim()
+    if (email) {
+      const byEmail = patients.value.find((p) =>
+        !p.deletedAt && (Array.isArray(p.emails) ? p.emails : []).some((e) => String(e || '').toLowerCase() === email.toLowerCase()),
+      )
+      if (byEmail) {
+        // 已有相同 email 的病人档案 — 仅补写 staffUserId 关联
+        const updated = await patientsApi.update(byEmail.id, { staffUserId: String(user.id) })
+        const idx = patients.value.findIndex((p) => p.id === byEmail.id)
+        if (idx !== -1) patients.value[idx] = updated
+        saveState()
+        return updated
+      }
+    }
+    // 创建新病人
+    return addPatient({
+      name: user.name || '',
+      emails: email ? [email] : [],
+      phone: user.phone || '',
+      mobilePhone: user.phone || '',
+      notes: 'Staff / 员工自动建档',
+      staffUserId: String(user.id),
+    })
+  }
+
   init()
 
   return {
@@ -146,5 +189,6 @@ export const usePatientsStore = defineStore('patients', () => {
     getPatient, searchPatients, addPatient, updatePatient,
     deletePatient, restorePatient, physicalDeletePatient,
     mergePatients, signConsent, getPatientsByPractitioner,
+    getPatientByStaffUserId, ensureStaffPatient,
   }
 })

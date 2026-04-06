@@ -1,3 +1,6 @@
+import { getActivePrescriptions, getPaymentStatus, getPrescriptionStatus } from './prescriptionWorkflow.js'
+import { dayjs } from './dateUtils.js'
+
 export const ROLES = {
   ADMIN: 'admin',
   PRACTITIONER: 'practitioner',
@@ -76,15 +79,123 @@ export function canAccess(roleOrRoles, module) {
   return allAccess.has(module)
 }
 
-export function canAccessPatientRecords(roleOrRoles, userId, patient, consultations) {
-  const userRoles = Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles]
+function normalizeRoles(roleOrRoles) {
+  return (Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles]).filter(Boolean)
+}
+
+function parseDateValue(value) {
+  const text = String(value || '').trim()
+  if (!text) return null
+  const normalized = text.includes(' ') && !text.includes('T')
+    ? text.replace(' ', 'T')
+    : text
+  let parsed = dayjs(normalized)
+  if (parsed.isValid()) return parsed
+  if (text.length >= 10) {
+    parsed = dayjs(text.slice(0, 10))
+    if (parsed.isValid()) return parsed
+  }
+  return null
+}
+
+function resolveActiveInternshipWindow(currentUser, now = dayjs()) {
+  const internshipDates = Array.isArray(currentUser?.internshipDates)
+    ? currentUser.internshipDates
+    : []
+  if (internshipDates.length === 0) return null
+
+  const today = dayjs(now).startOf('day')
+  let matchedWindow = null
+  internshipDates.forEach((rawDate) => {
+    const startDate = parseDateValue(rawDate)?.startOf('day')
+    if (!startDate) return
+    const endDate = startDate.add(2, 'day').endOf('day')
+    if (today.isBefore(startDate) || today.isAfter(endDate)) return
+    if (!matchedWindow || startDate.isAfter(matchedWindow.startDate)) {
+      matchedWindow = { startDate, endDate }
+    }
+  })
+  return matchedWindow
+}
+
+function isWithinInternshipWindow(value, window) {
+  const date = parseDateValue(value)
+  if (!date || !window) return false
+  return !date.isBefore(window.startDate) && !date.isAfter(window.endDate)
+}
+
+function collectInternshipPatientIds(consultations = [], appointments = [], window) {
+  const patientIds = new Set()
+  consultations.forEach((consultation) => {
+    if (!consultation || consultation.deletedAt || !consultation.patientId) return
+    if (isWithinInternshipWindow(consultation.date, window)) {
+      patientIds.add(consultation.patientId)
+    }
+  })
+  appointments.forEach((appointment) => {
+    if (!appointment || appointment.status === 'cancelled' || !appointment.patientId) return
+    if (isWithinInternshipWindow(appointment.startTime, window)) {
+      patientIds.add(appointment.patientId)
+    }
+  })
+  return patientIds
+}
+
+export function filterAccessibleConsultations(roleOrRoles, consultations = [], options = {}) {
+  const userRoles = normalizeRoles(roleOrRoles)
+  const source = Array.isArray(consultations) ? consultations : []
+  if (!userRoles.includes('apprentice')) {
+    return source.filter((consultation) => !consultation?.deletedAt)
+  }
+
+  const internshipWindow = resolveActiveInternshipWindow(options.currentUser, options.now)
+  if (!internshipWindow) return []
+
+  return source.filter((consultation) =>
+    consultation
+    && !consultation.deletedAt
+    && isWithinInternshipWindow(consultation.date, internshipWindow),
+  )
+}
+
+export function getAuthorizedServiceKeys(user) {
+  const serviceKeys = Array.isArray(user?.serviceKeys) ? user.serviceKeys : []
+  return [...new Set(serviceKeys.map((item) => String(item || '').trim()).filter(Boolean))]
+}
+
+export function canPractitionerProvideService(user, serviceKey) {
+  if (!serviceKey) return true
+  const serviceKeys = getAuthorizedServiceKeys(user)
+  return serviceKeys.length === 0 || serviceKeys.includes(serviceKey)
+}
+
+export function canAccessPatientRecords(roleOrRoles, userId, patient, consultations = [], options = {}) {
+  const userRoles = normalizeRoles(roleOrRoles)
+  const appointments = Array.isArray(options.appointments) ? options.appointments : []
+  const currentUser = options.currentUser || null
   if (userRoles.includes('admin')) return true
   if (!patient || !userId) return false
+
+  if (userRoles.includes('apprentice')) {
+    const internshipWindow = resolveActiveInternshipWindow(currentUser, options.now)
+    if (!internshipWindow) return false
+    return collectInternshipPatientIds(consultations, appointments, internshipWindow).has(patient.id)
+  }
+
   if (patient.practitionerId === userId) return true
 
   if (userRoles.includes('pharmacist')) {
     const hasPending = consultations.some(
-      (consultation) => consultation.patientId === patient.id && consultation.status === 'paid' && !consultation.deletedAt,
+      (consultation) => consultation.patientId === patient.id
+        && !consultation.deletedAt
+        && (
+          consultation.status === 'paid'
+          || getPaymentStatus(consultation) === 'paid'
+          || getActivePrescriptions(consultation).some((prescription) => {
+            const status = getPrescriptionStatus(prescription)
+            return status === 'editing' || status === 'pending' || status === 'dispensed'
+          })
+        ),
     )
     if (hasPending) return true
   }
@@ -92,22 +203,29 @@ export function canAccessPatientRecords(roleOrRoles, userId, patient, consultati
   if (userRoles.includes('cashier')) {
     const hasCompleted = consultations.some(
       (consultation) => consultation.patientId === patient.id
-        && (consultation.status === 'completed' || consultation.status === 'paid')
+        && (
+          consultation.status === 'completed'
+          || getPaymentStatus(consultation) !== 'unpaid'
+          || getActivePrescriptions(consultation).some((prescription) => {
+            const status = getPrescriptionStatus(prescription)
+            return status === 'pending' || status === 'dispensed'
+          })
+        )
         && !consultation.deletedAt,
     )
     if (hasCompleted) return true
   }
 
-  const now = Date.now()
+  const now = dayjs(options.now || undefined)
   return consultations.some((consultation) => {
     if (consultation.patientId !== patient.id || consultation.deletedAt) return false
-    if (consultation.practitionerId === userId && consultation.status !== 'completed' && consultation.status !== 'paid') {
+    if (consultation.practitionerId === userId && consultation.status !== 'completed') {
       return true
     }
     if (!consultation.date) return true
-    const consultDate = new Date(consultation.date).getTime()
-    if (Number.isNaN(consultDate)) return true
-    return now - consultDate <= 7 * 24 * 60 * 60 * 1000
+    const consultDate = parseDateValue(consultation.date)
+    if (!consultDate) return true
+    return now.diff(consultDate, 'day', true) <= 7
   })
 }
 

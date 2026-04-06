@@ -23,6 +23,12 @@ const router = createRouter({
       meta: { public: true },
     },
     {
+      path: '/book',
+      name: 'public-booking',
+      component: () => import('../views/public/PublicBookingView.vue'),
+      meta: { public: true },
+    },
+    {
       path: '/',
       component: () => import('../components/layout/AppLayout.vue'),
       meta: { requiresAuth: true },
@@ -64,7 +70,7 @@ const router = createRouter({
           path: 'patients/:patientId/consultations/:id',
           name: 'consultation-detail',
           component: () => import('../views/consultations/ConsultationView.vue'),
-          meta: { roles: ['admin', 'practitioner', 'apprentice'] },
+          meta: { roles: ['admin', 'practitioner', 'apprentice', 'cashier'] },
         },
         {
           path: 'appointments',

@@ -16,8 +16,9 @@ import { useMeridiansStore } from '../../stores/meridians'
 import { useTemplatesStore } from '../../stores/templates'
 import { ROLE_LABELS, ROLE_COLORS } from '../../utils/permissions'
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
+import { bindHerbSelection } from '../../utils/herbBinding'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { authApi, bootstrapApi } from '../../utils/api'
+import { authApi, bootstrapApi, usersApi } from '../../utils/api'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -36,6 +37,32 @@ const templatesStore = useTemplatesStore()
 
 const activeTab = ref('users')
 
+const herbOptions = computed(() => herbDictStore.activeHerbs)
+
+function createFormulaHerbDraft() {
+  return { herbDictId: null, herbName: '', dosage: 0, unit: 'g', notes: '' }
+}
+
+function applyHerbSelection(target, herbId) {
+  return bindHerbSelection(target, herbDictStore.getHerb(herbId), { nameKey: 'herbName' })
+}
+
+function syncDraftHerb(draftRef, herbId) {
+  draftRef.value = applyHerbSelection(draftRef.value, herbId)
+}
+
+function syncRowHerb(row, herbId) {
+  Object.assign(row, applyHerbSelection(row, herbId))
+}
+
+function validateFormulaHerbs(items = []) {
+  if (items.some((item) => !item.herbDictId)) {
+    ElMessage.warning(t('inventory.selectHerbRequired'))
+    return false
+  }
+  return true
+}
+
 // ========== User management ==========
 const showAddUserDialog = ref(false)
 const newUser = ref({ name: '', email: '', password: '', roles: ['practitioner'], phone: '' })
@@ -48,7 +75,13 @@ async function handleAddUser() {
     return ElMessage.warning(t('admin.passwordTooShort'))
   }
   try {
-    await authStore.addUser({ ...newUser.value })
+    const created = await authStore.addUser({ ...newUser.value })
+    // 自动在病人列表中建档
+    try {
+      await patientsStore.ensureStaffPatient(created)
+    } catch (e) {
+      console.warn('Auto-create staff patient failed:', e)
+    }
     ElMessage.success(t('admin.userCreated'))
     showAddUserDialog.value = false
     newUser.value = { name: '', email: '', password: '', roles: ['practitioner'], phone: '' }
@@ -91,7 +124,13 @@ async function saveEditUser() {
       await settingsStore.setPractitionerInterval(editingUserId.value, editUserForm.value.appointmentInterval)
     }
     const { appointmentInterval, ...userData } = editUserForm.value
-    await authStore.updateUser(editingUserId.value, userData)
+    const updated = await authStore.updateUser(editingUserId.value, userData)
+    // 同步更新对应的病人档案（姓名、邮箱、电话等）
+    try {
+      await patientsStore.ensureStaffPatient(updated)
+    } catch (e) {
+      console.warn('Sync staff patient on update failed:', e)
+    }
     editingUserId.value = null
     ElMessage.success(t('admin.saved'))
   } catch (e) {
@@ -107,11 +146,93 @@ const profileForm = ref({
   regulatoryBody: '',
   title: '',
   registrationNumber: '',
+  practitionerSortOrder: null,
+  serviceKeys: [],
+  internshipDates: [],
   homeAddress: { street: '', city: '', province: '', postalCode: '', country: '' },
   workingHours: {}
 })
 const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
 const WEEKDAY_LABELS = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' }
+
+function getUserRoles(user) {
+  return Array.isArray(user?.roles) && user.roles.length > 0
+    ? user.roles
+    : user?.role ? [user.role] : []
+}
+
+function isPractitionerUser(user) {
+  return getUserRoles(user).includes('practitioner') || getUserRoles(user).includes('doctor')
+}
+
+function isApprenticeUser(user) {
+  return getUserRoles(user).includes('apprentice')
+}
+
+function createEmptyWorkingRange() {
+  return { start: '', end: '' }
+}
+
+function normalizeWorkingHoursForForm(workingHours = {}) {
+  const normalized = {}
+  WEEKDAYS.forEach((day) => {
+    const dayRanges = Array.isArray(workingHours?.[day])
+      ? workingHours[day]
+      : workingHours?.[day]?.start || workingHours?.[day]?.end
+        ? [workingHours[day]]
+        : []
+    normalized[day] = dayRanges.length > 0
+      ? dayRanges.map((range) => ({
+        start: range?.start || '',
+        end: range?.end || '',
+      }))
+      : [createEmptyWorkingRange()]
+  })
+  return normalized
+}
+
+function buildWorkingHoursPayload() {
+  const cleanHours = {}
+  WEEKDAYS.forEach((day) => {
+    const ranges = (profileForm.value.workingHours?.[day] || [])
+      .map((range) => ({
+        start: range?.start || '',
+        end: range?.end || '',
+      }))
+      .filter((range) => range.start && range.end)
+    if (ranges.length > 0) {
+      cleanHours[day] = ranges
+    }
+  })
+  return cleanHours
+}
+
+function addWorkingHourRange(day) {
+  if (!profileForm.value.workingHours[day]) {
+    profileForm.value.workingHours[day] = []
+  }
+  profileForm.value.workingHours[day].push(createEmptyWorkingRange())
+}
+
+function removeWorkingHourRange(day, index) {
+  const ranges = profileForm.value.workingHours?.[day]
+  if (!Array.isArray(ranges) || ranges.length === 0) return
+  ranges.splice(index, 1)
+  if (ranges.length === 0) {
+    profileForm.value.workingHours[day] = [createEmptyWorkingRange()]
+  }
+}
+
+const servicePermissionOptions = computed(() =>
+  Object.entries(settingsStore.serviceTypes || {}).map(([key, config]) => ({
+    value: key,
+    label: config?.label || key,
+  })),
+)
+
+const profileTargetRoles = computed(() => getUserRoles(profileTarget.value))
+const profileSupportsScheduling = computed(() => profileTargetRoles.value.includes('practitioner') || profileTargetRoles.value.includes('doctor'))
+const profileSupportsInternship = computed(() => profileTargetRoles.value.includes('apprentice'))
 
 function openProfileDrawer(user) {
   profileTarget.value = user
@@ -120,6 +241,9 @@ function openProfileDrawer(user) {
     regulatoryBody: user.regulatoryBody || '',
     title: user.title || '',
     registrationNumber: user.registrationNumber || '',
+    practitionerSortOrder: user.practitionerSortOrder ?? null,
+    serviceKeys: [...(user.serviceKeys || [])],
+    internshipDates: [...(user.internshipDates || [])],
     homeAddress: {
       street: user.homeAddress?.street || '',
       city: user.homeAddress?.city || '',
@@ -127,27 +251,21 @@ function openProfileDrawer(user) {
       postalCode: user.homeAddress?.postalCode || '',
       country: user.homeAddress?.country || ''
     },
-    workingHours: { ...(user.workingHours || {}) }
+    workingHours: normalizeWorkingHoursForForm(user.workingHours || {})
   }
-  // Initialize an empty working-hours entry for each weekday.
-  WEEKDAYS.forEach(day => {
-    if (!profileForm.value.workingHours[day]) {
-      profileForm.value.workingHours[day] = { start: '', end: '' }
-    }
-  })
   showProfileDrawer.value = true
 }
 
 async function saveProfile() {
   try {
-    // 清理空的工作时间
-    const cleanHours = {}
-    WEEKDAYS.forEach(day => {
-      const h = profileForm.value.workingHours[day]
-      if (h && h.start && h.end) cleanHours[day] = h
-    })
-    const payload = { ...profileForm.value, workingHours: cleanHours }
-    await authStore.updateUser(profileTarget.value.id, payload)
+    const payload = {
+      ...profileForm.value,
+      workingHours: buildWorkingHoursPayload(),
+      serviceKeys: [...(profileForm.value.serviceKeys || [])],
+      internshipDates: [...(profileForm.value.internshipDates || [])],
+    }
+    const updated = await authStore.updateUser(profileTarget.value.id, payload)
+    profileTarget.value = updated
     showProfileDrawer.value = false
     ElMessage.success(t('admin.profileSaved'))
   } catch (e) {
@@ -155,6 +273,21 @@ async function saveProfile() {
     const detail = e.response?.data?.msg || e.message || t('admin.saveFailed')
     console.error('Profile save error:', e, 'Response:', e.response?.data)
     ElMessage.error(`${t('admin.saveFailed')}: ${detail}`)
+  }
+}
+
+async function handleInternshipToday(user = profileTarget.value) {
+  if (!user?.id) return
+  try {
+    const updated = await usersApi.addInternshipToday(user.id)
+    authStore.syncUser(updated)
+    if (profileTarget.value?.id === updated.id) {
+      profileTarget.value = updated
+      profileForm.value.internshipDates = [...(updated.internshipDates || [])]
+    }
+    ElMessage.success(t('admin.internshipAddedToday'))
+  } catch (e) {
+    ElMessage.error(e.message || t('admin.saveFailed'))
   }
 }
 
@@ -432,12 +565,12 @@ function getManagerName(managerId) {
 // ========== Formula management ==========
 const showAddFormulaDialog = ref(false)
 const newFormula = ref({ name: '', category: '', description: '', source: '', items: [] })
-const newFormulaHerb = ref({ herbName: '', dosage: 0, unit: 'g', notes: '' })
+const newFormulaHerb = ref(createFormulaHerbDraft())
 
 function addFormulaHerb() {
-  if (!newFormulaHerb.value.herbName) return ElMessage.warning(t('admin.fillFormulaHerbName'))
+  if (!newFormulaHerb.value.herbDictId) return ElMessage.warning(t('inventory.selectHerbRequired'))
   newFormula.value.items.push({ ...newFormulaHerb.value, sortOrder: newFormula.value.items.length + 1 })
-  newFormulaHerb.value = { herbName: '', dosage: 0, unit: 'g', notes: '' }
+  newFormulaHerb.value = createFormulaHerbDraft()
 }
 
 function removeFormulaHerb(idx) {
@@ -447,6 +580,7 @@ function removeFormulaHerb(idx) {
 async function handleAddFormula() {
   if (!newFormula.value.name) return ElMessage.warning(t('admin.fillFormulaName'))
   if (newFormula.value.items.length === 0) return ElMessage.warning(t('admin.fillFormulaHerbs'))
+  if (!validateFormulaHerbs(newFormula.value.items)) return
   await formulasStore.addFormula({ ...newFormula.value })
   ElMessage.success(t('admin.formulaCreated'))
   showAddFormulaDialog.value = false
@@ -455,7 +589,7 @@ async function handleAddFormula() {
 
 const editingFormulaId = ref(null)
 const editFormulaForm = ref({})
-const editFormulaHerb = ref({ herbName: '', dosage: 0, unit: 'g', notes: '' })
+const editFormulaHerb = ref(createFormulaHerbDraft())
 
 function startEditFormula(formula) {
   editingFormulaId.value = formula.id
@@ -464,14 +598,14 @@ function startEditFormula(formula) {
     category: formula.category || '',
     description: formula.description || '',
     source: formula.source || '',
-    items: [...(formula.items || []).map(i => ({ ...i }))],
+      items: [...(formula.items || []).map(i => ({ ...i }))],
   }
 }
 
 function addEditFormulaHerb() {
-  if (!editFormulaHerb.value.herbName) return ElMessage.warning(t('admin.fillFormulaHerbName'))
+  if (!editFormulaHerb.value.herbDictId) return ElMessage.warning(t('inventory.selectHerbRequired'))
   editFormulaForm.value.items.push({ ...editFormulaHerb.value, sortOrder: editFormulaForm.value.items.length + 1 })
-  editFormulaHerb.value = { herbName: '', dosage: 0, unit: 'g', notes: '' }
+  editFormulaHerb.value = createFormulaHerbDraft()
 }
 
 function removeEditFormulaHerb(idx) {
@@ -479,6 +613,7 @@ function removeEditFormulaHerb(idx) {
 }
 
 async function saveEditFormula() {
+  if (!validateFormulaHerbs(editFormulaForm.value.items)) return
   await formulasStore.updateFormula(editingFormulaId.value, editFormulaForm.value)
   editingFormulaId.value = null
   ElMessage.success(t('admin.formulaUpdated'))
@@ -772,7 +907,7 @@ async function deleteTemplate(tmpl) {
           <el-table-column :label="t('admin.createdDate')" width="120">
             <template #default="{ row }">{{ formatDate(row.createdAt) }}</template>
           </el-table-column>
-          <el-table-column :label="t('admin.operation')" width="260" fixed="right">
+          <el-table-column :label="t('admin.operation')" width="320" fixed="right">
             <template #default="{ row }">
               <div v-if="editingUserId === row.id">
                 <el-button size="small" type="primary" text @click="saveEditUser">{{ t('common.save') }}</el-button>
@@ -781,6 +916,7 @@ async function deleteTemplate(tmpl) {
               <div v-else>
                 <el-button size="small" text type="primary" @click="startEditUser(row)">{{ t('common.edit') }}</el-button>
                 <el-button size="small" text type="success" @click="openProfileDrawer(row)">{{ t('admin.profile') }}</el-button>
+                <el-button v-if="isApprenticeUser(row)" size="small" text type="warning" @click="handleInternshipToday(row)">{{ t('admin.addInternshipToday') }}</el-button>
                 <el-button size="small" text type="warning" @click="openResetPwd(row)">{{ t('admin.resetPassword') }}</el-button>
                 <el-button size="small" text type="danger" @click="deleteUser(row)" :disabled="row.id === authStore.userId">{{ t('common.delete') }}</el-button>
               </div>
@@ -806,7 +942,7 @@ async function deleteTemplate(tmpl) {
       </el-dialog>
 
     <!-- Practitioner profile drawer -->
-      <el-drawer v-model="showProfileDrawer" :title="t('admin.profileTitle', { name: profileTarget?.name || '' })" size="580px" direction="rtl">
+      <el-drawer v-model="showProfileDrawer" :title="t('admin.profileTitle', { name: profileTarget?.name || '' })" size="760px" direction="rtl">
         <el-form :model="profileForm" label-width="120px" label-position="top">
           <el-divider content-position="left">{{ t('admin.profileBasicInfo') }}</el-divider>
           <el-row :gutter="16">
@@ -838,6 +974,34 @@ async function deleteTemplate(tmpl) {
             </el-col>
           </el-row>
 
+          <el-row v-if="profileSupportsScheduling" :gutter="16">
+            <el-col :span="12">
+              <el-form-item :label="t('admin.profilePractitionerSortOrder')">
+                <el-input-number v-model="profileForm.practitionerSortOrder" :min="0" :step="1" style="width:100%" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item :label="t('admin.profileServiceScope')">
+                <el-select
+                  v-model="profileForm.serviceKeys"
+                  multiple
+                  filterable
+                  collapse-tags
+                  :placeholder="t('admin.profileServiceScopePh')"
+                  style="width:100%"
+                >
+                  <el-option
+                    v-for="service in servicePermissionOptions"
+                    :key="service.value"
+                    :label="service.label"
+                    :value="service.value"
+                  />
+                </el-select>
+                <div class="profile-helper-text">{{ t('admin.profileServiceScopeHint') }}</div>
+              </el-form-item>
+            </el-col>
+          </el-row>
+
           <el-divider content-position="left">{{ t('admin.profileHomeAddress') }}</el-divider>
           <el-form-item :label="t('admin.profileStreet')">
             <el-input v-model="profileForm.homeAddress.street" :placeholder="t('admin.profileStreetPh')" />
@@ -863,13 +1027,39 @@ async function deleteTemplate(tmpl) {
             <el-input v-model="profileForm.homeAddress.country" :placeholder="t('admin.profileCountryPh')" style="max-width:200px" />
           </el-form-item>
 
-          <el-divider content-position="left">{{ t('admin.profileWorkingHours') }}</el-divider>
-          <div v-for="day in WEEKDAYS" :key="day" style="display:flex; align-items:center; gap:8px; margin-bottom:8px">
-            <span style="width:40px; font-size:13px; color:#666">{{ WEEKDAY_LABELS[day] }}</span>
-            <el-time-picker v-model="profileForm.workingHours[day].start" format="HH:mm" value-format="HH:mm" :placeholder="t('admin.profileStartTime')" size="small" style="width:120px" />
-            <span style="color:#999">to</span>
-            <el-time-picker v-model="profileForm.workingHours[day].end" format="HH:mm" value-format="HH:mm" :placeholder="t('admin.profileEndTime')" size="small" style="width:120px" />
-          </div>
+          <template v-if="profileSupportsScheduling">
+            <el-divider content-position="left">{{ t('admin.profileWorkingHours') }}</el-divider>
+            <div v-for="day in WEEKDAYS" :key="day" class="schedule-day-card">
+              <div class="schedule-day-header">
+                <span class="schedule-day-label">{{ WEEKDAY_LABELS[day] }}</span>
+                <el-button size="small" text type="primary" @click="addWorkingHourRange(day)">{{ t('admin.addWorkingRange') }}</el-button>
+              </div>
+              <div class="schedule-range-list">
+                <div v-for="(range, index) in profileForm.workingHours[day]" :key="`${day}-${index}`" class="schedule-range-row">
+                  <el-time-picker v-model="range.start" format="HH:mm" value-format="HH:mm" :placeholder="t('admin.profileStartTime')" size="small" style="width:140px" />
+                  <span style="color:#999">{{ t('admin.profileRangeSeparator') }}</span>
+                  <el-time-picker v-model="range.end" format="HH:mm" value-format="HH:mm" :placeholder="t('admin.profileEndTime')" size="small" style="width:140px" />
+                  <el-button size="small" text type="danger" @click="removeWorkingHourRange(day, index)">{{ t('common.delete') }}</el-button>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <template v-if="profileSupportsInternship">
+            <el-divider content-position="left">{{ t('admin.internshipRecords') }}</el-divider>
+            <div class="internship-toolbar">
+              <div class="profile-helper-text">{{ t('admin.internshipWindowHint') }}</div>
+              <el-button size="small" type="warning" plain @click="handleInternshipToday()">{{ t('admin.addInternshipToday') }}</el-button>
+            </div>
+            <el-table
+              :data="(profileForm.internshipDates || []).map((date, index) => ({ id: `${date}-${index}`, date }))"
+              size="small"
+              border
+              :empty-text="t('admin.noInternshipRecords')"
+            >
+              <el-table-column prop="date" :label="t('common.date')" />
+            </el-table>
+          </template>
         </el-form>
         <template #footer>
           <el-button @click="showProfileDrawer = false">{{ t('common.cancel') }}</el-button>
@@ -1263,14 +1453,38 @@ async function deleteTemplate(tmpl) {
             </el-form-item>
             <el-divider>{{ t('admin.formulaHerbDetail') }}</el-divider>
             <el-row :gutter="8" style="margin-bottom:8px">
-              <el-col :span="8"><el-input v-model="editFormulaHerb.herbName" :placeholder="t('admin.formulaHerbNamePh')" size="small" /></el-col>
+              <el-col :span="8">
+                <el-select
+                  v-model="editFormulaHerb.herbDictId"
+                  filterable
+                  :placeholder="t('inventory.selectHerbRequired')"
+                  size="small"
+                  style="width:100%"
+                  @change="syncDraftHerb(editFormulaHerb, $event)"
+                >
+                  <el-option v-for="herb in herbOptions" :key="herb.id" :label="herb.name" :value="herb.id" />
+                </el-select>
+              </el-col>
               <el-col :span="5"><el-input-number v-model="editFormulaHerb.dosage" :min="0" :step="1" size="small" style="width:100%" /></el-col>
               <el-col :span="4"><el-input v-model="editFormulaHerb.unit" :placeholder="t('admin.formulaUnit')" size="small" /></el-col>
               <el-col :span="4"><el-input v-model="editFormulaHerb.notes" :placeholder="t('admin.formulaHerbNotes')" size="small" /></el-col>
               <el-col :span="3"><el-button size="small" type="primary" @click="addEditFormulaHerb">{{ t('common.add') }}</el-button></el-col>
             </el-row>
             <el-table :data="editFormulaForm.items" size="small" max-height="250" :empty-text="t('admin.formulaNoHerbsAdd')">
-              <el-table-column prop="herbName" :label="t('admin.formulaHerbName')" min-width="100" />
+              <el-table-column :label="t('admin.formulaHerbName')" min-width="180">
+                <template #default="{ row }">
+                  <el-select
+                    v-model="row.herbDictId"
+                    filterable
+                    :placeholder="row.herbName || t('inventory.selectHerbRequired')"
+                    size="small"
+                    style="width:100%"
+                    @change="syncRowHerb(row, $event)"
+                  >
+                    <el-option v-for="herb in herbOptions" :key="herb.id" :label="herb.name" :value="herb.id" />
+                  </el-select>
+                </template>
+              </el-table-column>
               <el-table-column :label="t('admin.formulaDosage')" width="80"><template #default="{ row }">{{ row.dosage }}{{ row.unit }}</template></el-table-column>
               <el-table-column prop="notes" :label="t('admin.formulaHerbNotes')" width="100" />
               <el-table-column width="60"><template #default="{ $index }"><el-button size="small" text type="danger" @click="removeEditFormulaHerb($index)">{{ t('common.delete') }}</el-button></template></el-table-column>
@@ -1794,7 +2008,16 @@ async function deleteTemplate(tmpl) {
         <el-divider>{{ t('admin.formulaHerbDetail') }}</el-divider>
         <el-row :gutter="8" style="margin-bottom:8px">
           <el-col :span="8">
-            <el-input v-model="newFormulaHerb.herbName" :placeholder="t('admin.formulaHerbNamePh')" size="small" />
+            <el-select
+              v-model="newFormulaHerb.herbDictId"
+              filterable
+              :placeholder="t('inventory.selectHerbRequired')"
+              size="small"
+              style="width:100%"
+              @change="syncDraftHerb(newFormulaHerb, $event)"
+            >
+              <el-option v-for="herb in herbOptions" :key="herb.id" :label="herb.name" :value="herb.id" />
+            </el-select>
           </el-col>
           <el-col :span="5">
             <el-input-number v-model="newFormulaHerb.dosage" :min="0" :step="1" size="small" style="width:100%" />
@@ -1810,7 +2033,20 @@ async function deleteTemplate(tmpl) {
           </el-col>
         </el-row>
         <el-table :data="newFormula.items" size="small" max-height="250" :empty-text="t('admin.formulaNoHerbsAdd')">
-          <el-table-column prop="herbName" :label="t('admin.formulaHerbName')" min-width="100" />
+          <el-table-column :label="t('admin.formulaHerbName')" min-width="180">
+            <template #default="{ row }">
+              <el-select
+                v-model="row.herbDictId"
+                filterable
+                :placeholder="row.herbName || t('inventory.selectHerbRequired')"
+                size="small"
+                style="width:100%"
+                @change="syncRowHerb(row, $event)"
+              >
+                <el-option v-for="herb in herbOptions" :key="herb.id" :label="herb.name" :value="herb.id" />
+              </el-select>
+            </template>
+          </el-table-column>
           <el-table-column :label="t('admin.formulaDosage')" width="80">
             <template #default="{ row }">{{ row.dosage }}{{ row.unit }}</template>
           </el-table-column>
@@ -2005,4 +2241,11 @@ async function deleteTemplate(tmpl) {
 .admin-view { max-width: 100%; }
 .tab-toolbar { margin-bottom: 16px; }
 .settings-card { max-width: 600px; border-radius: 10px; }
+.profile-helper-text { font-size: 12px; color: #888; line-height: 1.5; margin-top: 6px; }
+.schedule-day-card { border: 1px solid #eee; border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fafafa; }
+.schedule-day-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.schedule-day-label { font-size: 14px; font-weight: 600; color: #1b4332; }
+.schedule-range-list { display: flex; flex-direction: column; gap: 8px; }
+.schedule-range-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.internship-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 </style>

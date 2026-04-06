@@ -12,6 +12,16 @@ function clearSession() {
   localStorage.removeItem(AUTH_KEY)
 }
 
+function buildQuery(params = {}) {
+  const search = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return
+    search.set(key, String(value))
+  })
+  const queryString = search.toString()
+  return queryString ? `?${queryString}` : ''
+}
+
 async function request(path, { method = 'GET', body, auth = true } = {}) {
   const headers = {
     'Content-Type': 'application/json',
@@ -104,6 +114,7 @@ export const usersApi = {
   list() { return request('/api/users') },
   create(data) { return request('/api/users', { method: 'POST', body: data }) },
   update(id, data) { return request(`/api/users/${id}`, { method: 'PUT', body: data }) },
+  addInternshipToday(id) { return request(`/api/users/${id}/internship-today`, { method: 'POST' }) },
   remove(id) { return request(`/api/users/${id}`, { method: 'DELETE' }) },
 }
 
@@ -131,6 +142,9 @@ export const appointmentsApi = {
   list() { return request('/api/appointments') },
   create(data) { return request('/api/appointments', { method: 'POST', body: data }) },
   update(id, data) { return request(`/api/appointments/${id}`, { method: 'PUT', body: data }) },
+  availability(params = {}) {
+    return request(`/api/appointments/availability${buildQuery(params)}`)
+  },
   status(id, status) {
     return request(`/api/appointments/${id}/status`, { method: 'PATCH', body: { status } })
   },
@@ -150,6 +164,24 @@ export const consultationsApi = {
   complete(id) { return request(`/api/consultations/${id}/complete`, { method: 'PATCH' }) },
   paid(id, data = {}) {
     return request(`/api/consultations/${id}/paid`, { method: 'PATCH', body: data })
+  },
+  createPayment(id, data = {}) {
+    return request(`/api/consultations/${id}/payments`, { method: 'POST', body: data })
+  },
+  syncPrescription(id, data) {
+    return request(`/api/consultations/${id}/prescriptions`, { method: 'PATCH', body: data })
+  },
+  completePrescription(id, prescriptionId, data = {}) {
+    return request(`/api/consultations/${id}/prescriptions/${prescriptionId}/complete`, { method: 'PATCH', body: data })
+  },
+  deletePrescription(id, prescriptionId, data = {}) {
+    return request(`/api/consultations/${id}/prescriptions/${prescriptionId}/delete`, { method: 'PATCH', body: data })
+  },
+  reopenPrescription(id, prescriptionId) {
+    return request(`/api/consultations/${id}/prescriptions/${prescriptionId}/reopen`, { method: 'PATCH' })
+  },
+  dispensePrescription(id, prescriptionId) {
+    return request(`/api/consultations/${id}/prescriptions/${prescriptionId}/dispense`, { method: 'PATCH' })
   },
   dispense(id, { skipDeduct = true } = {}) {
     const params = skipDeduct ? '?skipDeduct=true' : ''
@@ -391,6 +423,22 @@ export const intakePublicApi = {
     return request(`/api/intake/${token}/submit`, {
       method: 'POST',
       body: formData,
+      auth: false,
+    })
+  },
+}
+
+export const publicBookingApi = {
+  options() {
+    return request('/api/public-booking/options', { auth: false })
+  },
+  availability(params = {}) {
+    return request(`/api/public-booking/availability${buildQuery(params)}`, { auth: false })
+  },
+  create(data) {
+    return request('/api/public-booking', {
+      method: 'POST',
+      body: data,
       auth: false,
     })
   },

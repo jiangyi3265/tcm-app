@@ -4,24 +4,33 @@ import { useI18n } from 'vue-i18n'
 import { useConsultationsStore } from '../../stores/consultations'
 import { usePatientsStore } from '../../stores/patients'
 import { useAuthStore } from '../../stores/auth'
-import { useInventoryStore } from '../../stores/inventory'
 import { useSettingsStore } from '../../stores/settings'
 import { useBranchesStore } from '../../stores/branches'
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
 import { printInvoice } from '../../utils/pdfExport'
 import { useEmailSimulator } from '../../utils/emailSimulator'
+import {
+  getLatestPaymentTime,
+  getOutstandingAmount,
+  getPaidAmount,
+  getPaymentRecords,
+  getPaymentStatus,
+} from '../../utils/prescriptionWorkflow'
+import { getPaymentMethodLabel, getPaymentMethodOptions, normalizePaymentMethodValue } from '../../utils/paymentMethods'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
 const consultationsStore = useConsultationsStore()
 const patientsStore = usePatientsStore()
 const authStore = useAuthStore()
-const inventoryStore = useInventoryStore()
 const settingsStore = useSettingsStore()
 const branchesStore = useBranchesStore()
 const { showEmailDialog, emailData, openEmailPreview, sendEmail, buildInvoiceEmail } = useEmailSimulator()
 
 const activeTab = ref('pending')
+const selectedConsult = ref(null)
+const showInvoiceDialog = ref(false)
+const selectedPaymentMethod = ref('cash')
 
 function toAmount(value) {
   const n = Number(value)
@@ -32,101 +41,123 @@ function formatAmount(value) {
   return toAmount(value).toFixed(2)
 }
 
+function getPaymentStatusTagType(status) {
+  if (status === 'paid') return 'success'
+  if (status === 'partial') return 'warning'
+  return 'info'
+}
+
+function getPaymentStatusLabel(status) {
+  if (status === 'paid') return t('cashier.statusPaid')
+  if (status === 'partial') return t('cashier.statusPartial')
+  return t('cashier.statusPending')
+}
+
+function enrichConsultation(consultation) {
+  return {
+    ...consultation,
+    totalAmount: toAmount(consultation.totalAmount),
+    taxAmount: toAmount(consultation.taxAmount),
+    paidAmount: getPaidAmount(consultation),
+    outstandingAmount: getOutstandingAmount(consultation),
+    paymentStatus: getPaymentStatus(consultation),
+    paymentRecords: getPaymentRecords(consultation),
+    latestPaymentTime: getLatestPaymentTime(consultation),
+    services: Array.isArray(consultation.services) ? consultation.services : [],
+    patient: patientsStore.getPatient(consultation.patientId),
+    practitioner: authStore.users.find((u) => u.id === consultation.practitionerId),
+  }
+}
+
 const pendingPayments = computed(() => {
   const branchId = branchesStore.currentBranchId
   return consultationsStore.pendingPayments
-    .filter(c => !branchId || c.branchId === branchId || !c.branchId)
-    .map((c) => ({
-      ...c,
-      totalAmount: toAmount(c.totalAmount),
-      taxAmount: toAmount(c.taxAmount),
-      services: Array.isArray(c.services) ? c.services : [],
-      patient: patientsStore.getPatient(c.patientId),
-      practitioner: authStore.users.find((u) => u.id === c.practitionerId),
-    }))
+    .filter((c) => !branchId || c.branchId === branchId || !c.branchId)
+    .map(enrichConsultation)
 })
 
-const paidConsultations = computed(() => {
+const paymentHistory = computed(() => {
   const branchId = branchesStore.currentBranchId
   return consultationsStore.consultations
-    .filter((c) => c.status === 'paid' && !c.deletedAt && (!branchId || c.branchId === branchId || !c.branchId))
-    .map((c) => ({
-      ...c,
-      totalAmount: toAmount(c.totalAmount),
-      taxAmount: toAmount(c.taxAmount),
-      services: Array.isArray(c.services) ? c.services : [],
-      patient: patientsStore.getPatient(c.patientId),
-      practitioner: authStore.users.find((u) => u.id === c.practitionerId),
-    }))
-    .sort((a, b) => new Date(b.lockedAt) - new Date(a.lockedAt))
-    .slice(0, 50)
+    .filter((c) => !c.deletedAt && (!branchId || c.branchId === branchId || !c.branchId))
+    .flatMap((consultation) => {
+      const enriched = enrichConsultation(consultation)
+      return enriched.paymentRecords.map((record) => ({
+        ...record,
+        consultation: enriched,
+        patient: enriched.patient,
+        practitioner: enriched.practitioner,
+      }))
+    })
+    .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
+    .slice(0, 100)
 })
 
-const selectedConsult = ref(null)
-const showInvoiceDialog = ref(false)
-const selectedPaymentMethod = ref('cash')
+const paymentMethods = computed(() => getPaymentMethodOptions(t))
 
-const paymentMethods = computed(() => [
-  { value: 'cash', label: t('cashier.paymentMethods.cash') },
-  { value: 'card', label: t('cashier.paymentMethods.card') },
-  { value: 'wechat', label: t('cashier.paymentMethods.wechat') },
-  { value: 'alipay', label: t('cashier.paymentMethods.alipay') },
-  { value: 'transfer', label: t('cashier.paymentMethods.transfer') },
-  { value: 'other', label: t('cashier.paymentMethods.other') },
-])
-
-function viewInvoice(consult) {
-  selectedConsult.value = consult
-  selectedPaymentMethod.value = 'cash'
-  showInvoiceDialog.value = true
-}
-
-async function processPayment(consult) {
-  try {
-    await ElMessageBox.confirm(
-      t('cashier.confirmPaymentMsg', { name: consult.patient?.name, amount: formatAmount(consult.totalAmount) }),
-      t('cashier.confirmPaymentTitle'),
-      { type: 'success' },
-    )
-  } catch {
-    return // 用户取消
-  }
-  try {
-    const updated = await consultationsStore.markAsPaid(consult.id, { paymentMethod: selectedPaymentMethod.value })
-    await inventoryStore.refreshFromApi()
-    ElMessage.success(t('cashier.paymentSuccess'))
-    showInvoiceDialog.value = false
-    // 发票邮件预览
-    const emailContent = buildInvoiceEmail(consult.patient, { ...consult, ...updated }, settingsStore.clinicName)
-    if (consult.patient?.emails?.[0] || consult.patient?.email) {
-      openEmailPreview(emailContent)
-    }
-  } catch (e) {
-    ElMessage.error(e.message || t('cashier.paymentFailed'))
-  }
-}
-
-function handlePrintInvoice(consult) {
-  printInvoice(consult, consult.patient, consult.practitioner, settingsStore.clinicName, settingsStore.taxRate)
-}
-
-// 今日收入统计
 const todayRevenue = computed(() => {
   const today = new Date().toISOString().split('T')[0]
-  return paidConsultations.value
-    .filter((c) => c.lockedAt?.startsWith(today))
-    .reduce((sum, c) => sum + toAmount(c.totalAmount), 0)
+  return paymentHistory.value
+    .filter((record) => String(record.date || '').startsWith(today))
+    .reduce((sum, record) => sum + toAmount(record.amount), 0)
 })
 
 const todayCount = computed(() => {
   const today = new Date().toISOString().split('T')[0]
-  return paidConsultations.value.filter((c) => c.lockedAt?.startsWith(today)).length
+  return paymentHistory.value.filter((record) => String(record.date || '').startsWith(today)).length
 })
+
+function viewInvoice(target) {
+  const consultation = target?.consultation || target
+  if (!consultation) return
+  selectedConsult.value = enrichConsultation(consultation)
+  selectedPaymentMethod.value = 'cash'
+  showInvoiceDialog.value = true
+}
+
+async function processPayment(consultation) {
+  const consult = enrichConsultation(consultation)
+  if (consult.outstandingAmount <= 0) {
+    ElMessage.info(t('cashier.noPendingAmount'))
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      t('cashier.confirmPaymentMsg', { name: consult.patient?.name, amount: formatAmount(consult.outstandingAmount) }),
+      t('cashier.confirmPaymentTitle'),
+      { type: 'success' },
+    )
+  } catch {
+    return
+  }
+
+  try {
+    const updated = await consultationsStore.markAsPaid(consult.id, {
+      paymentMethod: normalizePaymentMethodValue(selectedPaymentMethod.value),
+      amount: consult.outstandingAmount,
+    })
+    const refreshed = enrichConsultation(updated || consult)
+    selectedConsult.value = refreshed
+    ElMessage.success(t('cashier.paymentSuccess'))
+
+    const emailContent = buildInvoiceEmail(refreshed.patient, refreshed, settingsStore.clinicName)
+    if (refreshed.patient?.emails?.[0] || refreshed.patient?.email) {
+      openEmailPreview(emailContent)
+    }
+  } catch (error) {
+    ElMessage.error(error.message || t('cashier.paymentFailed'))
+  }
+}
+
+function handlePrintInvoice(consultation) {
+  if (!consultation) return
+  printInvoice(consultation, consultation.patient, consultation.practitioner, settingsStore.clinicName, settingsStore.taxRate)
+}
 </script>
 
 <template>
   <div class="cashier-view">
-    <!-- 今日统计 -->
     <div class="cashier-stats">
       <div class="cashier-stat">
         <div class="cstat-label">{{ t('cashier.todayTransactions') }}</div>
@@ -143,17 +174,12 @@ const todayCount = computed(() => {
     </div>
 
     <el-tabs v-model="activeTab">
-      <!-- 待收款 -->
       <el-tab-pane :label="t('cashier.pendingTab')" name="pending">
         <div v-if="pendingPayments.length === 0" class="empty-state">
           <el-empty :description="t('cashier.noPending')" />
         </div>
         <div v-else class="payment-list">
-          <el-card
-            v-for="c in pendingPayments"
-            :key="c.id"
-            class="payment-card"
-          >
+          <el-card v-for="c in pendingPayments" :key="c.id" class="payment-card">
             <div class="payment-header">
               <div class="payment-patient">
                 <el-avatar :size="40" style="background: var(--color-primary)">
@@ -165,9 +191,20 @@ const todayCount = computed(() => {
                 </div>
               </div>
               <div class="payment-amount">
-                <div class="amount-total">${{ formatAmount(c.totalAmount) }}</div>
-                <div class="amount-tax" style="font-size: 12px; color: #888">{{ t('cashier.tax') }} ${{ formatAmount(c.taxAmount) }}</div>
+                <div class="amount-total">${{ formatAmount(c.outstandingAmount) }}</div>
+                <div class="amount-meta">
+                  {{ t('cashier.paidAmount') }} ${{ formatAmount(c.paidAmount) }} / {{ t('cashier.totalCharge') }} ${{ formatAmount(c.totalAmount) }}
+                </div>
               </div>
+            </div>
+
+            <div class="payment-tags">
+              <el-tag :type="getPaymentStatusTagType(c.paymentStatus)" size="small">
+                {{ getPaymentStatusLabel(c.paymentStatus) }}
+              </el-tag>
+              <el-tag v-if="c.latestPaymentTime" type="info" size="small">
+                {{ t('cashier.lastPayment') }} {{ formatDateTime(c.latestPaymentTime) }}
+              </el-tag>
             </div>
 
             <div class="payment-services">
@@ -178,7 +215,7 @@ const todayCount = computed(() => {
                 type="info"
                 style="margin-right: 4px; margin-bottom: 4px"
               >
-                {{ s.name }} ${{ formatAmount(s?.price) }}
+                {{ s.name }} ${{ formatAmount((Number(s?.price || 0) * (s?.quantity || 1)) - (s?.manualDiscount || 0)) }}
               </el-tag>
             </div>
 
@@ -192,28 +229,30 @@ const todayCount = computed(() => {
         </div>
       </el-tab-pane>
 
-      <!-- 已收款历史 -->
       <el-tab-pane :label="t('cashier.historyTab')" name="history">
-        <el-table :data="paidConsultations" stripe>
+        <div v-if="paymentHistory.length === 0" class="empty-state">
+          <el-empty :description="t('cashier.noHistory')" />
+        </div>
+        <el-table v-else :data="paymentHistory" stripe>
           <el-table-column :label="t('cashier.patient')" min-width="100">
             <template #default="{ row }">{{ row.patient?.name }}</template>
           </el-table-column>
           <el-table-column :label="t('cashier.consultDate')" width="120">
-            <template #default="{ row }">{{ formatDate(row.date) }}</template>
+            <template #default="{ row }">{{ formatDate(row.consultation?.date) }}</template>
           </el-table-column>
           <el-table-column :label="t('cashier.practitioner')" width="90">
             <template #default="{ row }">{{ row.practitioner?.name }}</template>
           </el-table-column>
           <el-table-column :label="t('cashier.amount')" width="110" align="right">
             <template #default="{ row }">
-              <span style="font-weight: 600; color: #1b4332">${{ formatAmount(row.totalAmount) }}</span>
+              <span style="font-weight: 600; color: #1b4332">${{ formatAmount(row.amount) }}</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('cashier.taxAmount')" width="90" align="right">
-            <template #default="{ row }">${{ formatAmount(row.taxAmount) }}</template>
+          <el-table-column :label="t('cashier.paymentMethod')" width="100">
+            <template #default="{ row }">{{ getPaymentMethodLabel(row.method, t) }}</template>
           </el-table-column>
           <el-table-column :label="t('cashier.paymentTime')" width="160">
-            <template #default="{ row }">{{ formatDateTime(row.lockedAt) }}</template>
+            <template #default="{ row }">{{ formatDateTime(row.date) }}</template>
           </el-table-column>
           <el-table-column :label="t('cashier.operation')" width="80">
             <template #default="{ row }">
@@ -224,7 +263,6 @@ const todayCount = computed(() => {
       </el-tab-pane>
     </el-tabs>
 
-    <!-- 发票对话框 -->
     <el-drawer v-model="showInvoiceDialog" :title="t('cashier.invoiceDetail')" size="480px" direction="rtl">
       <div v-if="selectedConsult" class="invoice-view">
         <div class="inv-top">
@@ -252,25 +290,27 @@ const todayCount = computed(() => {
           </el-table-column>
         </el-table>
         <div class="inv-totals">
-          <div class="inv-row"><span>{{ t('cashier.subtotal') }}</span><span>${{ formatAmount(toAmount(selectedConsult.totalAmount) - toAmount(selectedConsult.taxAmount)) }}</span></div>
+          <div class="inv-row"><span>{{ t('cashier.subtotal') }}</span><span>${{ formatAmount(selectedConsult.totalAmount - selectedConsult.taxAmount) }}</span></div>
           <div class="inv-row"><span>{{ t('cashier.salesTax', { rate: (toAmount(settingsStore.taxRate) * 100).toFixed(0) }) }}</span><span>${{ formatAmount(selectedConsult.taxAmount) }}</span></div>
-          <div class="inv-row total"><span>{{ t('cashier.totalAmount') }}</span><span>${{ formatAmount(selectedConsult.totalAmount) }}</span></div>
+          <div class="inv-row"><span>{{ t('cashier.totalCharge') }}</span><span>${{ formatAmount(selectedConsult.totalAmount) }}</span></div>
+          <div class="inv-row"><span>{{ t('cashier.paidAmount') }}</span><span>${{ formatAmount(selectedConsult.paidAmount) }}</span></div>
+          <div class="inv-row total"><span>{{ t('cashier.currentCharge') }}</span><span>${{ formatAmount(selectedConsult.outstandingAmount) }}</span></div>
         </div>
-        <div v-if="selectedConsult.status !== 'paid'" style="margin-top: 12px">
+        <div v-if="selectedConsult.outstandingAmount > 0" style="margin-top: 12px">
           <strong style="font-size: 13px; color: #555">{{ t('cashier.paymentMethod') }}：</strong>
           <el-radio-group v-model="selectedPaymentMethod" size="small" style="margin-top: 6px">
             <el-radio-button v-for="m in paymentMethods" :key="m.value" :value="m.value">{{ m.label }}</el-radio-button>
           </el-radio-group>
         </div>
         <div class="inv-status">
-          <el-tag :type="selectedConsult.status === 'paid' ? 'success' : 'warning'" size="large">
-            {{ selectedConsult.status === 'paid' ? t('cashier.statusPaid') : t('cashier.statusPending') }}
+          <el-tag :type="getPaymentStatusTagType(selectedConsult.paymentStatus)" size="large">
+            {{ getPaymentStatusLabel(selectedConsult.paymentStatus) }}
           </el-tag>
         </div>
       </div>
       <template #footer>
         <el-button @click="showInvoiceDialog = false">{{ t('common.close') }}</el-button>
-        <el-button v-if="selectedConsult?.status !== 'paid'" type="primary" @click="processPayment(selectedConsult)">
+        <el-button v-if="selectedConsult?.outstandingAmount > 0" type="primary" @click="processPayment(selectedConsult)">
           {{ t('cashier.confirmPayment') }}
         </el-button>
         <el-button type="info" @click="handlePrintInvoice(selectedConsult)">
@@ -279,7 +319,6 @@ const todayCount = computed(() => {
       </template>
     </el-drawer>
 
-    <!-- 邮件预览对话框 -->
     <el-drawer v-model="showEmailDialog" :title="t('email.preview')" size="520px" direction="rtl">
       <el-form label-width="60px" size="small">
         <el-form-item :label="t('email.recipient')">
@@ -335,6 +374,7 @@ const todayCount = computed(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 10px;
+  gap: 12px;
 }
 
 .payment-patient { display: flex; gap: 12px; align-items: center; }
@@ -343,6 +383,14 @@ const todayCount = computed(() => {
 
 .payment-amount { text-align: right; }
 .amount-total { font-size: 22px; font-weight: 700; color: #1b4332; }
+.amount-meta { font-size: 12px; color: #888; margin-top: 2px; }
+
+.payment-tags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
 
 .payment-services { margin-bottom: 12px; }
 .payment-actions { text-align: right; display: flex; gap: 8px; justify-content: flex-end; }

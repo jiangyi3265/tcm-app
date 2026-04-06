@@ -14,6 +14,19 @@ function normalizeUserRoles(user) {
   return []
 }
 
+function resolvePractitionerSortOrder(user) {
+  const sortOrder = Number(user?.practitionerSortOrder)
+  return Number.isFinite(sortOrder) ? sortOrder : Number.MAX_SAFE_INTEGER
+}
+
+function comparePractitioners(left, right) {
+  const sortDiff = resolvePractitionerSortOrder(left) - resolvePractitionerSortOrder(right)
+  if (sortDiff !== 0) return sortDiff
+  const nameDiff = String(left?.name || '').localeCompare(String(right?.name || ''), 'zh-Hans-CN')
+  if (nameDiff !== 0) return nameDiff
+  return String(left?.id || '').localeCompare(String(right?.id || ''))
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const currentUser = ref(null)
   const users = ref([])
@@ -118,6 +131,22 @@ export const useAuthStore = defineStore('auth', () => {
     return updated
   }
 
+  function syncUser(user) {
+    if (!user?.id) return null
+    const idx = users.value.findIndex((item) => String(item.id) === String(user.id))
+    if (idx === -1) {
+      users.value.push(user)
+    } else {
+      users.value[idx] = user
+    }
+    saveUsers()
+    if (currentUser.value?.id === user.id) {
+      currentUser.value = { ...currentUser.value, ...user }
+      saveState()
+    }
+    return user
+  }
+
   async function deleteUser(id) {
     await usersApi.remove(id)
     users.value = users.value.filter((u) => u.id !== id)
@@ -125,12 +154,19 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function getPractitioners() {
-    return users.value.filter((u) => {
-      return normalizeUserRoles(u).some((rawRole) => {
-        const roleKey = String(rawRole).toLowerCase()
-        return roleKey === 'practitioner' || roleKey === 'doctor'
+    return users.value
+      .filter((u) => {
+        return normalizeUserRoles(u).some((rawRole) => {
+          const roleKey = String(rawRole).toLowerCase()
+          return roleKey === 'practitioner' || roleKey === 'doctor'
+        })
       })
-    })
+      .slice()
+      .sort(comparePractitioners)
+  }
+
+  function getUserById(id) {
+    return users.value.find((user) => String(user.id) === String(id)) || null
   }
 
   init()
@@ -146,7 +182,9 @@ export const useAuthStore = defineStore('auth', () => {
     logout,
     addUser,
     updateUser,
+    syncUser,
     deleteUser,
+    getUserById,
     getPractitioners,
   }
 })

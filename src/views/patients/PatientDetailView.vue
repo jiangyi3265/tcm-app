@@ -5,11 +5,20 @@ import { useI18n } from 'vue-i18n'
 import { usePatientsStore } from '../../stores/patients'
 import { useConsultationsStore } from '../../stores/consultations'
 import { useAuthStore } from '../../stores/auth'
-import { hasPermission, canAccessPatientRecords } from '../../utils/permissions'
+import { useAppointmentsStore } from '../../stores/appointments'
+import { hasPermission, canAccessPatientRecords, filterAccessibleConsultations } from '../../utils/permissions'
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
 import { filesApi, patientsApi } from '../../utils/api'
 import { useSettingsStore } from '../../stores/settings'
 import { buildCopiedTreatmentData } from '../../utils/consultationCopy'
+import { getPaymentStatus } from '../../utils/prescriptionWorkflow'
+import {
+  canSelectNewerHistory,
+  canSelectOlderHistory,
+  getHistoryDisplayOrder,
+  getNewerHistoryIndex,
+  getOlderHistoryIndex,
+} from '../../utils/historyCompareNavigation'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
@@ -19,15 +28,23 @@ const router = useRouter()
 const patientsStore = usePatientsStore()
 const consultationsStore = useConsultationsStore()
 const authStore = useAuthStore()
+const appointmentsStore = useAppointmentsStore()
 
 const roles = computed(() => authStore.roles)
 const canEdit = computed(() => hasPermission(roles.value, 'patient.edit'))
 const canCreate = computed(() => hasPermission(roles.value, 'consultation.create'))
 const canDelete = computed(() => hasPermission(roles.value, 'patient.delete'))
+const isApprenticeReadonly = computed(() => roles.value.includes('apprentice'))
 
 const patientId = route.params.id
 const patient = computed(() => patientsStore.getPatient(patientId))
-const consultations = computed(() => consultationsStore.getPatientConsultations(patientId))
+const consultations = computed(() =>
+  filterAccessibleConsultations(
+    roles.value,
+    consultationsStore.getPatientConsultations(patientId),
+    { currentUser: authStore.currentUser },
+  ),
+)
 const practitioners = computed(() => authStore.getPractitioners())
 const firstConsultation = computed(() => {
   if (!consultations.value.length) return null
@@ -48,10 +65,25 @@ const hasConsultationDrivenHistory = computed(() => !!firstConsultation.value)
 
 const activeTab = ref('summary')
 
+watch(isApprenticeReadonly, (readonly) => {
+  if (readonly && activeTab.value !== 'consultations') {
+    activeTab.value = 'consultations'
+  }
+}, { immediate: true })
+
 // ── 隐私保护：非主治医师1周后无法访问 ──
 const hasAccess = computed(() => {
   if (!patient.value) return false
-  return canAccessPatientRecords(roles.value, authStore.userId, patient.value, consultationsStore.getPatientConsultations(patientId))
+  return canAccessPatientRecords(
+    roles.value,
+    authStore.userId,
+    patient.value,
+    consultationsStore.getPatientConsultations(patientId),
+    {
+      currentUser: authStore.currentUser,
+      appointments: appointmentsStore.getPatientAppointments(patientId),
+    },
+  )
 })
 
 // ── 编辑模式 ──
@@ -141,6 +173,16 @@ const STATUS_MAP = {
   paid: { type: 'success' },
 }
 
+function getConsultTagType(consultation) {
+  if (getPaymentStatus(consultation) === 'paid') return 'success'
+  return STATUS_MAP[consultation.status]?.type || 'info'
+}
+
+function getConsultStatusLabel(consultation) {
+  if (getPaymentStatus(consultation) === 'paid') return t('consultation.paymentStatusPaid')
+  return t('consultStatus.' + consultation.status)
+}
+
 // ── 辨证寒热 ──
 function getColdHeat(consult) {
   const val = consult.diff?.coldHeat || consult.coldHeat
@@ -156,12 +198,13 @@ const compareConsultation = computed(() => {
   if (!compareMode.value || consultations.value.length < 2) return null
   return consultations.value[compareIndex.value]
 })
+const compareDisplayOrder = computed(() => getHistoryDisplayOrder(compareIndex.value, consultations.value.length))
 
 function prevCompare() {
-  if (compareIndex.value < consultations.value.length - 1) compareIndex.value++
+  compareIndex.value = getOlderHistoryIndex(compareIndex.value, consultations.value.length)
 }
 function nextCompare() {
-  if (compareIndex.value > 0) compareIndex.value--
+  compareIndex.value = getNewerHistoryIndex(compareIndex.value)
 }
 
 // ── 快速拷贝到新诊疗 ──
@@ -390,18 +433,18 @@ const fileTree = computed(() => {
         <div class="patient-basic">
           <div class="patient-name-row">
             <h2>{{ patient.name }}</h2>
-            <el-tag :type="patient.consentSigned ? 'success' : 'danger'" size="small">
+            <el-tag v-if="!isApprenticeReadonly" :type="patient.consentSigned ? 'success' : 'danger'" size="small">
               {{ patient.consentSigned ? t('patientDetail.consentSignedTag') : t('patientDetail.consentUnsignedTag') }}
             </el-tag>
-            <el-tag v-if="patient.consentPdfUrl" type="success" size="small" effect="plain"
+            <el-tag v-if="!isApprenticeReadonly && patient.consentPdfUrl" type="success" size="small" effect="plain"
               style="cursor:pointer" @click="openPatientFile({ url: patient.consentPdfUrl, label: t('patientDetail.consentPdfFile') })">
               PDF
             </el-tag>
-            <el-tag v-if="patient.gender" :type="patient.gender === '男' ? 'primary' : 'danger'" size="small">
+            <el-tag v-if="!isApprenticeReadonly && patient.gender" :type="patient.gender === '男' ? 'primary' : 'danger'" size="small">
               {{ patient.gender }}
             </el-tag>
           </div>
-          <div class="patient-meta">
+          <div v-if="!isApprenticeReadonly" class="patient-meta">
             <span v-if="patient.jobTitle">{{ patient.jobTitle }}</span>
             <span v-if="patient.jobTitle && patient.accountName"> · </span>
             <span v-if="patient.accountName">{{ patient.accountName }}</span>
@@ -416,7 +459,7 @@ const fileTree = computed(() => {
         </div>
       </div>
       <div class="patient-actions">
-        <el-button v-if="!patient.consentSigned" size="small" @click="sendConsent">
+        <el-button v-if="!isApprenticeReadonly && !patient.consentSigned" size="small" @click="sendConsent">
           <el-icon><Document /></el-icon> {{ t('patientDetail.signConsent') }}
         </el-button>
         <el-button v-if="canEdit && !editing" size="small" @click="startEdit">
@@ -436,10 +479,17 @@ const fileTree = computed(() => {
 
     <!-- 主内容标签页 -->
     <el-card class="detail-card">
+      <el-alert
+        v-if="isApprenticeReadonly"
+        :title="t('patientDetail.apprenticeReadonlyNotice')"
+        type="info"
+        :closable="false"
+        style="margin-bottom: 12px"
+      />
       <el-tabs v-model="activeTab">
 
         <!-- ══════════ Tab 1: Summary 基本信息 ══════════ -->
-        <el-tab-pane :label="t('patientDetail.tabSummary')" name="summary">
+        <el-tab-pane v-if="!isApprenticeReadonly" :label="t('patientDetail.tabSummary')" name="summary">
           <div v-if="!editing">
             <!-- 查看模式 -->
             <el-row :gutter="24">
@@ -493,7 +543,7 @@ const fileTree = computed(() => {
                     <el-timeline-item
                       v-for="consult in consultations.slice(0, 8)"
                       :key="consult.id"
-                      :type="consult.status === 'paid' ? 'success' : consult.status === 'completed' ? 'warning' : 'info'"
+                      :type="getConsultTagType(consult)"
                       :timestamp="formatDate(consult.date)"
                       placement="top"
                     >
@@ -503,8 +553,8 @@ const fileTree = computed(() => {
                       >
                         <div class="timeline-complaint">{{ consult.chiefComplaint || t('dashboard.generalConsultation') }}</div>
                         <div class="timeline-status">
-                          <el-tag :type="STATUS_MAP[consult.status]?.type" size="small">
-                            {{ t('consultStatus.' + consult.status) }}
+                          <el-tag :type="getConsultTagType(consult)" size="small">
+                            {{ getConsultStatusLabel(consult) }}
                           </el-tag>
                           <span v-if="consult.totalAmount > 0" class="timeline-amount">
                             ${{ consult.totalAmount.toFixed(2) }}
@@ -773,17 +823,17 @@ const fileTree = computed(() => {
           <div v-if="compareMode && consultations.length >= 2" class="compare-mode">
             <div class="compare-nav">
               <el-button
-                :disabled="compareIndex >= consultations.length - 1"
+                :disabled="!canSelectOlderHistory(compareIndex, consultations.length)"
                 :icon="'ArrowLeft'"
                 circle
                 size="small"
                 @click="prevCompare"
               />
               <span class="compare-label">
-                {{ formatDate(compareConsultation?.date) }} ↔ {{ formatDate(consultations[0]?.date) }}（{{ t('patientDetail.latest') }}）
+                {{ formatDate(compareConsultation?.date) }} ↔ {{ formatDate(consultations[0]?.date) }}（{{ compareDisplayOrder }}/{{ consultations.length }}）
               </span>
               <el-button
-                :disabled="compareIndex <= 0"
+                :disabled="!canSelectNewerHistory(compareIndex)"
                 :icon="'ArrowRight'"
                 circle
                 size="small"
@@ -854,8 +904,8 @@ const fileTree = computed(() => {
             </el-table-column>
             <el-table-column :label="t('common.status')" width="90">
               <template #default="{ row }">
-                <el-tag :type="STATUS_MAP[row.status]?.type" size="small">
-                  {{ t('consultStatus.' + row.status) }}
+                <el-tag :type="getConsultTagType(row)" size="small">
+                  {{ getConsultStatusLabel(row) }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -890,14 +940,14 @@ const fileTree = computed(() => {
             </el-table-column>
             <el-table-column label="" width="60" fixed="right">
               <template #default="{ row }">
-                <el-icon v-if="row.lockedAt" color="#bbb" :title="t('patientDetail.locked')"><Lock /></el-icon>
+                <el-icon v-if="getPaymentStatus(row) === 'paid'" color="#bbb" :title="t('consultation.paymentStatusPaid')"><Lock /></el-icon>
               </template>
             </el-table-column>
           </el-table>
         </el-tab-pane>
 
         <!-- ══════════ Tab 3: Consent 知情同意书 ══════════ -->
-        <el-tab-pane :label="t('patientDetail.tabConsent')" name="consent">
+        <el-tab-pane v-if="!isApprenticeReadonly" :label="t('patientDetail.tabConsent')" name="consent">
           <div class="consent-tab">
             <el-row :gutter="24">
               <el-col :span="14">
@@ -977,7 +1027,7 @@ const fileTree = computed(() => {
         </el-tab-pane>
 
         <!-- ══════════ Tab 4: Related 关联记录 ══════════ -->
-        <el-tab-pane :label="t('patientDetail.tabRelated')" name="related">
+        <el-tab-pane v-if="!isApprenticeReadonly" :label="t('patientDetail.tabRelated')" name="related">
           <div class="related-tab">
             <el-row :gutter="16">
               <!-- 诊疗统计 -->
@@ -1001,7 +1051,7 @@ const fileTree = computed(() => {
                 <el-card shadow="never" class="stat-card">
                   <div class="stat-icon" style="color: #3a86ff"><el-icon :size="28"><Calendar /></el-icon></div>
                   <div class="stat-num">
-                    {{ consultations.filter(c => c.status === 'paid').length }}
+                    {{ consultations.filter(c => getPaymentStatus(c) === 'paid').length }}
                   </div>
                   <div class="stat-label">{{ t('patientDetail.paidVisitCount') }}</div>
                 </el-card>
@@ -1018,8 +1068,8 @@ const fileTree = computed(() => {
                     <el-table-column :label="t('patientDetail.chiefComplaint')" prop="chiefComplaint" min-width="120" />
                     <el-table-column :label="t('common.status')" width="90">
                       <template #default="{ row }">
-                        <el-tag :type="STATUS_MAP[row.status]?.type" size="small">
-                          {{ t('consultStatus.' + row.status) }}
+                        <el-tag :type="getConsultTagType(row)" size="small">
+                          {{ getConsultStatusLabel(row) }}
                         </el-tag>
                       </template>
                     </el-table-column>
@@ -1059,7 +1109,7 @@ const fileTree = computed(() => {
         </el-tab-pane>
 
         <!-- ══════════ Tab 5: Files 文件管理 ══════════ -->
-        <el-tab-pane :label="t('patientDetail.tabFiles')" name="files">
+        <el-tab-pane v-if="!isApprenticeReadonly" :label="t('patientDetail.tabFiles')" name="files">
           <div class="files-tab">
             <div class="files-toolbar">
               <el-button size="small" @click="loadPatientFiles" :loading="filesLoading">

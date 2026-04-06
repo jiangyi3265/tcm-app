@@ -8,6 +8,7 @@ import { useAppointmentsStore } from '../../stores/appointments'
 import { useInventoryStore } from '../../stores/inventory'
 import { statisticsApi } from '../../utils/api'
 import { formatDate, dayjs } from '../../utils/dateUtils'
+import { getPaymentRecords, getPaymentStatus } from '../../utils/prescriptionWorkflow'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -18,8 +19,7 @@ const inventoryStore = useInventoryStore()
 
 const CURRENCY_SYMBOLS = { CAD: '$', USD: '$', CNY: '¥' }
 const cs = computed(() => {
-  // Derive currency from paid consultations (most common), fallback to ¥
-  const currencies = paidConsultations.value.map(c => c.currency).filter(Boolean)
+  const currencies = allPaymentRecords.value.map((record) => record.consultation?.currency).filter(Boolean)
   if (currencies.length === 0) return '¥'
   const counts = {}
   currencies.forEach(c => { counts[c] = (counts[c] || 0) + 1 })
@@ -34,28 +34,33 @@ const serverStats = ref(null)
 const totalPatients = computed(() => serverStats.value?.totalPatients ?? patientsStore.activePatients.length)
 const allConsultations = computed(() => consultationsStore.consultations.filter(c => !c.deletedAt))
 const totalConsultations = computed(() => serverStats.value?.totalConsultations ?? allConsultations.value.length)
+const allPaymentRecords = computed(() =>
+  allConsultations.value.flatMap((consultation) => getPaymentRecords(consultation).map((record) => ({
+    ...record,
+    consultation,
+  }))),
+)
 
-const paidConsultations = computed(() => allConsultations.value.filter(c => c.status === 'paid'))
-const totalRevenue = computed(() => serverStats.value?.totalRevenue ?? paidConsultations.value.reduce((s, c) => s + (c.totalAmount || 0), 0))
+const paidConsultations = computed(() => allConsultations.value.filter(c => getPaymentStatus(c) === 'paid'))
+const totalRevenue = computed(() => allPaymentRecords.value.reduce((sum, record) => sum + Number(record.amount || 0), 0))
 
 // Consultation status breakdown
 const statusBreakdown = computed(() => {
   const draft = serverStats.value?.draftCount ?? allConsultations.value.filter(c => c.status === 'draft').length
   const completed = serverStats.value?.completedCount ?? allConsultations.value.filter(c => c.status === 'completed').length
-  const paid = serverStats.value?.paidCount ?? paidConsultations.value.length
+  const paid = paidConsultations.value.length
   return { draft, completed, paid }
 })
 
 // Revenue last 7 days
 const dailyRevenue = computed(() => {
-  if (serverStats.value?.dailyRevenue) return serverStats.value.dailyRevenue
   const result = []
   for (let i = 6; i >= 0; i--) {
     const day = dayjs().subtract(i, 'day').format('YYYY-MM-DD')
     const dayShort = dayjs().subtract(i, 'day').format('MM/DD')
-    const revenue = paidConsultations.value
-      .filter(c => c.date === day)
-      .reduce((s, c) => s + (c.totalAmount || 0), 0)
+    const revenue = allPaymentRecords.value
+      .filter((record) => String(record.date || '').startsWith(day))
+      .reduce((sum, record) => sum + Number(record.amount || 0), 0)
     const count = allConsultations.value.filter(c => c.date === day).length
     result.push({ date: day, dayShort, revenue, count })
   }
@@ -64,15 +69,17 @@ const dailyRevenue = computed(() => {
 
 // Monthly revenue last 6 months
 const monthlyRevenue = computed(() => {
-  if (serverStats.value?.monthlyRevenue) return serverStats.value.monthlyRevenue
   const result = []
   for (let i = 5; i >= 0; i--) {
     const monthStart = dayjs().subtract(i, 'month').startOf('month')
     const monthEnd = monthStart.endOf('month')
     const label = monthStart.format('YYYY-MM')
-    const revenue = paidConsultations.value
-      .filter(c => c.date && c.date >= monthStart.format('YYYY-MM-DD') && c.date <= monthEnd.format('YYYY-MM-DD'))
-      .reduce((s, c) => s + (c.totalAmount || 0), 0)
+    const revenue = allPaymentRecords.value
+      .filter((record) => {
+        const date = String(record.date || '').slice(0, 10)
+        return date >= monthStart.format('YYYY-MM-DD') && date <= monthEnd.format('YYYY-MM-DD')
+      })
+      .reduce((sum, record) => sum + Number(record.amount || 0), 0)
     const count = allConsultations.value
       .filter(c => c.date && c.date >= monthStart.format('YYYY-MM-DD') && c.date <= monthEnd.format('YYYY-MM-DD'))
       .length
@@ -119,24 +126,28 @@ const maxMonthlyRevenue = computed(() => Math.max(...monthlyRevenue.value.map(d 
 
 // Today's stats
 const todayStr = computed(() => dayjs().format('YYYY-MM-DD'))
-const todayRevenue = computed(() => paidConsultations.value.filter(c => c.date === todayStr.value).reduce((s, c) => s + (c.totalAmount || 0), 0))
+const todayRevenue = computed(() =>
+  allPaymentRecords.value
+    .filter((record) => String(record.date || '').startsWith(todayStr.value))
+    .reduce((sum, record) => sum + Number(record.amount || 0), 0),
+)
 const todayConsultations = computed(() => allConsultations.value.filter(c => c.date === todayStr.value).length)
 const todayAppointments = computed(() => appointmentsStore.todayAppointments.length)
 
 // This week
 const weekRevenue = computed(() => {
   const weekStart = dayjs().startOf('week').format('YYYY-MM-DD')
-  return paidConsultations.value
-    .filter(c => c.date && c.date >= weekStart)
-    .reduce((s, c) => s + (c.totalAmount || 0), 0)
+  return allPaymentRecords.value
+    .filter((record) => String(record.date || '').slice(0, 10) >= weekStart)
+    .reduce((sum, record) => sum + Number(record.amount || 0), 0)
 })
 
 // This month
 const monthRevenue = computed(() => {
   const monthStart = dayjs().startOf('month').format('YYYY-MM-DD')
-  return paidConsultations.value
-    .filter(c => c.date && c.date >= monthStart)
-    .reduce((s, c) => s + (c.totalAmount || 0), 0)
+  return allPaymentRecords.value
+    .filter((record) => String(record.date || '').slice(0, 10) >= monthStart)
+    .reduce((sum, record) => sum + Number(record.amount || 0), 0)
 })
 
 function formatMoney(val) {

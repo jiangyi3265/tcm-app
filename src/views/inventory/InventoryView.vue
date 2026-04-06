@@ -5,8 +5,10 @@ import { useInventoryStore } from '../../stores/inventory'
 import { useAuthStore } from '../../stores/auth'
 import { useBranchesStore } from '../../stores/branches'
 import { useSuppliersStore } from '../../stores/suppliers'
+import { useHerbDictStore } from '../../stores/herbDict'
 import { useSettingsStore } from '../../stores/settings'
 import { hasPermission } from '../../utils/permissions'
+import { bindHerbSelection, getInventoryHerbMeta, validateBoundHerb } from '../../utils/herbBinding'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t, te, locale } = useI18n()
@@ -15,6 +17,7 @@ const inventoryStore = useInventoryStore()
 const authStore = useAuthStore()
 const branchesStore = useBranchesStore()
 const suppliersStore = useSuppliersStore()
+const herbDictStore = useHerbDictStore()
 const settingsStore = useSettingsStore()
 
 const roles = computed(() => authStore.roles)
@@ -42,6 +45,15 @@ const CATEGORY_CONFIG = computed(() => ({
   raw_herbs: { label: t('inventory.rawHerbs'), unit: 'g', defaultUnit: 'g' },
   pills: { label: t('inventory.pillsMed'), unit: '盒', defaultUnit: '盒' },
 }))
+
+const herbById = computed(() => new Map(herbDictStore.activeHerbs.map((herb) => [herb.id, herb])))
+
+const herbOptions = computed(() =>
+  herbDictStore.activeHerbs.map((herb) => ({
+    value: herb.id,
+    label: herb.pinyin ? `${herb.name} (${herb.pinyin})` : herb.name,
+  })),
+)
 
 // TCM 药材属性选项
 const HERB_NATURES = ['寒', '凉', '平', '温', '热']
@@ -73,8 +85,18 @@ function formatHistoryTime(value) {
   return date.toLocaleString(locale.value === 'zh-CN' ? 'zh-CN' : 'en-US')
 }
 
+function getHerbMeta(item) {
+  return getInventoryHerbMeta(item, herbById)
+}
+
+function syncHerbBinding(target, herbId) {
+  const herb = herbById.value.get(herbId) || herbById.value.get(String(herbId)) || null
+  return bindHerbSelection(target, herb)
+}
+
 const newItem = ref({
   name: '',
+  herbDictId: null,
   aliases: '',
   category: 'powder',
   unit: '包',
@@ -141,7 +163,14 @@ function getStockStatus(item) {
 }
 
 async function handleAddItem() {
-  if (!newItem.value.name) return ElMessage.warning(t('inventory.fillName'))
+  if (newItem.value.category === 'raw_herbs') {
+    newItem.value = syncHerbBinding(newItem.value, newItem.value.herbDictId)
+    if (!validateBoundHerb(newItem.value)) {
+      return ElMessage.warning(t('inventory.selectHerbRequired'))
+    }
+  } else if (!newItem.value.name) {
+    return ElMessage.warning(t('inventory.fillName'))
+  }
   try {
     await inventoryStore.addItem({ ...newItem.value, category: activeTab.value, branchId: branchesStore.currentBranchId || null })
     ElMessage.success(t('inventory.added'))
@@ -154,7 +183,7 @@ async function handleAddItem() {
 
 function resetNewItem() {
   newItem.value = {
-    name: '', aliases: '', category: 'powder', unit: '包', quantity: 0, purchasePrice: 0,
+    name: '', herbDictId: null, aliases: '', category: 'powder', unit: '包', quantity: 0, purchasePrice: 0,
     pricePerUnit: 0, supplierId: '', supplier: '', gramsPerPacket: null, minStockLevel: 10,
     nature: '', taste: [], guijing: [], toxicity: '无毒',
     functionsAndIndications: '', contraindications: '',
@@ -203,6 +232,7 @@ function startEdit(item) {
 
   editForm.value = {
     ...item,
+    herbDictId: item.herbDictId || null,
     taste: normalizeArray(item.taste),
     guijing: normalizeArray(item.guijing),
   }
@@ -210,12 +240,37 @@ function startEdit(item) {
 
 async function saveEdit(id) {
   try {
+    if (editForm.value.category === 'raw_herbs') {
+      editForm.value = syncHerbBinding(editForm.value, editForm.value.herbDictId)
+      if (!validateBoundHerb(editForm.value)) {
+        return ElMessage.warning(t('inventory.selectHerbRequired'))
+      }
+    }
     await inventoryStore.updateItem(id, editForm.value)
     editingId.value = null
     ElMessage.success(t('inventory.saved'))
   } catch (e) {
     ElMessage.error(e.message || t('inventory.saveFailed'))
   }
+}
+
+function handleNewCategoryChange(value) {
+  newItem.value.unit = CATEGORY_CONFIG.value[value]?.defaultUnit || newItem.value.unit
+  if (value === 'raw_herbs') {
+    if (newItem.value.herbDictId) {
+      newItem.value = syncHerbBinding(newItem.value, newItem.value.herbDictId)
+    }
+  } else {
+    newItem.value.herbDictId = null
+  }
+}
+
+function handleNewHerbChange(herbId) {
+  newItem.value = syncHerbBinding(newItem.value, herbId)
+}
+
+function handleEditHerbChange(herbId) {
+  editForm.value = syncHerbBinding(editForm.value, herbId)
 }
 
 async function handleBatchImport() {
@@ -312,8 +367,23 @@ async function openAdjustmentHistory(item) {
             <el-table-column :label="t('inventory.itemName')" min-width="180">
               <template #default="{ row }">
                 <div v-if="editingId === row.id">
-                  <el-input v-model="editForm.name" size="small" :placeholder="t('inventory.herbNamePh')" />
-                  <el-input v-model="editForm.aliases" size="small" :placeholder="t('inventory.aliasesOptional')" style="margin-top: 4px" />
+                  <template v-if="row.category === 'raw_herbs'">
+                    <el-select
+                      v-model="editForm.herbDictId"
+                      filterable
+                      clearable
+                      size="small"
+                      style="width: 100%"
+                      :placeholder="editForm.name || t('inventory.selectHerbRequired')"
+                      @change="handleEditHerbChange"
+                    >
+                      <el-option v-for="herb in herbOptions" :key="herb.value" :label="herb.label" :value="herb.value" />
+                    </el-select>
+                  </template>
+                  <template v-else>
+                    <el-input v-model="editForm.name" size="small" :placeholder="t('inventory.herbNamePh')" />
+                    <el-input v-model="editForm.aliases" size="small" :placeholder="t('inventory.aliasesOptional')" style="margin-top: 4px" />
+                  </template>
                 </div>
                 <div v-else>
                   <div>
@@ -322,30 +392,41 @@ async function openAdjustmentHistory(item) {
                       {{ getStockStatus(row).label }}
                     </el-tag>
                   </div>
-                  <div v-if="row.aliases" style="font-size: 11px; color: #aaa; margin-top: 2px">{{ t('inventory.aliases') }}：{{ row.aliases }}</div>
+                  <div v-if="getHerbMeta(row).alias" style="font-size: 11px; color: #aaa; margin-top: 2px">{{ t('inventory.aliases') }}：{{ getHerbMeta(row).alias }}</div>
                 </div>
               </template>
             </el-table-column>
           <el-table-column :label="t('inventory.natureTasteChannel')" min-width="180">
               <template #default="{ row }">
                 <div v-if="editingId === row.id">
-                  <el-select v-model="editForm.nature" size="small" :placeholder="t('inventory.nature')" style="width: 100%; margin-bottom: 4px">
-                    <el-option v-for="n in HERB_NATURES" :key="n" :label="localizeInventoryValue('natureOptions', n)" :value="n" />
-                  </el-select>
-                  <el-select v-model="editForm.taste" size="small" multiple :placeholder="t('inventory.taste')" style="width: 100%; margin-bottom: 4px">
-                    <el-option v-for="taste in HERB_TASTES" :key="taste" :label="localizeInventoryValue('tasteOptions', taste)" :value="taste" />
-                  </el-select>
-                  <el-select v-model="editForm.guijing" size="small" multiple :placeholder="t('inventory.channel')" style="width: 100%">
-                    <el-option v-for="c in HERB_CHANNELS" :key="c" :label="localizeInventoryValue('channelOptions', c)" :value="c" />
-                  </el-select>
+                  <template v-if="row.category === 'raw_herbs'">
+                    <div style="font-size: 12px">
+                      <span v-if="getHerbMeta(editForm).nature" class="tcm-badge nature">{{ localizeInventoryValue('natureOptions', getHerbMeta(editForm).nature) }}</span>
+                      <span v-for="taste in getHerbMeta(editForm).taste" :key="taste" class="tcm-badge taste">{{ localizeInventoryValue('tasteOptions', taste) }}</span>
+                    </div>
+                    <div v-if="getHerbMeta(editForm).guijing.length" style="font-size: 11px; color: #888; margin-top: 2px">
+                      {{ t('inventory.channelShort') }}：{{ getHerbMeta(editForm).guijing.map((item) => localizeInventoryValue('channelOptions', item)).join(locale === 'zh-CN' ? '、' : ', ') }}
+                    </div>
+                  </template>
+                  <template v-else>
+                    <el-select v-model="editForm.nature" size="small" :placeholder="t('inventory.nature')" style="width: 100%; margin-bottom: 4px">
+                      <el-option v-for="n in HERB_NATURES" :key="n" :label="localizeInventoryValue('natureOptions', n)" :value="n" />
+                    </el-select>
+                    <el-select v-model="editForm.taste" size="small" multiple :placeholder="t('inventory.taste')" style="width: 100%; margin-bottom: 4px">
+                      <el-option v-for="taste in HERB_TASTES" :key="taste" :label="localizeInventoryValue('tasteOptions', taste)" :value="taste" />
+                    </el-select>
+                    <el-select v-model="editForm.guijing" size="small" multiple :placeholder="t('inventory.channel')" style="width: 100%">
+                      <el-option v-for="c in HERB_CHANNELS" :key="c" :label="localizeInventoryValue('channelOptions', c)" :value="c" />
+                    </el-select>
+                  </template>
                 </div>
                 <div v-else>
                   <div style="font-size: 12px">
-                    <span v-if="row.nature" class="tcm-badge nature">{{ localizeInventoryValue('natureOptions', row.nature) }}</span>
-                    <span v-for="taste in normalizeArray(row.taste)" :key="taste" class="tcm-badge taste">{{ localizeInventoryValue('tasteOptions', taste) }}</span>
+                    <span v-if="getHerbMeta(row).nature" class="tcm-badge nature">{{ localizeInventoryValue('natureOptions', getHerbMeta(row).nature) }}</span>
+                    <span v-for="taste in getHerbMeta(row).taste" :key="taste" class="tcm-badge taste">{{ localizeInventoryValue('tasteOptions', taste) }}</span>
                   </div>
-                  <div v-if="normalizeArray(row.guijing).length" style="font-size: 11px; color: #888; margin-top: 2px">
-                    {{ t('inventory.channelShort') }}：{{ normalizeArray(row.guijing).map((item) => localizeInventoryValue('channelOptions', item)).join(locale === 'zh-CN' ? '、' : ', ') }}
+                  <div v-if="getHerbMeta(row).guijing.length" style="font-size: 11px; color: #888; margin-top: 2px">
+                    {{ t('inventory.channelShort') }}：{{ getHerbMeta(row).guijing.map((item) => localizeInventoryValue('channelOptions', item)).join(locale === 'zh-CN' ? '、' : ', ') }}
                   </div>
                 </div>
               </template>
@@ -437,17 +518,31 @@ async function openAdjustmentHistory(item) {
         <el-row :gutter="12">
           <el-col :span="14">
             <el-form-item :label="t('inventory.herbNameLabel')" required>
-              <el-input v-model="newItem.name" :placeholder="t('inventory.herbNamePh')" />
+              <template v-if="newItem.category === 'raw_herbs'">
+                <el-select
+                  v-model="newItem.herbDictId"
+                  filterable
+                  clearable
+                  style="width:100%"
+                  :placeholder="t('inventory.selectHerbRequired')"
+                  @change="handleNewHerbChange"
+                >
+                  <el-option v-for="herb in herbOptions" :key="herb.value" :label="herb.label" :value="herb.value" />
+                </el-select>
+              </template>
+              <template v-else>
+                <el-input v-model="newItem.name" :placeholder="t('inventory.herbNamePh')" />
+              </template>
             </el-form-item>
           </el-col>
-          <el-col :span="10">
+          <el-col v-if="newItem.category !== 'raw_herbs'" :span="10">
             <el-form-item :label="t('inventory.aliases')">
               <el-input v-model="newItem.aliases" :placeholder="t('inventory.aliasesPh')" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item :label="t('inventory.categoryLabel')">
-              <el-select v-model="newItem.category" @change="(v) => { newItem.unit = CATEGORY_CONFIG[v].defaultUnit }">
+              <el-select v-model="newItem.category" @change="handleNewCategoryChange">
                 <el-option v-for="(c, k) in CATEGORY_CONFIG" :key="k" :label="c.label" :value="k" />
               </el-select>
             </el-form-item>
@@ -496,8 +591,8 @@ async function openAdjustmentHistory(item) {
           </el-col>
         </el-row>
 
-        <div class="inv-form-title">{{ t('inventory.tcmProperties') }}</div>
-        <el-row :gutter="12">
+        <div v-if="newItem.category !== 'raw_herbs'" class="inv-form-title">{{ t('inventory.tcmProperties') }}</div>
+        <el-row v-if="newItem.category !== 'raw_herbs'" :gutter="12">
           <el-col :span="12">
             <el-form-item :label="t('inventory.nature')">
               <el-select v-model="newItem.nature" :placeholder="t('inventory.selectNature')" style="width:100%">

@@ -1,5 +1,5 @@
 ﻿<script setup>
-import { ref, computed, onMounted, onBeforeUnmount, reactive, inject } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, reactive, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useConsultationsStore } from '../../stores/consultations'
@@ -12,7 +12,7 @@ import { useBranchesStore } from '../../stores/branches'
 import { useFormulasStore } from '../../stores/formulas'
 import { useAcupointsStore } from '../../stores/acupoints'
 import { useHerbDictStore } from '../../stores/herbDict'
-import { hasPermission } from '../../utils/permissions'
+import { hasPermission, getAuthorizedServiceKeys } from '../../utils/permissions'
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
 import { TCM_OPTIONS, CHIEF_COMPLAINTS, emptyDiff, normalizeDiff } from '../../utils/sampleData'
 import { printConsultationReport, printPrescription } from '../../utils/pdfExport'
@@ -20,7 +20,34 @@ import { useEmailSimulator } from '../../utils/emailSimulator'
 import { filesApi, consultationsApi } from '../../utils/api'
 import { calculatePrescription, recalcWithSupplier } from '../../utils/prescriptionCalc'
 import { rehydrateCopiedPrescriptions } from '../../utils/consultationCopy'
+import { persistCopiedConsultationData } from '../../utils/consultationCopyFlow'
+import {
+  hasEditablePrescriptionItems,
+  shouldSyncPrescriptionDraft,
+} from '../../utils/consultationInventorySync'
+import {
+  shouldQueueRxAutosave,
+  shouldSkipRxAutosaveAfterSync,
+} from '../../utils/rxAutosaveGuard'
 import { localizeMixedText } from '../../utils/localizeMixedText'
+import {
+  getActivePrescriptions,
+  getBillablePrescriptionTotal,
+  getLatestPaymentTime,
+  getOutstandingAmount,
+  getPaidAmount,
+  getPaymentRecords,
+  getPaymentStatus,
+  getPrescriptionStatus,
+} from '../../utils/prescriptionWorkflow'
+import {
+  canStartInvoicePayment,
+  getPaymentMethodLabel,
+  getPaymentMethodOptions,
+  normalizePaymentMethodValue,
+  requiresPosSimulation,
+} from '../../utils/paymentMethods'
+import { resolveInvoicePaymentAfterSave } from '../../utils/invoicePaymentFlow'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ConsultationComparePanel from './ConsultationComparePanel.vue'
 
@@ -48,13 +75,11 @@ const isNew = route.name === 'consultation-new'
 
 const patient = computed(() => patientsStore.getPatient(patientId))
 const roles = computed(() => authStore.roles)
-const isReadOnly = computed(() => {
-  if (!hasPermission(roles.value, 'consultation.edit')) return true
-  if (form.value.lockedAt) return !roles.value.includes('admin')
-  return false
-})
+const isReadOnly = computed(() => !hasPermission(roles.value, 'consultation.edit'))
+const isApprenticeReadonly = computed(() => roles.value.includes('apprentice'))
 const canMarkPaid = computed(() => hasPermission(roles.value, 'invoice.manage'))
 const canDeleteConsultation = computed(() => hasPermission(roles.value, 'consultation.delete'))
+const canViewInvoiceTab = computed(() => ['admin', 'cashier'].some((role) => roles.value?.includes(role)))
 
 const lastConsultation = computed(() =>
   isNew ? consultStore.getLastConsultation(patientId) : null,
@@ -141,6 +166,11 @@ const lastSavedSnapshot = ref('')
 const unsavedTrackingReady = ref(false)
 const rxEditorSnapshot = ref('')
 const bypassUnsavedPrompt = ref(false)
+const showInvoicePaymentDialog = ref(false)
+const showPosSimulationDialog = ref(false)
+const invoicePaymentMethod = ref('bankcard')
+const pendingPosPaymentMethod = ref('')
+const invoicePaymentSubmitting = ref(false)
 
 function cloneJson(value, fallback = null) {
   if (value === undefined) return fallback
@@ -223,6 +253,12 @@ function syncRxBaseline() {
 }
 
 function resetRxEditorState() {
+  if (rxAutosaveTimer) {
+    clearTimeout(rxAutosaveTimer)
+    rxAutosaveTimer = null
+  }
+  pendingRxAutosave.value = false
+  rxCompleting.value = false
   rxEditorSnapshot.value = ''
   editingRxIdx.value = -1
   formulaSearch.value = ''
@@ -300,6 +336,21 @@ const sortedPatientConsultations = computed(() => {
 
 const firstConsultation = computed(() => sortedPatientConsultations.value[0] || null)
 const currentConsultationId = computed(() => consultation.value?.id || consultId || form.value.id || null)
+const visiblePrescriptions = computed(() => getActivePrescriptions(form.value))
+const paymentRecords = computed(() => getPaymentRecords(form.value))
+const paymentStatus = computed(() => getPaymentStatus(form.value))
+const paidAmount = computed(() => getPaidAmount(form.value))
+const outstandingAmount = computed(() => getOutstandingAmount(form.value))
+const latestPaymentTime = computed(() => getLatestPaymentTime(form.value))
+const invoicePaymentAmount = computed(() => Math.max(0, Number(outstandingAmount.value || 0)))
+const canStartInvoicePaymentAction = computed(() =>
+  canStartInvoicePayment({
+    consultationId: currentConsultationId.value,
+    outstandingAmount: outstandingAmount.value,
+    consultationStatus: form.value.status,
+  }),
+)
+const paymentMethodOptions = computed(() => getPaymentMethodOptions(t))
 
 const firstConsultDate = computed(() => firstConsultation.value?.date || '')
 
@@ -321,7 +372,7 @@ const historyMedSourceText = computed(() => {
   }
   return form.value.historyAndMedicationSnapshot
     || form.value.historyAndMedication
-    || patient.value?.historyAndMedication
+    || (isApprenticeReadonly.value ? '' : patient.value?.historyAndMedication)
     || ''
 })
 
@@ -368,7 +419,7 @@ async function saveHistoryMed() {
   editingHistoryMed.value = false
 }
 
-function onCopySection(data) {
+async function onCopySection(data) {
   const { diff, prescriptions, ...rest } = data || {}
   if (diff) {
     form.value.diff = { ...form.value.diff, ...diff }
@@ -376,6 +427,12 @@ function onCopySection(data) {
   Object.assign(form.value, rest)
   if (Array.isArray(prescriptions)) {
     applyCopiedPrescriptions(prescriptions)
+    await persistCopiedConsultationData({
+      currentConsultationId: currentConsultationId.value,
+      prescriptions: form.value.prescriptions,
+      persistConsultationDraft,
+      persistCopiedPrescriptions,
+    })
   }
   form.value.servicePriceList = normalizeServicePriceListSelection(form.value.servicePriceList)
   ElMessage.success(t('consultation.copiedToRecord'))
@@ -502,6 +559,9 @@ onMounted(() => {
         if (copyData.acupuncture) form.value.acupuncture = [...copyData.acupuncture]
         if (copyData.prescriptions) {
           applyCopiedPrescriptions(copyData.prescriptions)
+          persistCopiedPrescriptions(form.value.prescriptions).catch((error) => {
+            ElMessage.error(error.message || t('common.operationFailed'))
+          })
         }
         if (copyData.services) form.value.services = [...copyData.services]
         form.value.servicePriceList = normalizeServicePriceListSelection(form.value.servicePriceList)
@@ -545,12 +605,19 @@ onBeforeUnmount(() => {
 const showRxDialog = ref(false)
 const editingRxIdx = ref(-1)
 const formulaSearch = ref('')
+const rxAutosaving = ref(false)
+const rxCompleting = ref(false)
+const suspendRxAutosave = ref(false)
+const pendingRxAutosave = ref(false)
+let rxAutosaveTimer = null
+let rxAutosavePromise = null
 const formulaSuggestions = computed(() => {
   if (!formulaSearch.value || formulaSearch.value.trim() === '') return []
   const q = formulaSearch.value.trim().toLowerCase()
   return (formulasStore.formulas || []).filter(f => f.name && f.name.toLowerCase().includes(q))
 })
 const rxForm = ref({
+  id: '',
   formulaName: '',
   prescriptionType: normalizePrescriptionPreference(authStore.currentUser?.prescriptionPreference),
   quantity: 7,
@@ -559,12 +626,19 @@ const rxForm = ref({
   preferredUnit: 'g',
   items: [],
   comments: '',
+  rxStatus: 'editing',
 })
+
+function buildRxId() {
+  return `rx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
 
 function openNewRx() {
   editingRxIdx.value = -1
   const defaultPreference = normalizePrescriptionPreference(authStore.currentUser?.prescriptionPreference)
+  suspendRxAutosave.value = true
   rxForm.value = {
+    id: buildRxId(),
     formulaName: '',
     prescriptionType: defaultPreference,
     quantity: 7,
@@ -573,18 +647,32 @@ function openNewRx() {
     preferredUnit: defaultPreference === 'powder' ? 'bag' : 'g',
     items: [],
     comments: '',
+    rxStatus: 'editing',
   }
+  suspendRxAutosave.value = false
   syncRxBaseline()
   showRxDialog.value = true
 }
 
-function openEditRx(idx) {
+function resolvePrescriptionIndex(target) {
+  if (typeof target === 'number') return target
+  const rxId = typeof target === 'string' ? target : target?.id
+  if (!rxId) return -1
+  return form.value.prescriptions.findIndex((item) => item.id === rxId)
+}
+
+function openEditRx(target) {
+  const idx = resolvePrescriptionIndex(target)
+  if (idx < 0) return
   editingRxIdx.value = idx
   const oldRx = form.value.prescriptions[idx]
+  suspendRxAutosave.value = true
   rxForm.value = {
     ...oldRx,
-    items: (oldRx.items || []).map(i => ({ ...i }))
+    items: (oldRx.items || []).map(i => ({ ...i })),
+    rxStatus: oldRx?.rxStatus || getPrescriptionStatus(oldRx),
   }
+  suspendRxAutosave.value = false
   syncRxBaseline()
   showRxDialog.value = true
 }
@@ -617,7 +705,7 @@ function hasDispensingCompleted(source = form.value) {
   if (!source) return false
   if (source.dispensingCompleted) return true
   return Array.isArray(source.prescriptions)
-    && source.prescriptions.some((prescription) => prescription?.dispensingCompleted)
+    && source.prescriptions.some((prescription) => getPrescriptionStatus(prescription) === 'dispensed')
 }
 
 function resetDispensingState(target = form.value) {
@@ -636,17 +724,53 @@ function resetDispensingState(target = form.value) {
   }
   if (Array.isArray(target.prescriptions)) {
     target.prescriptions.forEach((prescription) => {
-      prescription.dispensingCompleted = false
+      if (getPrescriptionStatus(prescription) !== 'dispensed') {
+        prescription.dispensingCompleted = false
+      }
     })
   }
 }
 
 function isPrescriptionDispensed(row) {
-  return hasDispensingCompleted(form.value) || Boolean(row?.dispensingCompleted)
+  return getPrescriptionStatus(row) === 'dispensed'
+}
+
+function getPrescriptionStatusLabel(row) {
+  const status = getPrescriptionStatus(row)
+  if (status === 'editing') return t('consultation.rxStatusEditing')
+  if (status === 'pending') return t('consultation.rxStatusPending')
+  if (status === 'dispensed') return t('consultation.rxStatusDispensed')
+  return status
+}
+
+function getPrescriptionStatusTagType(row) {
+  const status = getPrescriptionStatus(row)
+  if (status === 'editing') return 'info'
+  if (status === 'pending') return 'warning'
+  if (status === 'dispensed') return 'success'
+  return 'info'
+}
+
+function getPaymentStatusLabel(source = form.value) {
+  const status = getPaymentStatus(source)
+  if (status === 'paid') return t('consultation.paymentStatusPaid')
+  if (status === 'partial') return t('consultation.paymentStatusPartial')
+  return t('consultation.paymentStatusUnpaid')
+}
+
+function getPaymentStatusTagType(source = form.value) {
+  const status = getPaymentStatus(source)
+  if (status === 'paid') return 'success'
+  if (status === 'partial') return 'warning'
+  return 'info'
+}
+
+function getPaymentRecordKey(record, index) {
+  return record?.id || `${record?.date || 'payment'}-${index}`
 }
 
 function syncFormFromPrimaryPrescription() {
-  const first = form.value.prescriptions[0]
+  const first = form.value.prescriptions.find((item) => getPrescriptionStatus(item) !== 'deleted')
   if (first) {
     form.value.herbals = (first.items || []).map(i => ({
       name: i.name,
@@ -675,6 +799,156 @@ function applyCopiedPrescriptions(sourcePrescriptions = []) {
   resetDispensingState(form.value)
 }
 
+function buildPrescriptionPayload(source = rxForm.value, overrideStatus = 'editing') {
+  return {
+    ...source,
+    id: source.id || buildRxId(),
+    subtotal: rxSubtotal.value,
+    perDoseSubtotal: rxPerDoseSubtotal.value,
+    rxStatus: overrideStatus,
+    dispensingCompleted: overrideStatus === 'dispensed',
+    items: (source.items || []).map((item) => ({ ...item })),
+  }
+}
+
+function hasPersistableRxDraft(source = rxForm.value) {
+  return hasEditablePrescriptionItems(source)
+}
+
+function shouldPersistRxDraft(source = rxForm.value) {
+  return shouldSyncPrescriptionDraft({
+    source,
+    existingPrescriptionIds: form.value.prescriptions.map((item) => item.id),
+  })
+}
+
+function buildRxTotals() {
+  return {
+    totalAmount: totalAmount.value,
+    taxAmount: taxAmount.value,
+    totalWithoutTax: totalWithoutTax.value,
+  }
+}
+
+function updateEditingRxIndex(rxId) {
+  editingRxIdx.value = form.value.prescriptions.findIndex((item) => item.id === rxId)
+}
+
+function syncRxFormFromConsultation(rxId) {
+  if (!showRxDialog.value || !rxId) return
+  const saved = form.value.prescriptions.find((item) => item.id === rxId)
+  if (!saved) return
+  suspendRxAutosave.value = true
+  rxForm.value = {
+    ...saved,
+    items: (saved.items || []).map((item) => ({ ...item })),
+  }
+  suspendRxAutosave.value = false
+  syncRxBaseline()
+  updateEditingRxIndex(rxId)
+}
+
+async function ensureConsultationForPrescription() {
+  if (currentConsultationId.value) return currentConsultationId.value
+  const created = await persistConsultationDraft({ silent: true, syncRoute: true })
+  return created?.id || currentConsultationId.value
+}
+
+async function syncPrescriptionDraft({ silent = true } = {}) {
+  if (isReadOnly.value || suspendRxAutosave.value || !showRxDialog.value) return null
+  const currentSnapshot = buildRxDraftSnapshot()
+  if (shouldSkipRxAutosaveAfterSync({
+    currentSnapshot,
+    baselineSnapshot: rxEditorSnapshot.value,
+  })) return null
+  if (shouldQueueRxAutosave({
+    rxSyncing: rxAutosaving.value,
+    hasPendingChanges: hasUnsavedRxDialogChanges.value,
+  })) {
+    pendingRxAutosave.value = true
+    return null
+  }
+  const payload = buildPrescriptionPayload(rxForm.value, 'editing')
+  if (!shouldPersistRxDraft(payload)) return null
+
+  const consultationId = await ensureConsultationForPrescription()
+  if (!consultationId) throw new Error(t('consultation.saveBefore'))
+
+  pendingRxAutosave.value = false
+  rxAutosaving.value = true
+  const autosaveTask = (async () => {
+    const updated = await consultStore.syncPrescription(consultationId, {
+      prescription: payload,
+      totals: buildRxTotals(),
+    })
+    applySavedConsultation(updated)
+    syncSavedSnapshot()
+    syncRxFormFromConsultation(payload.id)
+    return updated
+  })()
+  rxAutosavePromise = autosaveTask
+  try {
+    return await autosaveTask
+  } finally {
+    if (rxAutosavePromise === autosaveTask) {
+      rxAutosavePromise = null
+    }
+    rxAutosaving.value = false
+    if (pendingRxAutosave.value && hasUnsavedRxDialogChanges.value) {
+      pendingRxAutosave.value = false
+      scheduleRxAutosave()
+    }
+  }
+}
+
+async function waitForRxAutosaveToFinish() {
+  if (!rxAutosavePromise) return
+  await rxAutosavePromise
+}
+
+function scheduleRxAutosave() {
+  if (rxAutosaveTimer) clearTimeout(rxAutosaveTimer)
+  if (!showRxDialog.value || suspendRxAutosave.value || isReadOnly.value) return
+  rxAutosaveTimer = setTimeout(async () => {
+    try {
+      await syncPrescriptionDraft({ silent: true })
+    } catch (error) {
+      ElMessage.error(error.message || t('common.operationFailed'))
+    }
+  }, 500)
+}
+
+async function persistCopiedPrescriptions(sourcePrescriptions = []) {
+  if (!Array.isArray(sourcePrescriptions) || sourcePrescriptions.length === 0) return
+  const consultationId = await ensureConsultationForPrescription()
+  if (!consultationId) return
+
+  for (const prescription of sourcePrescriptions) {
+    if (!prescription?.id) prescription.id = buildRxId()
+    const cloned = {
+      ...prescription,
+      items: (prescription.items || []).map((item) => ({ ...item })),
+      rxStatus: 'editing',
+      dispensingCompleted: false,
+    }
+    const updated = await consultStore.syncPrescription(consultationId, {
+      prescription: cloned,
+      totals: buildRxTotals(),
+    })
+    applySavedConsultation(updated)
+    syncSavedSnapshot()
+  }
+}
+
+watch(
+  () => rxForm.value,
+  () => {
+    if (!hasUnsavedRxDialogChanges.value) return
+    scheduleRxAutosave()
+  },
+  { deep: true },
+)
+
 const rxDrawerSize = computed(() => (isMobile.value ? '100%' : '640px'))
 const sideDrawerSize = computed(() => (isMobile.value ? '100%' : '520px'))
 
@@ -682,9 +956,6 @@ async function persistConsultationDraft({ silent = false, syncRoute = true } = {
   saving.value = true
   try {
     applyHistorySnapshotToForm()
-    if (form.value.status === 'paid' && form.value.prescriptionType !== 'none' && form.value.prescriptions.length > 0) {
-      resetDispensingState(form.value)
-    }
     const data = buildPersistPayload()
     const targetId = currentConsultationId.value
 
@@ -724,26 +995,12 @@ async function persistConsultationDraft({ silent = false, syncRoute = true } = {
 }
 
 async function saveRx() {
-  const isEditing = editingRxIdx.value >= 0
-  const oldRx = isEditing ? form.value.prescriptions[editingRxIdx.value] : null
-
-  const rx = {
-    ...rxForm.value,
-    id: isEditing ? (oldRx?.id || 'rx-' + Date.now()) : 'rx-' + Date.now(),
-    subtotal: rxSubtotal.value,
-    perDoseSubtotal: rxPerDoseSubtotal.value,
-    dispensingCompleted: false,
+  if (rxCompleting.value) return
+  const rx = buildPrescriptionPayload(rxForm.value, 'pending')
+  if (!hasPersistableRxDraft(rx)) {
+    ElMessage.warning(t('admin.fillFormulaHerbs'))
+    return
   }
-
-  if (isEditing) {
-    form.value.prescriptions.splice(editingRxIdx.value, 1, rx)
-  } else {
-    form.value.prescriptions.push(rx)
-  }
-  if (form.value.status === 'paid' || hasDispensingCompleted(form.value) || oldRx?.dispensingCompleted) {
-    resetDispensingState(form.value)
-  }
-  syncFormFromPrimaryPrescription()
 
   if (rx.prescriptionType && rx.prescriptionType !== 'none') {
     const insufficientItems = rx.items.filter(i => i.stockSufficient === false)
@@ -753,23 +1010,75 @@ async function saveRx() {
     }
   }
 
+  rxCompleting.value = true
   try {
-    await persistConsultationDraft({ silent: true })
+    await waitForRxAutosaveToFinish()
+    await syncPrescriptionDraft({ silent: true })
+    const consultationId = currentConsultationId.value
+    if (!consultationId) throw new Error(t('consultation.saveBefore'))
+    const updated = await consultStore.completePrescription(consultationId, rx.id, {
+      totals: buildRxTotals(),
+    })
+    applySavedConsultation(updated)
+    syncSavedSnapshot()
     showRxDialog.value = false
   } catch (e) {
     ElMessage.error(e.message || t('common.operationFailed'))
+  } finally {
+    rxCompleting.value = false
   }
 }
 
-async function deleteRx(idx) {
-  form.value.prescriptions.splice(idx, 1)
-  if (form.value.status === 'paid' || hasDispensingCompleted(form.value)) {
-    resetDispensingState(form.value)
+async function deleteRx(target) {
+  const idx = resolvePrescriptionIndex(target)
+  if (idx < 0) return
+  const targetRx = form.value.prescriptions[idx]
+  if (!targetRx) return
+  if (!currentConsultationId.value) {
+    form.value.prescriptions.splice(idx, 1)
+    syncFormFromPrimaryPrescription()
+    return
   }
-  syncFormFromPrimaryPrescription()
+  try {
+    const updated = await consultStore.deletePrescription(currentConsultationId.value, targetRx.id, {
+      totals: buildRxTotals(),
+    })
+    applySavedConsultation(updated)
+    syncSavedSnapshot()
+  } catch (error) {
+    ElMessage.error(error.message || t('common.operationFailed'))
+  }
 }
 
-function handlePrintRx(idx) {
+async function completeRxRow(row) {
+  if (!row?.id || !currentConsultationId.value) return
+  try {
+    const updated = await consultStore.completePrescription(currentConsultationId.value, row.id, {
+      totals: buildRxTotals(),
+    })
+    applySavedConsultation(updated)
+    syncSavedSnapshot()
+    ElMessage.success(t('consultation.rxCompleted'))
+  } catch (error) {
+    ElMessage.error(error.message || t('common.operationFailed'))
+  }
+}
+
+async function reopenRxRow(row) {
+  if (!row?.id || !currentConsultationId.value) return
+  try {
+    const updated = await consultStore.reopenPrescription(currentConsultationId.value, row.id)
+    applySavedConsultation(updated)
+    syncSavedSnapshot()
+    ElMessage.success(t('consultation.rxReopened'))
+  } catch (error) {
+    ElMessage.error(error.message || t('common.operationFailed'))
+  }
+}
+
+function handlePrintRx(target) {
+  const idx = resolvePrescriptionIndex(target)
+  if (idx < 0) return
   const practitioner = authStore.users.find(u => u.id === form.value.practitionerId)
   const clinicName = settingsStore.clinicName || 'Clinic'
   printPrescription(form.value, patient.value, practitioner, clinicName, idx)
@@ -912,7 +1221,41 @@ function addAcu() { form.value.acupuncture.push({ point: '', side: 'bilateral', 
 function removeAcu(i) { form.value.acupuncture.splice(i, 1) }
 
 // ============ Services ============
-function addService() { form.value.services.push({ name: '', price: 0, quantity: 1, manualDiscount: 0, taxable: true }) }
+const serviceScopePractitioner = computed(() =>
+  authStore.getUserById(form.value.practitionerId) || authStore.currentUser,
+)
+const authorizedServiceKeys = computed(() => getAuthorizedServiceKeys(serviceScopePractitioner.value))
+const serviceSelectionRestricted = computed(() => authorizedServiceKeys.value.length > 0)
+
+function normalizeServiceMatchText(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '')
+}
+
+function isAuthorizedPriceListItem(name) {
+  if (!serviceSelectionRestricted.value) return true
+  const normalizedName = normalizeServiceMatchText(name)
+  if (!normalizedName) return false
+  return authorizedServiceKeys.value.some((serviceKey) => {
+    const config = settingsStore.serviceTypes?.[serviceKey] || {}
+    const candidates = [
+      serviceKey,
+      config.label,
+      ...String(serviceKey || '').split('_'),
+    ]
+    return candidates.some((candidate) => {
+      const normalizedCandidate = normalizeServiceMatchText(candidate)
+      return normalizedCandidate && (normalizedName.includes(normalizedCandidate) || normalizedCandidate.includes(normalizedName))
+    })
+  })
+}
+
+function addService() {
+  if (serviceSelectionRestricted.value && priceListServiceOptions.value.length === 0) {
+    ElMessage.warning(t('consultation.noAuthorizedServices'))
+    return
+  }
+  form.value.services.push({ name: '', price: 0, quantity: 1, manualDiscount: 0, taxable: true })
+}
 function removeService(i) { form.value.services.splice(i, 1) }
 
 // Aggregate items from the selected price list, or all active price lists when none is selected.
@@ -924,6 +1267,7 @@ const priceListServiceOptions = computed(() => {
     for (const [index, item] of (pl.items || []).entries()) {
       const name = String(item?.name || '').trim()
       if (!name) continue
+      if (!isAuthorizedPriceListItem(name)) continue
       const optionKey = `${pl.id || pl.name || 'price-list'}::${index}::${name}`
       options.push({
         key: optionKey,
@@ -969,7 +1313,7 @@ const totalServiceTax = computed(() =>
 )
 // 处方总额：单剂价格 × 数量
 const totalRxAmount = computed(() =>
-  form.value.prescriptions.reduce((sum, rx) => sum + Number(rx?.subtotal || 0), 0)
+  getBillablePrescriptionTotal(form.value)
 )
 const totalWithoutTax = computed(() => {
   let base = (form.value.consultationFee || 0) + totalService.value
@@ -1022,19 +1366,30 @@ async function completeConsultation() {
 }
 
 async function markPaid() {
+  const amount = outstandingAmount.value
+  if (amount <= 0) {
+    ElMessage.info(t('consultation.noPendingAmount'))
+    return
+  }
+
   try {
-    await ElMessageBox.confirm(t('consultation.confirmPayLock'), t('consultation.confirmPayTitle'), { type: 'warning' })
+    await ElMessageBox.confirm(
+      t('consultation.confirmRecordPayment', { amount: amount.toFixed(2) }),
+      t('consultation.confirmPayTitle'),
+      { type: 'warning' },
+    )
     const saved = await persistConsultationDraft({ silent: true })
     const id = saved?.id || currentConsultationId.value
     if (id) {
-      const updated = await consultStore.markAsPaid(id, { paymentMethod: 'manual' })
+      const updated = await consultStore.markAsPaid(id, {
+        paymentMethod: 'manual',
+        amount,
+      })
       if (updated) {
         applySavedConsultation(updated)
         syncSavedSnapshot()
       }
-      await inventoryStore.refreshFromApi()
-      ElMessage.success(t('consultation.paidAndLocked'))
-      await navigateWithoutUnsavedPrompt(() => router.push(`/patients/${patientId}`))
+      ElMessage.success(t('consultation.paymentRecorded'))
     }
   } catch (e) {
     if (e !== 'cancel') ElMessage.error(e.message)
@@ -1053,6 +1408,79 @@ async function deleteConsultation() {
   } catch (e) {
     if (e !== 'cancel') ElMessage.error(e.message)
   }
+}
+
+function openInvoicePaymentDialog() {
+  if (!currentConsultationId.value) {
+    ElMessage.warning(t('consultation.saveBefore'))
+    return
+  }
+  if (invoicePaymentAmount.value <= 0) {
+    ElMessage.info(t('consultation.noPendingAmount'))
+    return
+  }
+  invoicePaymentMethod.value = normalizePaymentMethodValue(invoicePaymentMethod.value) || 'bankcard'
+  showInvoicePaymentDialog.value = true
+}
+
+async function finalizeInvoicePayment(method) {
+  const id = currentConsultationId.value
+  if (!id) {
+    ElMessage.warning(t('consultation.saveBefore'))
+    return
+  }
+  if (invoicePaymentSubmitting.value) return
+  invoicePaymentSubmitting.value = true
+  try {
+    const { savedConsultation, outstandingAmount: refreshedOutstanding } =
+      await resolveInvoicePaymentAfterSave(persistConsultationDraft)
+
+    if (refreshedOutstanding <= 0) {
+      showInvoicePaymentDialog.value = false
+      showPosSimulationDialog.value = false
+      pendingPosPaymentMethod.value = ''
+      ElMessage.info(t('consultation.noPendingAmount'))
+      return
+    }
+
+    const paymentId = savedConsultation?.id || currentConsultationId.value
+    const updated = await consultStore.markAsPaid(paymentId, {
+      paymentMethod: method,
+      amount: refreshedOutstanding,
+    })
+    if (updated) {
+      applySavedConsultation(updated)
+      syncSavedSnapshot()
+    }
+    showInvoicePaymentDialog.value = false
+    showPosSimulationDialog.value = false
+    pendingPosPaymentMethod.value = ''
+    ElMessage.success(t('consultation.paymentRecorded'))
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e.message)
+  } finally {
+    invoicePaymentSubmitting.value = false
+  }
+}
+
+async function handleStartInvoicePayment() {
+  const method = normalizePaymentMethodValue(invoicePaymentMethod.value) || 'bankcard'
+  if (requiresPosSimulation(method)) {
+    pendingPosPaymentMethod.value = method
+    showPosSimulationDialog.value = true
+    return
+  }
+  await finalizeInvoicePayment(method)
+}
+
+async function handlePosSimulationSuccess() {
+  const method = normalizePaymentMethodValue(pendingPosPaymentMethod.value || invoicePaymentMethod.value) || 'bankcard'
+  await finalizeInvoicePayment(method)
+}
+
+function handlePosSimulationCancel() {
+  pendingPosPaymentMethod.value = ''
+  showPosSimulationDialog.value = false
 }
 
 function getUnsavedLeaveMessageKey() {
@@ -1245,8 +1673,12 @@ function handleSendReport() {
           <span class="cv-sep">_</span>
           <span class="cv-complaint">{{ form.chiefComplaint || (isNew ? t('consultation.newRecord') : t('consultation.record')) }}</span>
           <el-tag v-if="form.consultationId" size="small" type="info" style="margin-left:6px">{{ form.consultationId }}</el-tag>
-          <el-tag :type="{draft:'info',completed:'warning',paid:'success'}[form.status]" size="small" style="margin-left:4px">{{ t('consultation.status_' + form.status) }}</el-tag>
-          <el-tag v-if="form.lockedAt" size="small" type="danger" style="margin-left:4px">{{ t('consultation.locked') }}</el-tag>
+          <el-tag :type="{ draft: 'info', completed: 'warning', paid: 'success' }[form.status]" size="small" style="margin-left:4px">
+            {{ t('consultation.status_' + form.status) }}
+          </el-tag>
+          <el-tag size="small" :type="getPaymentStatusTagType()" style="margin-left:4px">
+            {{ getPaymentStatusLabel() }}
+          </el-tag>
           <el-tag v-if="form.version > 1" size="small" type="warning" style="margin-left:4px">v{{ form.version }}</el-tag>
         </div>
       </div>
@@ -1255,8 +1687,7 @@ function handleSendReport() {
         <template v-if="!isReadOnly">
         <el-button size="small" :loading="saving" @click="saveDraft">{{ t('common.save') }}</el-button>
         <el-button v-if="form.status === 'draft' || isNew" size="small" type="success" @click="completeConsultation">{{ t('consultation.complete') }}</el-button>
-        <el-button v-if="form.status === 'completed' && canMarkPaid" size="small" type="primary" @click="markPaid">{{ t('consultation.payAndLock') }}</el-button>
-        <el-button v-if="!form.lockedAt && canDeleteConsultation" size="small" type="danger" text @click="deleteConsultation">{{ t('common.delete') }}</el-button>
+        <el-button v-if="canDeleteConsultation" size="small" type="danger" text @click="deleteConsultation">{{ t('common.delete') }}</el-button>
         </template>
       </div>
     </div>
@@ -1352,7 +1783,7 @@ function handleSendReport() {
                     <div v-else style="color: #ccc; font-size: 13px; padding: 12px; text-align: center; border: 1px dashed #e0e0e0; border-radius: 6px;">
                       No history and medication notes yet
                     </div>
-                    <div v-if="patient.notes" style="color: #888; border-top: 1px dashed #eee; padding-top: 6px; margin-top: 8px;">
+                    <div v-if="!isApprenticeReadonly && patient.notes" style="color: #888; border-top: 1px dashed #eee; padding-top: 6px; margin-top: 8px;">
                       <strong>{{ t('common.notes') }}</strong>{{ patient.notes }}
                     </div>
                     <div style="margin-top: 8px; text-align: right;">
@@ -1865,7 +2296,7 @@ function handleSendReport() {
             </div>
           </template>
           <div class="wide-table-wrap">
-            <el-table :data="form.prescriptions" size="small" empty-text="We didn't find anything to show here">
+            <el-table :data="visiblePrescriptions" size="small" empty-text="We didn't find anything to show here">
               <el-table-column label="Name" min-width="200">
                 <template #default="{ row }">
                   <span class="rx-name-cell">{{ row.formulaName || t('common.customFormula') }} - {{ row.items?.length || 0 }}{{ t('consultation.herbCount') }}</span>
@@ -1888,28 +2319,62 @@ function handleSendReport() {
               <el-table-column label="Quantity" width="80">
                 <template #default="{ row }">{{ row.quantity }}</template>
               </el-table-column>
-              <el-table-column label="Dispensed" width="90">
+              <el-table-column label="Status" width="100">
                 <template #default="{ row }">
-                  <el-tag :type="isPrescriptionDispensed(row) ? 'success' : 'warning'" size="small">
-                    {{ isPrescriptionDispensed(row) ? t('consultation.dispensed') : t('consultation.pendingDispense') }}
+                  <el-tag :type="getPrescriptionStatusTagType(row)" size="small">
+                    {{ getPrescriptionStatusLabel(row) }}
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column v-if="!isReadOnly" width="160">
-                <template #default="{ row, $index }">
-                  <el-button size="small" text type="success" @click="handlePrintRx($index)"><el-icon><Printer /></el-icon> Print</el-button>
-                  <el-button size="small" text type="primary" @click="openEditRx($index)">{{ t('common.edit') }}</el-button>
-                  <el-button size="small" text type="danger" @click="deleteRx($index)">{{ t('common.delete') }}</el-button>
+              <el-table-column v-if="!isReadOnly" width="240">
+                <template #default="{ row }">
+                  <el-button size="small" text type="success" @click="handlePrintRx(row)"><el-icon><Printer /></el-icon> Print</el-button>
+                  <el-button
+                    v-if="getPrescriptionStatus(row) !== 'dispensed'"
+                    size="small"
+                    text
+                    type="primary"
+                    @click="openEditRx(row)"
+                  >
+                    {{ t('common.edit') }}
+                  </el-button>
+                  <el-button
+                    v-if="getPrescriptionStatus(row) === 'editing'"
+                    size="small"
+                    text
+                    type="warning"
+                    @click="completeRxRow(row)"
+                  >
+                    {{ t('consultation.completeRx') }}
+                  </el-button>
+                  <el-button
+                    v-if="getPrescriptionStatus(row) === 'dispensed' && roles.includes('admin')"
+                    size="small"
+                    text
+                    type="primary"
+                    @click="reopenRxRow(row)"
+                  >
+                    {{ t('consultation.reopenRx') }}
+                  </el-button>
+                  <el-button
+                    v-if="getPrescriptionStatus(row) !== 'dispensed'"
+                    size="small"
+                    text
+                    type="danger"
+                    @click="deleteRx(row)"
+                  >
+                    {{ t('common.delete') }}
+                  </el-button>
                 </template>
               </el-table-column>
               <el-table-column v-else width="80">
-                <template #default="{ row, $index }">
-                  <el-button size="small" text type="success" @click="handlePrintRx($index)"><el-icon><Printer /></el-icon> Print</el-button>
+                <template #default="{ row }">
+                  <el-button size="small" text type="success" @click="handlePrintRx(row)"><el-icon><Printer /></el-icon> Print</el-button>
                 </template>
               </el-table-column>
             </el-table>
           </div>
-          <div class="table-rows-count">Rows: {{ form.prescriptions.length }}</div>
+          <div class="table-rows-count">Rows: {{ visiblePrescriptions.length }}</div>
         </el-card>
 
         <!-- Prognosis & Feedback (image11) -->
@@ -1922,13 +2387,10 @@ function handleSendReport() {
                 :placeholder="t('consultation.prognosisPlaceholder')" :readonly="isReadOnly" />
             </el-col>
             <el-col :span="12">
-              <div class="prog-label">
-                Feedback for Current Treatment
-                <el-icon v-if="form.lockedAt" style="margin-left:4px"><Lock /></el-icon>
-              </div>
+              <div class="prog-label">Feedback for Current Treatment</div>
               <el-input v-model="form.feedback" type="textarea" :rows="10"
                 :placeholder="t('consultation.feedbackPlaceholder')"
-                :readonly="isReadOnly || !form.lockedAt" />
+                :readonly="isReadOnly" />
             </el-col>
           </el-row>
         </el-card>
@@ -1967,6 +2429,9 @@ function handleSendReport() {
               <el-icon><Plus /></el-icon> New Service
             </el-button>
           </div>
+          <div v-if="serviceSelectionRestricted" style="margin: -4px 0 10px; font-size: 12px; color: #888">
+            {{ t('consultation.authorizedServicesHint') }}
+          </div>
           <el-table :data="form.services" size="small" :empty-text="t('consultation.noServices')">
             <el-table-column label="Service" min-width="200">
               <template #default="{ row }">
@@ -1974,7 +2439,7 @@ function handleSendReport() {
                   v-if="!isReadOnly"
                   v-model="row.name"
                   filterable
-                  allow-create
+                  :allow-create="!serviceSelectionRestricted"
                   default-first-option
                   size="small"
                   :placeholder="t('consultation.serviceNamePlaceholder')"
@@ -2107,7 +2572,7 @@ function handleSendReport() {
                   <span>Total Service</span>
                   <span class="price-lock">{{ cs }}{{ totalService.toFixed(2) }} <el-icon><Lock /></el-icon></span>
                 </div>
-                <div class="price-row" v-if="form.includeRxAmount && form.prescriptions.length">
+                <div class="price-row" v-if="form.includeRxAmount && visiblePrescriptions.length">
                   <span>{{ localizeMixedLabel('Prescription Amount 处方金额') }}</span>
                   <span class="price-lock">{{ cs }}{{ totalRxAmount.toFixed(2) }} <el-icon><Lock /></el-icon></span>
                 </div>
@@ -2141,7 +2606,7 @@ function handleSendReport() {
 
       <!-- Tab 5: Invoices -->
 
-      <el-tab-pane :label="t('consultation.tabInvoice')" name="invoices">
+      <el-tab-pane v-if="canViewInvoiceTab" :label="t('consultation.tabInvoice')" name="invoices">
         <el-card class="section-card" style="margin-bottom:12px">
           <!-- PDF actions -->
           <div class="pdf-links" style="margin-bottom:12px">
@@ -2151,29 +2616,39 @@ function handleSendReport() {
             <el-button size="small" @click="handleSendReport">
               <el-icon><Message /></el-icon> {{ t('consultation.sendReport') }}
             </el-button>
+            <el-button
+              v-if="canStartInvoicePaymentAction"
+              size="small"
+              type="primary"
+              @click="openInvoicePaymentDialog"
+            >
+              {{ t('consultation.createInvoiceAndStartPayment') }}
+            </el-button>
           </div>
 
-          <el-table :data="form.lockedAt ? [form] : []" size="small" :empty-text="t('consultation.noInvoice')">
+          <el-table :data="paymentRecords" size="small" :empty-text="t('consultation.noInvoice')">
             <el-table-column label="Name" min-width="220">
-              <template #default>
-                <span class="link-text">INV-{{ form.consultationId?.slice(-8) || '------' }} - {{ patient.name }}</span>
+              <template #default="{ row }">
+                <span class="link-text">INV-{{ form.consultationId?.slice(-8) || '------' }} - {{ row.id || row.date }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="Status Reason" width="100">
-              <template #default><el-tag type="success" size="small">Paid</el-tag></template>
+            <el-table-column :label="t('cashier.paymentMethod')" width="120">
+              <template #default="{ row }">
+                <el-tag type="success" size="small">{{ getPaymentMethodLabel(row.method, t) }}</el-tag>
+              </template>
             </el-table-column>
             <el-table-column label="Status" width="90">
-              <template #default><el-tag type="info" size="small">Active</el-tag></template>
+              <template #default><el-tag :type="getPaymentStatusTagType()" size="small">{{ getPaymentStatusLabel() }}</el-tag></template>
             </el-table-column>
             <el-table-column label="Created On" width="160">
-              <template #default>{{ formatDateTime(form.lockedAt) }}</template>
+              <template #default="{ row }">{{ formatDateTime(row.date) }}</template>
             </el-table-column>
           </el-table>
-          <div class="table-rows-count">Rows: {{ form.lockedAt ? 1 : 0 }}</div>
+          <div class="table-rows-count">Rows: {{ paymentRecords.length }}</div>
         </el-card>
 
         <!-- Invoice PDF Preview (image17) -->
-        <el-card v-if="form.lockedAt" class="section-card invoice-pdf-preview">
+        <el-card class="section-card invoice-pdf-preview">
           <template #header>
             <div class="diff-card-header">
               <span class="sec-header">Invoice PDF Preview</span>
@@ -2193,7 +2668,7 @@ function handleSendReport() {
               </div>
               <div class="pdf-meta-right">
                 <div>INVOICE # {{ form.consultationId }}</div>
-                <div>DATE: {{ form.date }}</div>
+                <div>DATE: {{ latestPaymentTime || form.date }}</div>
               </div>
             </div>
             <div class="pdf-bill-to">
@@ -2226,7 +2701,8 @@ function handleSendReport() {
               <div>SUBTOTAL: {{ cs }}{{ totalWithoutTax.toFixed(2) }}</div>
               <div>TAX ({{ (effectiveTaxRate*100).toFixed(0) }}%): {{ cs }}{{ taxAmount.toFixed(2) }}</div>
               <div>GRAND TOTAL: <strong>{{ cs }}{{ totalAmount.toFixed(2) }}</strong></div>
-              <div>BALANCE AMOUNT: <strong>{{ cs }}0</strong></div>
+              <div>PAID AMOUNT: <strong>{{ cs }}{{ paidAmount.toFixed(2) }}</strong></div>
+              <div>BALANCE AMOUNT: <strong>{{ cs }}{{ outstandingAmount.toFixed(2) }}</strong></div>
             </div>
             <div class="pdf-footer">THANK YOU FOR YOUR BUSINESS!</div>
           </div>
@@ -2242,7 +2718,7 @@ function handleSendReport() {
             <el-descriptions :column="3" size="small" border>
               <el-descriptions-item label="Current Version">v{{ form.version || 1 }}</el-descriptions-item>
               <el-descriptions-item label="Created">{{ formatDateTime(form.createdAt) || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="Locked">{{ form.lockedAt ? formatDateTime(form.lockedAt) : 'Not locked' }}</el-descriptions-item>
+              <el-descriptions-item label="Latest Payment">{{ latestPaymentTime ? formatDateTime(latestPaymentTime) : 'Not paid yet' }}</el-descriptions-item>
             </el-descriptions>
           </div>
           <div v-if="form.modifications && form.modifications.length > 0" style="margin-top:16px">
@@ -2312,6 +2788,63 @@ function handleSendReport() {
       </el-tab-pane>
 
     </el-tabs>
+
+    <!-- Invoice Payment Dialog -->
+    <el-dialog
+      v-model="showInvoicePaymentDialog"
+      :title="t('consultation.invoicePaymentDialogTitle')"
+      width="520px"
+    >
+      <el-descriptions :column="1" size="small" border>
+        <el-descriptions-item :label="t('common.name')">{{ patient?.name || '-' }}</el-descriptions-item>
+        <el-descriptions-item :label="t('consultation.consultationId')">{{ form.consultationId || '-' }}</el-descriptions-item>
+        <el-descriptions-item :label="t('consultation.visitDate')">{{ form.date || '-' }}</el-descriptions-item>
+      </el-descriptions>
+      <el-form label-width="140px" size="small" style="margin-top:12px">
+        <el-form-item :label="t('consultation.currentInvoiceAmount')">
+          <el-input :model-value="`${cs}${invoicePaymentAmount.toFixed(2)}`" readonly />
+        </el-form-item>
+        <el-form-item :label="t('cashier.paymentMethod')">
+          <el-select v-model="invoicePaymentMethod" style="width:100%">
+            <el-option
+              v-for="option in paymentMethodOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showInvoicePaymentDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="invoicePaymentSubmitting" @click="handleStartInvoicePayment">
+          {{ t('consultation.startPayment') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- POS Simulation Dialog -->
+    <el-dialog
+      v-model="showPosSimulationDialog"
+      :title="t('consultation.posSimulationTitle')"
+      width="420px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="false"
+    >
+      <div style="line-height:1.6">
+        <div>{{ t('consultation.posSimulationWaiting') }}</div>
+        <div style="margin-top:8px">
+          {{ t('consultation.currentInvoiceAmount') }}: {{ cs }}{{ invoicePaymentAmount.toFixed(2) }}
+        </div>
+      </div>
+      <template #footer>
+        <el-button :disabled="invoicePaymentSubmitting" @click="handlePosSimulationCancel">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="invoicePaymentSubmitting" @click="handlePosSimulationSuccess">
+          {{ t('consultation.posSimulationSuccess') }}
+        </el-button>
+      </template>
+    </el-dialog>
 
     <!-- Prescription Drawer -->
     <el-drawer
@@ -2471,7 +3004,7 @@ function handleSendReport() {
       </div>
       <template #footer>
         <el-button @click="requestCloseRxDialog">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="saving" @click="saveRx">{{ t('consultation.saveRx') }}</el-button>
+        <el-button type="primary" :loading="rxCompleting" @click="saveRx">{{ t('consultation.completeRx') }}</el-button>
       </template>
     </el-drawer>
 

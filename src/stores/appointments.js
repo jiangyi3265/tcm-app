@@ -15,6 +15,18 @@ export const useAppointmentsStore = defineStore('appointments', () => {
     writeStoredJson('tcm_appointments', appointments.value)
   }
 
+  function upsertAppointment(appointment) {
+    if (!appointment?.id) return appointment
+    const idx = appointments.value.findIndex((item) => item.id === appointment.id)
+    if (idx === -1) {
+      appointments.value.push(appointment)
+    } else {
+      appointments.value[idx] = appointment
+    }
+    saveState()
+    return appointment
+  }
+
   function getAppointment(id) {
     return appointments.value.find((a) => a.id === id) || null
   }
@@ -49,56 +61,56 @@ export const useAppointmentsStore = defineStore('appointments', () => {
     })
   }
 
+  async function getAvailability({ date, serviceType, practitionerId, roomId, excludeId } = {}) {
+    return appointmentsApi.availability({
+      date,
+      serviceType,
+      practitionerId,
+      roomId,
+      excludeId,
+    })
+  }
+
   async function createAppointment(data) {
     const newAppt = {
       patientId: data.patientId,
-      practitionerId: data.practitionerId,
+      practitionerId: data.practitionerId || null,
       roomId: data.roomId || null,
       serviceType: data.serviceType,
       startTime: data.startTime,
       endTime: data.endTime,
-      status: 'booked',
+      status: data.status || 'booked',
       intakeFormData: data.intakeFormData || {},
       notes: data.notes || '',
       branchId: data.branchId || null,
       createdAt: data.createdAt || new Date().toISOString(),
     }
     const created = await appointmentsApi.create(newAppt)
-    appointments.value.push(created)
-    saveState()
-    return created
+    return upsertAppointment(created)
   }
 
   async function updateAppointment(id, updates) {
     const idx = appointments.value.findIndex((a) => a.id === id)
     if (idx !== -1) {
       const updated = await appointmentsApi.update(id, updates)
-      appointments.value[idx] = updated
-      saveState()
-      return updated
+      return upsertAppointment(updated)
     }
     return null
   }
 
   async function cancelAppointment(id) {
     const updated = await appointmentsApi.status(id, 'cancelled')
-    const idx = appointments.value.findIndex((a) => a.id === id)
-    if (idx !== -1) appointments.value[idx] = updated
-    saveState()
+    return upsertAppointment(updated)
   }
 
   async function confirmAppointment(id) {
     const updated = await appointmentsApi.status(id, 'confirmed')
-    const idx = appointments.value.findIndex((a) => a.id === id)
-    if (idx !== -1) appointments.value[idx] = updated
-    saveState()
+    return upsertAppointment(updated)
   }
 
   async function completeAppointment(id) {
     const updated = await appointmentsApi.status(id, 'completed')
-    const idx = appointments.value.findIndex((a) => a.id === id)
-    if (idx !== -1) appointments.value[idx] = updated
-    saveState()
+    return upsertAppointment(updated)
   }
 
   function getBranchAppointments(branchId) {
@@ -135,6 +147,7 @@ export const useAppointmentsStore = defineStore('appointments', () => {
     getPractitionerAppointments,
     getDayAppointments,
     isSlotAvailable,
+    getAvailability,
     getBranchAppointments,
     createAppointment,
     updateAppointment,

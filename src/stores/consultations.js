@@ -2,7 +2,14 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { emptyDiff, normalizeDiff } from '../utils/sampleData'
 import { consultationsApi } from '../utils/api'
+import { useInventoryStore } from './inventory'
 import { readStoredJson, writeStoredJson } from '../utils/storage'
+import {
+  getOutstandingAmount,
+  getPaymentStatus,
+  getPrescriptionStatus,
+  hasAnyPendingPrescription,
+} from '../utils/prescriptionWorkflow'
 
 function genConsultId() {
   const n = Math.random().toString(36).substring(2, 7).toUpperCase()
@@ -12,12 +19,13 @@ function genConsultId() {
 
 export const useConsultationsStore = defineStore('consultations', () => {
   const consultations = ref([])
+  const inventoryStore = useInventoryStore()
 
   function hasDispensingCompleted(consultation) {
     if (!consultation) return false
     if (consultation.dispensingCompleted) return true
     return Array.isArray(consultation.prescriptions)
-      && consultation.prescriptions.some((prescription) => prescription?.dispensingCompleted)
+      && consultation.prescriptions.some((prescription) => getPrescriptionStatus(prescription) === 'dispensed')
   }
 
   function init() {
@@ -31,6 +39,14 @@ export const useConsultationsStore = defineStore('consultations', () => {
 
   function saveState() {
     writeStoredJson('tcm_consultations', consultations.value)
+  }
+
+  async function refreshInventoryAfterPrescriptionChange() {
+    try {
+      await inventoryStore.refreshFromApi()
+    } catch (error) {
+      console.warn('处方变更后刷新库存失败:', error.message)
+    }
   }
 
   function getConsultation(id) {
@@ -162,7 +178,7 @@ export const useConsultationsStore = defineStore('consultations', () => {
   }
 
   async function markAsPaid(id, paymentInfo = {}) {
-    const updated = await consultationsApi.paid(id, paymentInfo)
+    const updated = await consultationsApi.createPayment(id, paymentInfo)
     const idx = consultations.value.findIndex((c) => c.id === id)
     if (idx === -1) return null
     consultations.value[idx] = updated
@@ -204,16 +220,60 @@ export const useConsultationsStore = defineStore('consultations', () => {
 
   const pendingPrescriptions = computed(() =>
     consultations.value.filter(
-      (c) => c.status === 'paid' && c.prescriptionType !== 'none' && !hasDispensingCompleted(c) && !c.deletedAt,
+      (c) => hasAnyPendingPrescription(c) && !c.deletedAt,
     ),
   )
 
   const pendingPayments = computed(() =>
-    consultations.value.filter((c) => c.status === 'completed' && !c.deletedAt),
+    consultations.value.filter((c) => c.status !== 'draft' && !c.deletedAt && getOutstandingAmount(c) > 0),
   )
 
   async function markDispensingComplete(id) {
     const updated = await consultationsApi.dispense(id)
+    const idx = consultations.value.findIndex((c) => c.id === id)
+    if (idx !== -1) consultations.value[idx] = updated
+    saveState()
+    return updated
+  }
+
+  async function syncPrescription(id, payload) {
+    const updated = await consultationsApi.syncPrescription(id, payload)
+    const idx = consultations.value.findIndex((c) => c.id === id)
+    if (idx !== -1) consultations.value[idx] = updated
+    saveState()
+    await refreshInventoryAfterPrescriptionChange()
+    return updated
+  }
+
+  async function completePrescription(id, prescriptionId, payload = {}) {
+    const updated = await consultationsApi.completePrescription(id, prescriptionId, payload)
+    const idx = consultations.value.findIndex((c) => c.id === id)
+    if (idx !== -1) consultations.value[idx] = updated
+    saveState()
+    await refreshInventoryAfterPrescriptionChange()
+    return updated
+  }
+
+  async function deletePrescription(id, prescriptionId, payload = {}) {
+    const updated = await consultationsApi.deletePrescription(id, prescriptionId, payload)
+    const idx = consultations.value.findIndex((c) => c.id === id)
+    if (idx !== -1) consultations.value[idx] = updated
+    saveState()
+    await refreshInventoryAfterPrescriptionChange()
+    return updated
+  }
+
+  async function reopenPrescription(id, prescriptionId) {
+    const updated = await consultationsApi.reopenPrescription(id, prescriptionId)
+    const idx = consultations.value.findIndex((c) => c.id === id)
+    if (idx !== -1) consultations.value[idx] = updated
+    saveState()
+    await refreshInventoryAfterPrescriptionChange()
+    return updated
+  }
+
+  async function dispensePrescription(id, prescriptionId) {
+    const updated = await consultationsApi.dispensePrescription(id, prescriptionId)
     const idx = consultations.value.findIndex((c) => c.id === id)
     if (idx !== -1) consultations.value[idx] = updated
     saveState()
@@ -226,9 +286,12 @@ export const useConsultationsStore = defineStore('consultations', () => {
     consultations, todayConsultations, pendingPrescriptions, pendingPayments,
     deletedConsultations,
     hasDispensingCompleted,
+    getOutstandingAmount,
+    getPaymentStatus,
     getConsultation, getPatientConsultations, getPractitionerConsultations, getLastConsultation,
     createConsultation, updateConsultation, completeConsultation, markAsPaid,
     deleteConsultation, restoreConsultation, physicalDeleteConsultation,
     markDispensingComplete, syncPatientHistorySnapshot,
+    syncPrescription, completePrescription, deletePrescription, reopenPrescription, dispensePrescription,
   }
 })

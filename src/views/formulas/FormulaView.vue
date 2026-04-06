@@ -3,13 +3,16 @@ import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useFormulasStore } from '../../stores/formulas'
 import { useInventoryStore } from '../../stores/inventory'
+import { useHerbDictStore } from '../../stores/herbDict'
 import { useSuppliersStore } from '../../stores/suppliers'
 import { calculatePrescription } from '../../utils/prescriptionCalc'
+import { bindHerbSelection } from '../../utils/herbBinding'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t, locale } = useI18n()
 const formulasStore = useFormulasStore()
 const inventoryStore = useInventoryStore()
+const herbDictStore = useHerbDictStore()
 const suppliersStore = useSuppliersStore()
 
 const searchQuery = ref('')
@@ -45,6 +48,32 @@ const formulaCategoryOptions = computed(() => [
   })),
 ])
 
+const herbOptions = computed(() => herbDictStore.activeHerbs)
+
+function createHerbDraft() {
+  return { herbDictId: null, herbName: '', dosage: 0, unit: 'g', notes: '' }
+}
+
+function applyHerbSelection(target, herbId) {
+  return bindHerbSelection(target, herbDictStore.getHerb(herbId), { nameKey: 'herbName' })
+}
+
+function syncDraftHerb(draftRef, herbId) {
+  draftRef.value = applyHerbSelection(draftRef.value, herbId)
+}
+
+function syncRowHerb(row, herbId) {
+  Object.assign(row, applyHerbSelection(row, herbId))
+}
+
+function validateFormulaHerbs(items = []) {
+  if (items.some((item) => !item.herbDictId)) {
+    ElMessage.warning(t('inventory.selectHerbRequired'))
+    return false
+  }
+  return true
+}
+
 // ── 过滤 ──
 const filteredFormulas = computed(() => {
   let list = formulasStore.activeFormulas
@@ -67,7 +96,7 @@ const filteredFormulas = computed(() => {
 const expandedId = ref(null)
 const editing = ref(false)
 const editForm = ref({})
-const editHerb = ref({ herbName: '', dosage: 0, unit: 'g', notes: '' })
+const editHerb = ref(createHerbDraft())
 
 // ── 预览换算 ──
 const previewType = ref('raw_herbs')
@@ -121,7 +150,7 @@ function startEdit(formula) {
     description: formula.description || '',
     items: (formula.items || []).map(i => ({ ...i })),
   }
-  editHerb.value = { herbName: '', dosage: 0, unit: 'g', notes: '' }
+  editHerb.value = createHerbDraft()
 }
 
 function cancelEdit() {
@@ -129,12 +158,12 @@ function cancelEdit() {
 }
 
 function addEditHerb() {
-  if (!editHerb.value.herbName) return ElMessage.warning(t('admin.fillFormulaHerbName'))
+  if (!editHerb.value.herbDictId) return ElMessage.warning(t('inventory.selectHerbRequired'))
   editForm.value.items.push({
     ...editHerb.value,
     sortOrder: editForm.value.items.length + 1,
   })
-  editHerb.value = { herbName: '', dosage: 0, unit: 'g', notes: '' }
+  editHerb.value = createHerbDraft()
 }
 
 function removeEditHerb(idx) {
@@ -143,6 +172,7 @@ function removeEditHerb(idx) {
 
 async function saveEdit() {
   if (!editForm.value.name) return ElMessage.warning(t('admin.fillFormulaName'))
+  if (!validateFormulaHerbs(editForm.value.items)) return
   try {
     await formulasStore.updateFormula(expandedId.value, editForm.value)
     ElMessage.success(t('admin.formulaUpdated'))
@@ -157,15 +187,15 @@ const showAddPanel = ref(false)
 const newFormula = ref({
   name: '', category: '', source: '', description: '', items: [],
 })
-const newHerb = ref({ herbName: '', dosage: 0, unit: 'g', notes: '' })
+const newHerb = ref(createHerbDraft())
 
 function addNewHerb() {
-  if (!newHerb.value.herbName) return ElMessage.warning(t('admin.fillFormulaHerbName'))
+  if (!newHerb.value.herbDictId) return ElMessage.warning(t('inventory.selectHerbRequired'))
   newFormula.value.items.push({
     ...newHerb.value,
     sortOrder: newFormula.value.items.length + 1,
   })
-  newHerb.value = { herbName: '', dosage: 0, unit: 'g', notes: '' }
+  newHerb.value = createHerbDraft()
 }
 
 function removeNewHerb(idx) {
@@ -174,6 +204,7 @@ function removeNewHerb(idx) {
 
 async function handleAddFormula() {
   if (!newFormula.value.name) return ElMessage.warning(t('admin.fillFormulaName'))
+  if (!validateFormulaHerbs(newFormula.value.items)) return
   try {
     await formulasStore.addFormula({ ...newFormula.value })
     ElMessage.success(t('admin.formulaCreated'))
@@ -310,7 +341,18 @@ const categoryCountEntries = computed(() => {
           </el-row>
           <el-divider>{{ t('admin.formulaHerbs') }}</el-divider>
           <el-row :gutter="8" style="margin-bottom:8px">
-            <el-col :span="8"><el-input v-model="newHerb.herbName" :placeholder="t('admin.formulaHerbNamePh')" size="small" /></el-col>
+            <el-col :span="8">
+              <el-select
+                v-model="newHerb.herbDictId"
+                filterable
+                :placeholder="t('inventory.selectHerbRequired')"
+                size="small"
+                style="width:100%"
+                @change="syncDraftHerb(newHerb, $event)"
+              >
+                <el-option v-for="herb in herbOptions" :key="herb.id" :label="herb.name" :value="herb.id" />
+              </el-select>
+            </el-col>
             <el-col :span="5"><el-input-number v-model="newHerb.dosage" :min="0" :step="1" size="small" style="width:100%" /></el-col>
             <el-col :span="4"><el-input v-model="newHerb.unit" :placeholder="t('admin.formulaUnit')" size="small" /></el-col>
             <el-col :span="4"><el-input v-model="newHerb.notes" :placeholder="t('admin.formulaHerbNotes')" size="small" /></el-col>
@@ -464,14 +506,38 @@ const categoryCountEntries = computed(() => {
                   </el-row>
                   <el-divider>{{ t('admin.formulaHerbs') }}</el-divider>
                   <el-row :gutter="8" style="margin-bottom:8px">
-                    <el-col :span="8"><el-input v-model="editHerb.herbName" :placeholder="t('admin.formulaHerbNamePh')" size="small" /></el-col>
+                    <el-col :span="8">
+                      <el-select
+                        v-model="editHerb.herbDictId"
+                        filterable
+                        :placeholder="t('inventory.selectHerbRequired')"
+                        size="small"
+                        style="width:100%"
+                        @change="syncDraftHerb(editHerb, $event)"
+                      >
+                        <el-option v-for="herb in herbOptions" :key="herb.id" :label="herb.name" :value="herb.id" />
+                      </el-select>
+                    </el-col>
                     <el-col :span="5"><el-input-number v-model="editHerb.dosage" :min="0" :step="1" size="small" style="width:100%" /></el-col>
                     <el-col :span="4"><el-input v-model="editHerb.unit" :placeholder="t('admin.formulaUnit')" size="small" /></el-col>
                     <el-col :span="4"><el-input v-model="editHerb.notes" :placeholder="t('admin.formulaHerbNotes')" size="small" /></el-col>
                     <el-col :span="3"><el-button size="small" type="primary" @click="addEditHerb">{{ t('consultation.addHerb') }}</el-button></el-col>
                   </el-row>
                   <el-table :data="editForm.items" size="small" max-height="250" :empty-text="t('admin.formulaNoHerbsAdd')">
-                    <el-table-column prop="herbName" :label="t('admin.formulaHerbName')" min-width="100" />
+                    <el-table-column :label="t('admin.formulaHerbName')" min-width="180">
+                      <template #default="{ row }">
+                        <el-select
+                          v-model="row.herbDictId"
+                          filterable
+                          :placeholder="row.herbName || t('inventory.selectHerbRequired')"
+                          size="small"
+                          style="width:100%"
+                          @change="syncRowHerb(row, $event)"
+                        >
+                          <el-option v-for="herb in herbOptions" :key="herb.id" :label="herb.name" :value="herb.id" />
+                        </el-select>
+                      </template>
+                    </el-table-column>
                     <el-table-column :label="t('admin.formulaDosage')" width="80"><template #default="{ row }">{{ row.dosage }}{{ row.unit }}</template></el-table-column>
                     <el-table-column prop="notes" :label="t('admin.formulaHerbNotes')" width="100" />
                     <el-table-column width="60"><template #default="{ $index }"><el-button size="small" text type="danger" @click="removeEditHerb($index)">{{ t('common.delete') }}</el-button></template></el-table-column>

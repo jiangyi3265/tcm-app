@@ -9,6 +9,7 @@ import { useAppointmentsStore } from '../stores/appointments'
 import { useInventoryStore } from '../stores/inventory'
 import { useBranchesStore } from '../stores/branches'
 import { formatTime, formatDate, dayjs } from '../utils/dateUtils'
+import { getActivePrescriptions, getPaymentRecords, getPaymentStatus, getPrescriptionStatus } from '../utils/prescriptionWorkflow'
 import { SERVICE_TYPES } from '../utils/sampleData'
 
 const { t, locale } = useI18n()
@@ -73,14 +74,30 @@ const weekStats = computed(() => {
     && (roles.value.includes('admin') || c.practitionerId === authStore.userId)
     && (!branchId || c.branchId === branchId || !c.branchId)
   )
-  const revenue = myConsults.filter(c => c.status === 'paid').reduce((s, c) => s + (c.totalAmount || 0), 0)
+  const revenue = myConsults
+    .flatMap((consultation) => getPaymentRecords(consultation))
+    .filter((record) => String(record.date || '') >= startOfWeek)
+    .reduce((sum, record) => sum + Number(record.amount || 0), 0)
   return {
     consultCount: myConsults.length,
     revenue,
   }
 })
 
-const pendingPrescriptions = computed(() => consultationsStore.pendingPrescriptions)
+const pendingPrescriptions = computed(() => {
+  const branchId = branchesStore.currentBranchId
+  return consultationsStore.consultations
+    .filter((consultation) => !consultation.deletedAt && (!branchId || consultation.branchId === branchId || !consultation.branchId))
+    .flatMap((consultation) => getActivePrescriptions(consultation)
+      .filter((prescription) => getPrescriptionStatus(prescription) === 'pending')
+      .map((prescription) => ({
+        id: `${consultation.id}:${prescription.id}`,
+        consultation,
+        patient: patientsStore.getPatient(consultation.patientId),
+        formulaName: prescription.formulaName || consultation.formulaName || t('common.customFormula'),
+        prescriptionType: prescription.prescriptionType || consultation.prescriptionType || 'raw_herbs',
+      })))
+})
 const currentWeekday = computed(() =>
   new Intl.DateTimeFormat(locale.value === 'zh-CN' ? 'zh-CN' : 'en-US', { weekday: 'long' }).format(new Date()),
 )
@@ -112,10 +129,10 @@ const STATUS_MAP = {
   cancelled: { type: 'danger' },
 }
 
-const CONSULT_STATUS = {
-  draft: { type: 'info' },
-  completed: { type: 'warning' },
-  paid: { type: 'success' },
+function getConsultStatusType(consultation) {
+  if (getPaymentStatus(consultation) === 'paid') return 'success'
+  if (consultation.status === 'completed') return 'warning'
+  return 'info'
 }
 </script>
 
@@ -224,7 +241,7 @@ const CONSULT_STATUS = {
             class="prescription-item"
           >
             <div class="rx-info">
-              <span class="rx-patient">{{ patientsStore.getPatient(c.patientId)?.name }}</span>
+              <span class="rx-patient">{{ c.patient?.name }}</span>
               <span class="rx-formula">{{ c.formulaName || t('common.customFormula') }}</span>
             </div>
             <el-tag size="small" :type="c.prescriptionType === 'powder' ? 'warning' : 'success'">
@@ -312,8 +329,8 @@ const CONSULT_STATUS = {
             </div>
             <div class="consult-meta">
               <div class="consult-date">{{ formatDate(c.date) }}</div>
-              <el-tag :type="CONSULT_STATUS[c.status]?.type" size="small">
-                {{ t('consultStatus.' + c.status) }}
+              <el-tag :type="getConsultStatusType(c)" size="small">
+                {{ getPaymentStatus(c) === 'paid' ? t('consultation.paymentStatusPaid') : t('consultStatus.' + c.status) }}
               </el-tag>
             </div>
           </div>

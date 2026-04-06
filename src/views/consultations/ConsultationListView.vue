@@ -5,7 +5,8 @@ import { useI18n } from 'vue-i18n'
 import { useConsultationsStore } from '../../stores/consultations'
 import { usePatientsStore } from '../../stores/patients'
 import { useAuthStore } from '../../stores/auth'
-import { canAccessPatientRecords } from '../../utils/permissions'
+import { useAppointmentsStore } from '../../stores/appointments'
+import { canAccessPatientRecords, filterAccessibleConsultations } from '../../utils/permissions'
 import { formatDate } from '../../utils/dateUtils'
 
 const { t } = useI18n()
@@ -14,6 +15,7 @@ const router = useRouter()
 const consultationsStore = useConsultationsStore()
 const patientsStore = usePatientsStore()
 const authStore = useAuthStore()
+const appointmentsStore = useAppointmentsStore()
 
 const searchQuery = ref('')
 const statusFilter = ref('all')
@@ -59,7 +61,11 @@ function formatAmount(row) {
 }
 
 const visibleConsultations = computed(() =>
-  consultationsStore.consultations
+  filterAccessibleConsultations(
+    authStore.roles,
+    consultationsStore.consultations,
+    { currentUser: authStore.currentUser },
+  )
     .filter((consultation) => !consultation.deletedAt)
     .filter((consultation) => {
       const patient = patientsStore.getPatient(consultation.patientId)
@@ -69,6 +75,10 @@ const visibleConsultations = computed(() =>
         authStore.userId,
         patient,
         patientConsultationsMap.value.get(consultation.patientId) || [],
+        {
+          currentUser: authStore.currentUser,
+          appointments: appointmentsStore.getPatientAppointments(consultation.patientId),
+        },
       )
     })
     .map((consultation) => ({

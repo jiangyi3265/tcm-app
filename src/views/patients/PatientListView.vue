@@ -21,6 +21,7 @@ const showMergeDialog = ref(false)
 const roles = computed(() => authStore.roles)
 const canCreate = computed(() => hasPermission(roles.value, 'patient.create'))
 const canMerge = computed(() => hasPermission(roles.value, 'patient.merge'))
+const isApprenticeReadonly = computed(() => roles.value.includes('apprentice'))
 
 const filteredPatients = computed(() => patientsStore.searchPatients(searchQuery.value))
 
@@ -146,6 +147,15 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
       </div>
     </div>
 
+    <el-alert
+      v-if="isApprenticeReadonly"
+      :title="t('patientDetail.apprenticeReadonlyNotice')"
+      type="info"
+      show-icon
+      :closable="false"
+      style="margin-bottom: 16px"
+    />
+
     <!-- 病人列表 -->
     <el-card class="list-card">
       <el-table
@@ -163,28 +173,28 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
               </el-avatar>
               <div>
                 <div style="font-weight: 600">{{ row.name }}</div>
-                <div style="font-size: 12px; color: #888">{{ row.emails?.[0] }}</div>
+                <div v-if="!isApprenticeReadonly" style="font-size: 12px; color: #888">{{ row.emails?.[0] }}</div>
               </div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column :label="t('patients.gender')" width="80">
+        <el-table-column v-if="!isApprenticeReadonly" :label="t('patients.gender')" width="80">
           <template #default="{ row }">
             <el-tag v-if="row.gender" :type="GENDER_MAP[row.gender]" size="small">{{ row.gender }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="phone" :label="t('patients.phone')" width="130" />
-        <el-table-column :label="t('patients.dateOfBirth')" width="120">
+        <el-table-column v-if="!isApprenticeReadonly" prop="phone" :label="t('patients.phone')" width="130" />
+        <el-table-column v-if="!isApprenticeReadonly" :label="t('patients.dateOfBirth')" width="120">
           <template #default="{ row }">{{ row.dateOfBirth || '-' }}</template>
         </el-table-column>
-        <el-table-column :label="t('patients.consent')" width="120">
+        <el-table-column v-if="!isApprenticeReadonly" :label="t('patients.consent')" width="120">
           <template #default="{ row }">
             <el-tag :type="row.consentSigned ? 'success' : 'danger'" size="small">
               {{ row.consentSigned ? t('patients.consentSigned') : t('patients.consentUnsigned') }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="t('patients.createdDate')" width="120">
+        <el-table-column v-if="!isApprenticeReadonly" :label="t('patients.createdDate')" width="120">
           <template #default="{ row }">{{ formatDate(row.createdAt) }}</template>
         </el-table-column>
         <el-table-column :label="t('patients.operation')" width="100" fixed="right">
