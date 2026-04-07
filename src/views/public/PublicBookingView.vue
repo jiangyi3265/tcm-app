@@ -289,7 +289,10 @@ async function loadSchedule() {
     })
     if (requestId !== scheduleRequestId) return
     if (response?.weekStart) {
-      currentWeek.value = alignWeekStart(response.weekStart)
+      const normalizedWeekStart = alignWeekStart(response.weekStart)
+      if (!dayjs(normalizedWeekStart).isSame(weekStart.value, 'day')) {
+        currentWeek.value = normalizedWeekStart
+      }
     }
     scheduleSlots.value = collectSlots(response)
     if (!scheduleSlots.value.some((slot) => slot.startTime === selectedSlotValue.value)) {
