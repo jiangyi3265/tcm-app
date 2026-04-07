@@ -9,6 +9,9 @@
     "dev:server": "node ./scripts/run-server.mjs spring-boot:run",
     "dev:full": "concurrently -k \"npm run dev:server\" \"npm run dev:client\"",
     "test": "node --test",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:install": "playwright install chromium",
     "build": "vite build",
     "build:server": "node ./scripts/run-server.mjs -DskipTests package",
     "build:full": "npm run build && npm run build:server",
@@ -25,6 +28,7 @@
     "vue-router": "^5.0.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@vitejs/plugin-vue": "^6.0.4",
     "concurrently": "^9.2.1",
     "mammoth": "^1.12.0",
