@@ -1,12 +1,19 @@
 import { expect, test } from '@playwright/test'
-import { createDraftConsultation, createPatient, withTemporaryPractitionerSchedule } from './helpers/api.js'
+import dayjs from 'dayjs'
+import { createDraftConsultation, createPatient, createPractitioner, createRoom, withTemporaryPractitionerSchedule } from './helpers/api.js'
 import { chooseSelectOption, seedSession, setPreferredLocale } from './helpers/ui.js'
 
 test.describe.serial('最小浏览器级冒烟', () => {
   test('公开预约页可匿名完成预约', async ({ page, request }) => {
-    await withTemporaryPractitionerSchedule(request, '102', {
-      monday: [{ start: '09:00', end: '12:00' }],
-      tuesday: [{ start: '09:00', end: '12:00' }],
+    const practitioner = await createPractitioner(request, {
+      name: `E2E公开医师-${Date.now()}`,
+    })
+    const room = await createRoom(request, {
+      name: `E2E公开诊室-${Date.now()}`,
+      supportTags: ['acupuncture'],
+    })
+    await withTemporaryPractitionerSchedule(request, practitioner.id, {
+      wednesday: [{ start: '09:00', end: '12:00' }],
     }, async () => {
       const bookingName = `E2E公开预约-${Date.now()}`
       const bookingPhone = `138${String(Date.now()).slice(-8)}`
@@ -16,8 +23,8 @@ test.describe.serial('最小浏览器级冒烟', () => {
       await expect(page.getByRole('heading', { name: '在线预约' })).toBeVisible()
 
       const form = page.locator('.public-form')
-      await chooseSelectOption(page, form, '医师', '王医师')
-      await chooseSelectOption(page, form, '诊室', '诊疗室三号')
+      await chooseSelectOption(page, form, '医师', practitioner.name)
+      await chooseSelectOption(page, form, '诊室', room.name)
 
       await expect(page.locator('.schedule-empty').filter({ hasText: '加载中...' })).toBeHidden({ timeout: 15000 })
       const slotCard = page.locator('.slot-card').first()
@@ -30,16 +37,25 @@ test.describe.serial('最小浏览器级冒烟', () => {
       await page.getByRole('button', { name: '提交预约' }).click()
 
       await expect(page.getByRole('heading', { name: '预约已提交' })).toBeVisible()
-      await expect(page.getByText('接诊医师：王医师')).toBeVisible()
+      await expect(page.getByText(`接诊医师：${practitioner.name}`)).toBeVisible()
       if (selectedSlotTime) {
         await expect(page.getByText('预约时间：')).toContainText(selectedSlotTime.split(' - ')[0])
+      }
+
+      await page.getByRole('button', { name: /继续预约|再约一个/ }).click()
+      await expect(page.getByRole('heading', { name: '在线预约' })).toBeVisible()
+      if (selectedSlotTime) {
+        await expect(page.locator('.slot-card').filter({ hasText: selectedSlotTime.split(' - ')[0] })).toHaveCount(0)
       }
     })
   })
 
   test('前台预约页排班与建单联动可用', async ({ page, request }) => {
-    await withTemporaryPractitionerSchedule(request, '102', {
-      wednesday: [{ start: '09:00', end: '12:00' }],
+    const practitioner = await createPractitioner(request, {
+      name: `E2E排班医师-${Date.now()}`,
+    })
+    await withTemporaryPractitionerSchedule(request, practitioner.id, {
+      wednesday: [{ start: '14:20', end: '16:20' }],
     }, async () => {
       const patient = await createPatient(request, {
         name: `E2E排班联动-${Date.now()}`,
@@ -48,27 +64,30 @@ test.describe.serial('最小浏览器级冒烟', () => {
 
       await seedSession(page, request)
       await page.goto('/appointments')
-      await expect(page.locator('.page-title').filter({ hasText: '预约管理' })).toBeVisible()
+      await expect(page.getByRole('banner').getByText('预约管理', { exact: true })).toBeVisible()
 
       await page.locator('.appt-toolbar .toolbar-right .el-select').first().click()
-      await page.locator('.el-select-dropdown__item').filter({ hasText: '王医师' }).last().click()
+      await page.locator('.el-select-dropdown__item').filter({ hasText: practitioner.name }).last().click()
 
-      const availableCell = page.locator('.schedule-cell.clickable .available-pill').first()
-      await expect(availableCell).toBeVisible()
-      await availableCell.click()
+      const slotPrefix = dayjs().format('YYYY-MM-DD')
+      const slot1420 = page.locator(`[data-testid="appointment-slot-${slotPrefix}-14:20"].clickable`)
+      const slot1430 = page.locator(`[data-testid="appointment-slot-${slotPrefix}-14:30"].clickable`)
+      await expect(slot1420).toBeVisible()
+      await expect(slot1430).toHaveCount(0)
+      await slot1420.click()
 
       const drawer = page.locator('.el-drawer').filter({ hasText: '新建预约' }).last()
       await expect(drawer).toBeVisible()
       await chooseSelectOption(page, drawer, '病人', patient.name)
-      await chooseSelectOption(page, drawer, '诊室', '诊疗室三号')
+      await chooseSelectOption(page, drawer, '服务类型', '仅中药')
 
-      const slotCard = drawer.locator('.availability-card').first()
+      const slotCard = drawer.locator('.availability-card').filter({ hasText: '14:20' }).first()
       await expect(slotCard).toBeVisible()
       await slotCard.click()
       await drawer.getByRole('button', { name: '确认预约' }).click()
 
       await expect(page.getByText('预约已创建')).toBeVisible()
-      await expect(page.locator('.appt-chip').filter({ hasText: patient.name }).first()).toBeVisible()
+      await expect(page.locator('[data-testid^="appointment-block-"]').filter({ hasText: patient.name }).first()).toBeVisible()
     })
   })
 

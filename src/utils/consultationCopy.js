@@ -14,7 +14,10 @@ export function buildCopiedTreatmentData(source = {}) {
   const sourceHerbals = source.herbals || []
   const sourcePrescriptionType = source.prescriptionType || 'none'
 
-  let prescriptions = sourcePrescriptions.map((rx, index) => ({
+  // Filter out soft-deleted prescriptions before copying
+  const activePrescriptions = sourcePrescriptions.filter((rx) => !rx.deletedAt)
+
+  let prescriptions = activePrescriptions.map((rx, index) => ({
     ...cloneJson(rx, {}),
     id: buildCopiedPrescriptionId(index),
     rxStatus: 'editing',
@@ -62,11 +65,15 @@ export function buildCopiedTreatmentData(source = {}) {
     }]
   }
 
+  // When prescriptionType is 'none', clear herbals/formulaName to prevent
+  // copying residual data from records that have no active prescription.
+  const hasActivePrescription = sourcePrescriptionType !== 'none'
+
   return {
     acupuncture: cloneJson(source.acupuncture || [], []),
     prescriptions,
-    herbals: cloneJson(sourceHerbals, []),
-    formulaName: source.formulaName || '',
+    herbals: hasActivePrescription ? cloneJson(sourceHerbals, []) : [],
+    formulaName: hasActivePrescription ? (source.formulaName || '') : '',
     prescriptionType: sourcePrescriptionType,
     prognosis: source.prognosis || '',
   }

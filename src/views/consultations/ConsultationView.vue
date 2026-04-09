@@ -12,6 +12,7 @@ import { useBranchesStore } from '../../stores/branches'
 import { useFormulasStore } from '../../stores/formulas'
 import { useAcupointsStore } from '../../stores/acupoints'
 import { useHerbDictStore } from '../../stores/herbDict'
+import { useTemplatesStore } from '../../stores/templates'
 import { hasPermission, getAuthorizedServiceKeys } from '../../utils/permissions'
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
 import { TCM_OPTIONS, CHIEF_COMPLAINTS, emptyDiff, normalizeDiff } from '../../utils/sampleData'
@@ -68,6 +69,7 @@ const appointmentsStore = useAppointmentsStore()
 const formulasStore = useFormulasStore()
 const acupointsStore = useAcupointsStore()
 const herbDictStore = useHerbDictStore()
+const templatesStore = useTemplatesStore()
 const isMobile = inject('isMobile', ref(false))
 
 const patientId = route.params.patientId
@@ -1269,6 +1271,14 @@ function handleHerbSelect(item, row) {
 function addAcu() { form.value.acupuncture.push({ point: '', side: 'bilateral', notes: '' }) }
 function removeAcu(i) { form.value.acupuncture.splice(i, 1) }
 
+function applyAcuTemplate(templateId) {
+  const tpl = templatesStore.getTemplate(templateId)
+  if (!tpl || !tpl.acupoints || tpl.acupoints.length === 0) return
+  tpl.acupoints.forEach(name => {
+    form.value.acupuncture.push({ point: name, side: 'bilateral', notes: '' })
+  })
+}
+
 // ============ Services ============
 const serviceScopePractitioner = computed(() =>
   authStore.getUserById(form.value.practitionerId) || authStore.currentUser,
@@ -2306,9 +2316,27 @@ function handleSendReport() {
           <template #header>
             <div class="diff-card-header">
               <span class="sec-header">Acu Points</span>
-              <el-button v-if="!isReadOnly" size="small" @click="addAcu">
-                <el-icon><Plus /></el-icon> Add Acupoint
-              </el-button>
+              <div v-if="!isReadOnly" style="display:flex;gap:8px;align-items:center">
+                <el-select
+                  v-if="templatesStore.activeTemplates.length > 0"
+                  placeholder="Apply Template"
+                  size="small"
+                  filterable
+                  style="width:180px"
+                  @change="applyAcuTemplate"
+                  :model-value="null"
+                >
+                  <el-option
+                    v-for="tpl in templatesStore.activeTemplates"
+                    :key="tpl.id"
+                    :label="`${tpl.name} (${(tpl.acupoints||[]).length})`"
+                    :value="tpl.id"
+                  />
+                </el-select>
+                <el-button size="small" @click="addAcu">
+                  <el-icon><Plus /></el-icon> Add Acupoint
+                </el-button>
+              </div>
             </div>
           </template>
           <el-table :data="form.acupuncture" size="small" empty-text="We didn't find anything to show here">

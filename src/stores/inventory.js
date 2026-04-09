@@ -78,6 +78,7 @@ export const useInventoryStore = defineStore('inventory', () => {
     const idx = items.value.findIndex((i) => i.id === id)
     if (idx !== -1) items.value[idx] = updated
     saveState()
+    refreshFromApi().catch(() => {})
   }
 
   async function restoreItem(id) {
@@ -85,6 +86,7 @@ export const useInventoryStore = defineStore('inventory', () => {
     const idx = items.value.findIndex((i) => i.id === id)
     if (idx !== -1) items.value[idx] = updated
     saveState()
+    refreshFromApi().catch(() => {})
   }
 
   async function physicalDeleteItem(id) {
@@ -107,6 +109,7 @@ export const useInventoryStore = defineStore('inventory', () => {
     const updated = await inventoryApi.adjust(id, delta, reason)
     items.value[idx] = updated
     saveState()
+    refreshFromApi().catch(() => {})
     return true
   }
 

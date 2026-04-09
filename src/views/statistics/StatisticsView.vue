@@ -8,7 +8,7 @@ import { useAppointmentsStore } from '../../stores/appointments'
 import { useInventoryStore } from '../../stores/inventory'
 import { statisticsApi } from '../../utils/api'
 import { formatDate, dayjs } from '../../utils/dateUtils'
-import { getPaymentRecords, getPaymentStatus } from '../../utils/prescriptionWorkflow'
+import { getPaymentRecords, getPaymentStatus, getBillablePrescriptionTotal } from '../../utils/prescriptionWorkflow'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -154,6 +154,142 @@ function formatMoney(val) {
   return Number(val || 0).toFixed(2)
 }
 
+// ── Revenue Export ──
+const exportDateRange = ref([
+  dayjs().startOf('year').format('YYYY-MM-DD'),
+  dayjs().endOf('year').format('YYYY-MM-DD'),
+])
+const exportPreset = ref('year')
+
+function setExportPreset(preset) {
+  exportPreset.value = preset
+  const now = dayjs()
+  if (preset === 'q1') {
+    exportDateRange.value = [now.startOf('year').format('YYYY-MM-DD'), now.startOf('year').add(2, 'month').endOf('month').format('YYYY-MM-DD')]
+  } else if (preset === 'q2') {
+    exportDateRange.value = [now.startOf('year').add(3, 'month').format('YYYY-MM-DD'), now.startOf('year').add(5, 'month').endOf('month').format('YYYY-MM-DD')]
+  } else if (preset === 'q3') {
+    exportDateRange.value = [now.startOf('year').add(6, 'month').format('YYYY-MM-DD'), now.startOf('year').add(8, 'month').endOf('month').format('YYYY-MM-DD')]
+  } else if (preset === 'q4') {
+    exportDateRange.value = [now.startOf('year').add(9, 'month').format('YYYY-MM-DD'), now.endOf('year').format('YYYY-MM-DD')]
+  } else if (preset === 'year') {
+    exportDateRange.value = [now.startOf('year').format('YYYY-MM-DD'), now.endOf('year').format('YYYY-MM-DD')]
+  } else if (preset === 'lastYear') {
+    exportDateRange.value = [now.subtract(1, 'year').startOf('year').format('YYYY-MM-DD'), now.subtract(1, 'year').endOf('year').format('YYYY-MM-DD')]
+  }
+}
+
+const exportConsultations = computed(() => {
+  const [start, end] = exportDateRange.value || []
+  if (!start || !end) return []
+  return allConsultations.value.filter(c => {
+    const d = c.date || ''
+    return d >= start && d <= end
+  })
+})
+
+const exportSummary = computed(() => {
+  let acupunctureIncome = 0
+  let herbIncome = 0
+  let otherServiceIncome = 0
+  let totalTax = 0
+  let totalPaid = 0
+  const rows = []
+
+  for (const c of exportConsultations.value) {
+    const payments = getPaymentRecords(c)
+    const paidAmount = payments.reduce((s, p) => s + Number(p.amount || 0), 0)
+    if (paidAmount === 0) continue
+
+    const tax = Number(c.taxAmount || 0)
+    totalTax += tax
+    totalPaid += paidAmount
+
+    // Classify services
+    let consultAcuIncome = 0
+    let consultHerbIncome = 0
+    let consultOtherIncome = 0
+    const services = c.services || []
+    for (const svc of services) {
+      const amount = Number(svc.amount || svc.price || 0) * Number(svc.quantity || 1)
+      const key = svc.serviceKey || svc.key || ''
+      if (key.includes('acupuncture') || key.includes('acu')) {
+        consultAcuIncome += amount
+      } else if (key.includes('herb') || key.includes('formula') || key.includes('chinese_medicine')) {
+        consultHerbIncome += amount
+      } else {
+        consultOtherIncome += amount
+      }
+    }
+
+    // If no services breakdown, classify by prescriptionType
+    if (services.length === 0) {
+      const fee = Number(c.consultationFee || 0)
+      const rxTotal = Number(c.totalWithoutTax || paidAmount - tax) - fee
+      if (c.prescriptionType && c.prescriptionType !== 'none') {
+        consultHerbIncome += rxTotal > 0 ? rxTotal : 0
+        consultAcuIncome += fee
+      } else {
+        consultAcuIncome += paidAmount - tax
+      }
+    }
+
+    acupunctureIncome += consultAcuIncome
+    herbIncome += consultHerbIncome
+    otherServiceIncome += consultOtherIncome
+
+    const patient = patientsStore.getPatient(c.patientId)
+    const practitioner = authStore.users.find(u => u.id === c.practitionerId)
+    rows.push({
+      date: c.date || '',
+      patientName: patient?.name || c.patientId || '',
+      practitionerName: practitioner?.name || c.practitionerId || '',
+      acupunture: consultAcuIncome,
+      herbs: consultHerbIncome,
+      other: consultOtherIncome,
+      tax,
+      total: paidAmount,
+      paymentMethod: payments.map(p => p.method || '').join(', '),
+    })
+  }
+
+  return { acupunctureIncome, herbIncome, otherServiceIncome, totalTax, totalPaid, rows }
+})
+
+function downloadRevenueCsv() {
+  const { rows } = exportSummary.value
+  if (!rows.length) return
+  const headers = [
+    t('statistics.exportDate'), t('statistics.exportPatient'), t('statistics.exportPractitioner'),
+    t('statistics.exportAcupuncture'), t('statistics.exportHerbs'), t('statistics.exportOther'),
+    t('statistics.exportTax'), t('statistics.exportTotal'), t('statistics.exportPaymentMethod'),
+  ]
+  const csvRows = [headers.join(',')]
+  for (const r of rows) {
+    csvRows.push([
+      r.date, `"${r.patientName}"`, `"${r.practitionerName}"`,
+      r.acupunture.toFixed(2), r.herbs.toFixed(2), r.other.toFixed(2),
+      r.tax.toFixed(2), r.total.toFixed(2), `"${r.paymentMethod}"`,
+    ].join(','))
+  }
+  // Summary row
+  const s = exportSummary.value
+  csvRows.push('')
+  csvRows.push([t('statistics.exportSummary'), '', '',
+    s.acupunctureIncome.toFixed(2), s.herbIncome.toFixed(2), s.otherServiceIncome.toFixed(2),
+    s.totalTax.toFixed(2), s.totalPaid.toFixed(2), '',
+  ].join(','))
+
+  const bom = '\uFEFF'
+  const blob = new Blob([bom + csvRows.join('\n')], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `revenue_${exportDateRange.value[0]}_${exportDateRange.value[1]}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 onMounted(async () => {
   try {
     loading.value = true
@@ -294,7 +430,7 @@ onMounted(async () => {
     </el-row>
 
     <!-- 病种排行 & 医师排行 -->
-    <el-row :gutter="16">
+    <el-row :gutter="16" style="margin-bottom: 16px">
       <el-col :span="12">
         <el-card>
           <div class="chart-title">{{ t('statistics.topComplaints') }}</div>
@@ -323,6 +459,63 @@ onMounted(async () => {
         </el-card>
       </el-col>
     </el-row>
+
+    <!-- 收入导出 -->
+    <el-card style="margin-bottom: 16px">
+      <div class="chart-title">{{ t('statistics.revenueExport') }}</div>
+      <div class="export-toolbar">
+        <div class="export-presets">
+          <el-button size="small" :type="exportPreset === 'q1' ? 'primary' : ''" @click="setExportPreset('q1')">Q1</el-button>
+          <el-button size="small" :type="exportPreset === 'q2' ? 'primary' : ''" @click="setExportPreset('q2')">Q2</el-button>
+          <el-button size="small" :type="exportPreset === 'q3' ? 'primary' : ''" @click="setExportPreset('q3')">Q3</el-button>
+          <el-button size="small" :type="exportPreset === 'q4' ? 'primary' : ''" @click="setExportPreset('q4')">Q4</el-button>
+          <el-button size="small" :type="exportPreset === 'year' ? 'primary' : ''" @click="setExportPreset('year')">{{ t('statistics.thisYear') }}</el-button>
+          <el-button size="small" :type="exportPreset === 'lastYear' ? 'primary' : ''" @click="setExportPreset('lastYear')">{{ t('statistics.lastYear') }}</el-button>
+        </div>
+        <el-date-picker
+          v-model="exportDateRange"
+          type="daterange"
+          value-format="YYYY-MM-DD"
+          :start-placeholder="t('statistics.startDate')"
+          :end-placeholder="t('statistics.endDate')"
+          size="small"
+          style="width: 280px"
+          @change="exportPreset = ''"
+        />
+        <el-button type="success" size="small" @click="downloadRevenueCsv" :disabled="!exportSummary.rows.length">
+          <el-icon><Download /></el-icon> {{ t('statistics.downloadCsv') }}
+        </el-button>
+      </div>
+
+      <div v-if="exportSummary.rows.length" class="export-summary">
+        <div class="export-summary-cards">
+          <div class="es-card acupuncture">
+            <div class="es-label">{{ t('statistics.acupunctureIncome') }}</div>
+            <div class="es-value">{{ cs }}{{ formatMoney(exportSummary.acupunctureIncome) }}</div>
+          </div>
+          <div class="es-card herbs">
+            <div class="es-label">{{ t('statistics.herbIncome') }}</div>
+            <div class="es-value">{{ cs }}{{ formatMoney(exportSummary.herbIncome) }}</div>
+          </div>
+          <div class="es-card other" v-if="exportSummary.otherServiceIncome > 0">
+            <div class="es-label">{{ t('statistics.otherIncome') }}</div>
+            <div class="es-value">{{ cs }}{{ formatMoney(exportSummary.otherServiceIncome) }}</div>
+          </div>
+          <div class="es-card tax">
+            <div class="es-label">{{ t('statistics.totalTax') }}</div>
+            <div class="es-value">{{ cs }}{{ formatMoney(exportSummary.totalTax) }}</div>
+          </div>
+          <div class="es-card total">
+            <div class="es-label">{{ t('statistics.totalPaidAmount') }}</div>
+            <div class="es-value">{{ cs }}{{ formatMoney(exportSummary.totalPaid) }}</div>
+          </div>
+        </div>
+        <div style="font-size:12px; color:#888; margin-top:8px">
+          {{ t('statistics.exportRecordCount', { count: exportSummary.rows.length }) }}
+        </div>
+      </div>
+      <div v-else style="text-align:center;padding:20px;color:#999">{{ t('statistics.noDataInRange') }}</div>
+    </el-card>
   </div>
 </template>
 
@@ -406,4 +599,17 @@ onMounted(async () => {
 }
 .rank-no.top3 { background: #fef3c7; color: #b45309; }
 .rank-name { flex: 1; font-size: 13px; color: #333; }
+
+/* Export */
+.export-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+.export-presets { display: flex; gap: 4px; }
+.export-summary-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+.es-card { padding: 14px; border-radius: 10px; background: #f8fafc; border: 1px solid #eef2f7; }
+.es-card.acupuncture { border-left: 3px solid #2d6a4f; }
+.es-card.herbs { border-left: 3px solid #7c3aed; }
+.es-card.other { border-left: 3px solid #0d9488; }
+.es-card.tax { border-left: 3px solid #b45309; }
+.es-card.total { border-left: 3px solid #1d4ed8; background: #eef4ff; }
+.es-label { font-size: 12px; color: #888; margin-bottom: 4px; }
+.es-value { font-size: 20px; font-weight: 700; color: #1a1a1a; }
 </style>

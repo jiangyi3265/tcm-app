@@ -1,4 +1,5 @@
 const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+const WORKING_HOURS_STEP_MINUTES = 10
 
 function createEmptyWorkingRange() {
   return { start: '', end: '' }
@@ -15,9 +16,9 @@ function toMinutes(value) {
   return hours * 60 + minutes
 }
 
-function isHalfHourAligned(value) {
+function isWorkingHoursStepAligned(value) {
   const minutes = toMinutes(value)
-  return minutes != null && minutes % 30 === 0
+  return minutes != null && minutes % WORKING_HOURS_STEP_MINUTES === 0
 }
 
 function normalizeWorkingHoursForForm(workingHours = {}) {
@@ -74,7 +75,7 @@ function validateWorkingHours(workingHours = {}) {
       if (!range.start || !range.end) {
         return { ok: false, code: 'incomplete', day }
       }
-      if (range.startMinutes == null || range.endMinutes == null || !isHalfHourAligned(range.start) || !isHalfHourAligned(range.end)) {
+      if (range.startMinutes == null || range.endMinutes == null || !isWorkingHoursStepAligned(range.start) || !isWorkingHoursStepAligned(range.end)) {
         return { ok: false, code: 'granularity', day }
       }
       if (range.startMinutes >= range.endMinutes) {
@@ -95,6 +96,7 @@ function validateWorkingHours(workingHours = {}) {
 
 export {
   WEEKDAYS,
+  WORKING_HOURS_STEP_MINUTES,
   createEmptyWorkingRange,
   normalizeWorkingHoursForForm,
   buildWorkingHoursPayload,

@@ -342,13 +342,15 @@ async function handleExportData() {
 // ========== Room management ==========
 const showAddRoomDialog = ref(false)
 const newRoomName = ref('')
+const newRoomTags = ref([])
 
 async function handleAddRoom() {
   if (!newRoomName.value) return ElMessage.warning(t('admin.fillRoomName'))
-  await settingsStore.addRoom({ name: newRoomName.value })
+  await settingsStore.addRoom({ name: newRoomName.value, supportTags: newRoomTags.value })
   ElMessage.success(t('admin.roomAdded'))
   showAddRoomDialog.value = false
   newRoomName.value = ''
+  newRoomTags.value = []
 }
 
 async function deleteRoom(room) {
@@ -366,6 +368,10 @@ async function renameRoom(room) {
 async function enableRoom(room) {
   await settingsStore.updateRoom(room.id, { isActive: true })
   ElMessage.success(t('admin.enabled'))
+}
+
+async function updateRoomTags(room, tags) {
+  await settingsStore.updateRoom(room.id, { supportTags: tags })
 }
 
 // ========== Service type settings ==========
@@ -1024,9 +1030,9 @@ async function deleteTemplate(tmpl) {
               </div>
               <div class="schedule-range-list">
                 <div v-for="(range, index) in profileForm.workingHours[day]" :key="`${day}-${index}`" class="schedule-range-row">
-                  <el-time-select v-model="range.start" start="00:00" end="23:30" step="00:30" :placeholder="t('admin.profileStartTime')" size="small" style="width:140px" />
+                  <el-time-select v-model="range.start" start="00:00" end="23:50" step="00:10" :placeholder="t('admin.profileStartTime')" size="small" style="width:140px" />
                   <span style="color:#999">{{ t('admin.profileRangeSeparator') }}</span>
-                  <el-time-select v-model="range.end" start="00:00" end="23:30" step="00:30" :placeholder="t('admin.profileEndTime')" size="small" style="width:140px" />
+                  <el-time-select v-model="range.end" start="00:00" end="23:50" step="00:10" :placeholder="t('admin.profileEndTime')" size="small" style="width:140px" />
                   <el-button size="small" text type="danger" @click="removeWorkingHourRange(day, index)">{{ t('common.delete') }}</el-button>
                 </div>
               </div>
@@ -1126,6 +1132,17 @@ async function deleteTemplate(tmpl) {
         </div>
         <el-table :data="settingsStore.rooms" stripe>
           <el-table-column prop="name" :label="t('admin.roomName')" min-width="160" />
+          <el-table-column :label="t('admin.supportTags')" min-width="240">
+            <template #default="{ row }">
+              <el-checkbox-group :model-value="row.supportTags || []" @change="tags => updateRoomTags(row, tags)" size="small">
+                <el-checkbox label="acupuncture">{{ t('admin.tagAcupuncture') }}</el-checkbox>
+                <el-checkbox label="tuina">{{ t('admin.tagTuina') }}</el-checkbox>
+                <el-checkbox label="consultation">{{ t('admin.tagConsultation') }}</el-checkbox>
+                <el-checkbox label="herbs">{{ t('admin.tagHerbs') }}</el-checkbox>
+                <el-checkbox label="moxibustion">{{ t('admin.tagMoxibustion') }}</el-checkbox>
+              </el-checkbox-group>
+            </template>
+          </el-table-column>
           <el-table-column :label="t('admin.status')" width="100">
             <template #default="{ row }">
               <el-tag :type="row.isActive ? 'success' : 'info'" size="small">
@@ -1885,10 +1902,19 @@ async function deleteTemplate(tmpl) {
     </el-drawer>
 
     <!-- Add room dialog -->
-    <el-dialog v-model="showAddRoomDialog" :title="t('admin.addRoomDialog')" width="360px">
-      <el-form label-width="80px">
+    <el-dialog v-model="showAddRoomDialog" :title="t('admin.addRoomDialog')" width="420px">
+      <el-form label-width="100px">
         <el-form-item :label="t('admin.roomName')">
           <el-input v-model="newRoomName" :placeholder="t('admin.roomNamePlaceholder')" />
+        </el-form-item>
+        <el-form-item :label="t('admin.supportTags')">
+          <el-checkbox-group v-model="newRoomTags">
+            <el-checkbox label="acupuncture">{{ t('admin.tagAcupuncture') }}</el-checkbox>
+            <el-checkbox label="tuina">{{ t('admin.tagTuina') }}</el-checkbox>
+            <el-checkbox label="consultation">{{ t('admin.tagConsultation') }}</el-checkbox>
+            <el-checkbox label="herbs">{{ t('admin.tagHerbs') }}</el-checkbox>
+            <el-checkbox label="moxibustion">{{ t('admin.tagMoxibustion') }}</el-checkbox>
+          </el-checkbox-group>
         </el-form-item>
       </el-form>
       <template #footer>

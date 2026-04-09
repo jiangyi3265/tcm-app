@@ -4,10 +4,12 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { publicBookingApi } from '../../utils/api'
 import { dayjs, formatDate, formatTime } from '../../utils/dateUtils'
+import { SERVICE_TYPES } from '../../utils/sampleData'
 
 const { t } = useI18n()
 
-const SLOT_MINUTES = 30
+const MIN_SLOT_MINUTES = 10
+const DEFAULT_SLOT_MINUTES = 20
 
 const loading = ref(true)
 const scheduleLoading = ref(false)
@@ -17,6 +19,71 @@ const rooms = ref([])
 const scheduleSlots = ref([])
 const selectedSlotValue = ref('')
 const successState = ref(null)
+const scheduleStepMinutes = ref(DEFAULT_SLOT_MINUTES)
+
+function normalizeTagList(value) {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map((item) => String(item || '').trim()).filter(Boolean))]
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const text = value.trim()
+    if (text.startsWith('[') && text.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(text)
+        if (Array.isArray(parsed)) {
+          return [...new Set(parsed.map((item) => String(item || '').trim()).filter(Boolean))]
+        }
+      } catch {
+        // fall through to comma-delimited parsing
+      }
+    }
+    if (text.includes(',')) {
+      return [...new Set(text.split(',').map((item) => String(item || '').trim()).filter(Boolean))]
+    }
+    return [text]
+  }
+  return []
+}
+
+function normalizeServiceTypes(source) {
+  const items = Array.isArray(source)
+    ? source
+    : source && typeof source === 'object'
+      ? Object.entries(source).map(([key, value]) => ({ key, ...value }))
+      : []
+  return items
+    .map((item) => ({
+      ...item,
+      key: item?.key ?? item?.serviceKey ?? item?.service_type ?? '',
+    }))
+    .filter((item) => item && item.key)
+    .map((item) => {
+      const fallback = SERVICE_TYPES[item.key] || {}
+      return {
+        ...fallback,
+        ...item,
+        key: item.key,
+        requiredTag: item.requiredTag ?? fallback.requiredTag ?? '',
+        roomRequired: Boolean(item.roomRequired ?? fallback.roomRequired),
+      }
+    })
+}
+
+function normalizeRooms(source) {
+  return Array.isArray(source)
+    ? source.map((room) => ({
+      ...room,
+      supportTags: normalizeTagList(room?.supportTags),
+      isActive: room?.isActive !== false,
+    }))
+    : []
+}
+
+function roomSupportsTag(room, tag) {
+  if (!tag) return true
+  const tags = Array.isArray(room?.supportTags) ? room.supportTags : []
+  return tags.length === 0 || tags.includes(tag)
+}
 
 function alignWeekStart(value) {
   const date = dayjs(value || undefined)
@@ -45,12 +112,20 @@ const form = ref({
 const selectedService = computed(() => serviceTypes.value.find((item) => item.key === form.value.serviceType) || null)
 const requiresRoomSelection = computed(() => Boolean(selectedService.value?.roomRequired))
 const activeRooms = computed(() => rooms.value.filter((item) => item?.isActive !== false))
+const filteredRooms = computed(() => {
+  const tag = selectedService.value?.requiredTag
+  return activeRooms.value.filter((room) => roomSupportsTag(room, tag))
+})
 const practitionerOptions = computed(() =>
   practitioners.value.filter((item) => {
     const serviceKeys = Array.isArray(item.serviceKeys) ? item.serviceKeys : []
     return !form.value.serviceType || serviceKeys.length === 0 || serviceKeys.includes(form.value.serviceType)
   }),
 )
+const displayStepMinutes = computed(() => {
+  const step = Number(scheduleStepMinutes.value)
+  return Number.isFinite(step) && step > 0 ? Math.max(MIN_SLOT_MINUTES, step) : DEFAULT_SLOT_MINUTES
+})
 
 const weekStart = computed(() => dayjs(alignWeekStart(currentWeek.value)))
 const weekDays = computed(() => Array.from({ length: 7 }, (_, index) => weekStart.value.add(index, 'day').toDate()))
@@ -110,7 +185,7 @@ function normalizeSlot(slot) {
   }
   if (status === 'reserved') status = 'booked'
   if (status === 'free') status = 'available'
-  if (!['off', 'working', 'booked', 'available'].includes(status)) status = 'working'
+  if (!['off', 'working', 'booked', 'available', 'occupied'].includes(status)) status = 'working'
 
   return {
     ...slot,
@@ -151,17 +226,18 @@ const gridBounds = computed(() => {
   if (!relevantSlots.length) {
     return { startMinutes: 8 * 60, endMinutes: 18 * 60 }
   }
-  const startMinutes = Math.max(0, Math.floor(Math.min(...relevantSlots.map((slot) => slot.startMinutes)) / SLOT_MINUTES) * SLOT_MINUTES)
-  const endMinutes = Math.min(24 * 60, Math.ceil(Math.max(...relevantSlots.map((slot) => slot.endMinutes)) / SLOT_MINUTES) * SLOT_MINUTES)
+  const step = displayStepMinutes.value
+  const startMinutes = Math.max(0, Math.floor(Math.min(...relevantSlots.map((slot) => slot.startMinutes)) / step) * step)
+  const endMinutes = Math.min(24 * 60, Math.ceil(Math.max(...relevantSlots.map((slot) => slot.endMinutes)) / step) * step)
   return {
     startMinutes,
-    endMinutes: endMinutes > startMinutes ? endMinutes : startMinutes + SLOT_MINUTES,
+    endMinutes: endMinutes > startMinutes ? endMinutes : startMinutes + step,
   }
 })
 
 const timeRows = computed(() => {
   const rows = []
-  for (let minute = gridBounds.value.startMinutes; minute < gridBounds.value.endMinutes; minute += SLOT_MINUTES) {
+  for (let minute = gridBounds.value.startMinutes; minute < gridBounds.value.endMinutes; minute += displayStepMinutes.value) {
     rows.push(minute)
   }
   return rows
@@ -181,7 +257,7 @@ const slotCoverageMap = computed(() => {
       const list = map.get(key) || []
       list.push(slot)
       map.set(key, list)
-      cursor = cursor.add(SLOT_MINUTES, 'minute')
+      cursor = cursor.add(displayStepMinutes.value, 'minute')
     }
   })
   return map
@@ -228,6 +304,16 @@ function getCellClass(date, totalMinutes) {
   }
 }
 
+function getCellDisplaySlot(date, totalMinutes) {
+  const status = getCellStatus(date, totalMinutes)
+  const primarySlot = getPrimaryCellSlot(date, totalMinutes)
+  const coveredSlot = getCoveredCellSlot(date, totalMinutes)
+  if (status === 'available') {
+    return primarySlot || coveredSlot
+  }
+  return coveredSlot || primarySlot
+}
+
 function isSelectedCell(date, totalMinutes) {
   return selectedSlotValue.value === getPrimaryCellSlot(date, totalMinutes)?.startTime
 }
@@ -240,9 +326,10 @@ async function loadOptions() {
   loading.value = true
   try {
     const response = await publicBookingApi.options()
-    serviceTypes.value = Array.isArray(response?.serviceTypes) ? response.serviceTypes : []
+    const nextServiceTypes = normalizeServiceTypes(response?.serviceTypes)
+    serviceTypes.value = nextServiceTypes.length > 0 ? nextServiceTypes : normalizeServiceTypes(SERVICE_TYPES)
     practitioners.value = Array.isArray(response?.practitioners) ? response.practitioners : []
-    rooms.value = Array.isArray(response?.rooms) ? response.rooms : []
+    rooms.value = normalizeRooms(response?.rooms)
     if (!form.value.serviceType && serviceTypes.value.length > 0) {
       form.value.serviceType = serviceTypes.value[0].key
     }
@@ -259,14 +346,14 @@ watch(practitionerOptions, (items) => {
   }
 })
 
-watch(requiresRoomSelection, (required) => {
-  if (!required) form.value.roomId = ''
-})
-
-watch(activeRooms, (items) => {
+watch(filteredRooms, (items) => {
   if (form.value.roomId && !items.some((item) => String(item.id) === String(form.value.roomId))) {
     form.value.roomId = ''
   }
+})
+
+watch(requiresRoomSelection, (required) => {
+  if (!required) form.value.roomId = ''
 })
 
 let scheduleRequestId = 0
@@ -288,6 +375,10 @@ async function loadSchedule() {
       roomId: requiresRoomSelection.value ? form.value.roomId : null,
     })
     if (requestId !== scheduleRequestId) return
+    scheduleStepMinutes.value = (() => {
+      const step = Number(response?.slotStepMinutes ?? DEFAULT_SLOT_MINUTES)
+      return Number.isFinite(step) && step > 0 ? Math.max(MIN_SLOT_MINUTES, step) : DEFAULT_SLOT_MINUTES
+    })()
     if (response?.weekStart) {
       const normalizedWeekStart = alignWeekStart(response.weekStart)
       if (!dayjs(normalizedWeekStart).isSame(weekStart.value, 'day')) {
@@ -356,8 +447,31 @@ async function submitBooking() {
       startTime: selectedSlot.value.startTime,
       practitionerId: selectedSlot.value.assignedPractitionerId,
     }
+    selectedSlotValue.value = ''
+    try {
+      await loadSchedule()
+    } catch {
+      // Preserve the success state even if the refresh fails.
+    }
   } catch (error) {
     ElMessage.error(error.message || t('publicBooking.submitFailed'))
+  }
+}
+
+const successTimeLabel = computed(() => {
+  const startTime = successState.value?.startTime
+  if (!startTime) return ''
+  const parsed = dayjs(startTime)
+  return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm') : String(startTime)
+})
+
+async function bookAnother() {
+  successState.value = null
+  selectedSlotValue.value = ''
+  try {
+    await loadSchedule()
+  } catch {
+    // Keep the form usable even if the refresh fails.
   }
 }
 
@@ -378,9 +492,9 @@ onMounted(() => {
     <div v-if="successState" class="public-card success-card">
       <h1>{{ t('publicBooking.successTitle') }}</h1>
       <p>{{ t('publicBooking.successIntro') }}</p>
-      <p>{{ t('publicBooking.successTime', { time: `${successState.startTime}` }) }}</p>
+      <p>{{ t('publicBooking.successTime', { time: successTimeLabel }) }}</p>
       <p>{{ t('publicBooking.successPractitioner', { name: getPractitionerName(successState.practitionerId) }) }}</p>
-      <el-button type="primary" @click="successState = null">{{ t('publicBooking.bookAnother') }}</el-button>
+      <el-button type="primary" @click="bookAnother">{{ t('publicBooking.bookAnother') }}</el-button>
     </div>
 
     <div v-else class="public-card">
@@ -422,7 +536,7 @@ onMounted(() => {
           </el-form-item>
           <el-form-item v-if="requiresRoomSelection" :label="t('appointments.room')" required>
             <el-select v-model="form.roomId" :placeholder="t('appointments.selectRoom')" style="width:100%">
-              <el-option v-for="room in activeRooms" :key="room.id" :label="room.name" :value="room.id" />
+              <el-option v-for="room in filteredRooms" :key="room.id" :label="room.name" :value="room.id" />
             </el-select>
           </el-form-item>
           <div v-else />
@@ -476,8 +590,8 @@ onMounted(() => {
                   :class="getCellClass(day, minute)"
                   @click="selectCell(day, minute)"
                 >
-                  <template v-if="getPrimaryCellSlot(day, minute)">
-                    <template v-if="getPrimaryCellSlot(day, minute).status === 'available'">
+                  <template v-if="getCellStatus(day, minute) !== 'empty'">
+                    <template v-if="getCellStatus(day, minute) === 'available' && getPrimaryCellSlot(day, minute)">
                       <button
                         type="button"
                         class="slot-card"
@@ -490,8 +604,8 @@ onMounted(() => {
                     </template>
                     <template v-else>
                       <div class="slot-block">
-                        <div class="slot-time">{{ formatTime(getPrimaryCellSlot(day, minute).startTime) }} - {{ formatTime(getPrimaryCellSlot(day, minute).endTime) }}</div>
-                        <div class="slot-status">{{ t(`publicBooking.slotStatus.${getPrimaryCellSlot(day, minute).status}`) }}</div>
+                        <div class="slot-time">{{ formatTime(getCellDisplaySlot(day, minute)?.startTime) }} - {{ formatTime(getCellDisplaySlot(day, minute)?.endTime) }}</div>
+                        <div class="slot-status">{{ t(`publicBooking.slotStatus.${getCellStatus(day, minute)}`) }}</div>
                       </div>
                     </template>
                   </template>

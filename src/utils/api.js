@@ -22,6 +22,13 @@ function buildQuery(params = {}) {
   return queryString ? `?${queryString}` : ''
 }
 
+function normalizeScheduleParams(params = {}) {
+  const normalized = { ...params }
+  if (!normalized.weekStart && normalized.date) normalized.weekStart = normalized.date
+  if (!normalized.date && normalized.weekStart) normalized.date = normalized.weekStart
+  return normalized
+}
+
 async function request(path, { method = 'GET', body, auth = true } = {}) {
   const headers = {
     'Content-Type': 'application/json',
@@ -433,12 +440,7 @@ export const publicBookingApi = {
     return request('/api/public-booking/options', { auth: false })
   },
   schedule(params = {}) {
-    const normalizedParams = {
-      ...params,
-      weekStart: params.weekStart || params.date,
-      date: params.date || params.weekStart,
-    }
-    return request(`/api/public-booking/schedule${buildQuery(normalizedParams)}`, { auth: false })
+    return request(`/api/public-booking/schedule${buildQuery(normalizeScheduleParams(params))}`, { auth: false })
   },
   availability(params = {}) {
     return request(`/api/public-booking/availability${buildQuery(params)}`, { auth: false })

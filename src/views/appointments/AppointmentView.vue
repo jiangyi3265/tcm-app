@@ -21,7 +21,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t, te } = useI18n()
 
-const SLOT_MINUTES = 30
+const SLOT_MINUTES = 10
+const MIN_BOOKING_STEP_MINUTES = 10
+const DEFAULT_BOOKING_STEP_MINUTES = 20
 const WEEKDAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
 const WEEKDAY_LABELS = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' }
 
@@ -109,6 +111,7 @@ const serviceOptions = computed(() => {
     label: getServiceTypeLabel(key, config?.label),
     duration: Number(config?.duration || 0),
     roomRequired: Boolean(config?.roomRequired),
+    requiredTag: config?.requiredTag || '',
   }))
 })
 
@@ -132,6 +135,11 @@ watch(practitioners, (items) => {
 }, { immediate: true })
 
 const selectedPractitioner = computed(() => authStore.getUserById(filterPractitioner.value) || null)
+const filteredPractitionerStepMinutes = computed(() => {
+  if (!filterPractitioner.value) return DEFAULT_BOOKING_STEP_MINUTES
+  const step = Number(settingsStore.getPractitionerInterval(filterPractitioner.value))
+  return Number.isFinite(step) && step > 0 ? Math.max(MIN_BOOKING_STEP_MINUTES, step) : DEFAULT_BOOKING_STEP_MINUTES
+})
 
 function getWorkingRanges(practitioner, date) {
   const weekdayKey = WEEKDAY_KEYS[dayjs(date).day()]
@@ -214,12 +222,40 @@ const occupiedCellSet = computed(() => {
   return set
 })
 
+function getPractitionerBusyMinutes(appointment) {
+  const start = dayjs(appointment?.startTime)
+  const end = dayjs(appointment?.endTime)
+  if (!start.isValid() || !end.isValid() || !end.isAfter(start)) return 0
+  const durationMinutes = end.diff(start, 'minute')
+  const practitionerTime = Number(getServiceTypeConfig(appointment?.serviceType)?.practitionerTime || 0)
+  if (Number.isFinite(practitionerTime) && practitionerTime > 0 && practitionerTime <= durationMinutes) {
+    return practitionerTime
+  }
+  return durationMinutes
+}
+
+const practitionerOccupiedCellSet = computed(() => {
+  const set = new Set()
+  weekAppointments.value.forEach((appointment) => {
+    let cursor = dayjs(appointment.startTime)
+    const end = cursor.add(getPractitionerBusyMinutes(appointment), 'minute')
+    while (cursor.isValid() && end.isValid() && cursor.isBefore(end)) {
+      set.add(buildCellKey(cursor, cursor.hour() * 60 + cursor.minute()))
+      cursor = cursor.add(SLOT_MINUTES, 'minute')
+    }
+  })
+  return set
+})
+
 function getCellAppointments(date, totalMinutes) {
   return appointmentStartMap.value.get(buildCellKey(date, totalMinutes)) || []
 }
 
 function isCellOccupied(date, totalMinutes) {
-  return occupiedCellSet.value.has(buildCellKey(date, totalMinutes))
+  const key = buildCellKey(date, totalMinutes)
+  return filterPractitioner.value
+    ? practitionerOccupiedCellSet.value.has(key)
+    : occupiedCellSet.value.has(key)
 }
 
 function getCellClass(date, totalMinutes) {
@@ -230,11 +266,102 @@ function getCellClass(date, totalMinutes) {
   }
 }
 
+function getDayClickSlots(date) {
+  if (!filterPractitioner.value || !selectedPractitioner.value) {
+    return timeSlots.value
+  }
+  const slots = []
+  for (const range of getWorkingRanges(selectedPractitioner.value, date)) {
+    for (let total = range.startMinutes; total + SLOT_MINUTES <= range.endMinutes; total += filteredPractitionerStepMinutes.value) {
+      slots.push({ total, label: toSlotLabel(total) })
+    }
+  }
+  return slots
+}
+
+// ── Proportional calendar layout ──
+const PX_PER_MINUTE = 1.8  // each minute = 1.8px height
+
+function getSlotTopPx(totalMinutes) {
+  const base = timeSlots.value.length > 0 ? timeSlots.value[0].total : 0
+  return (totalMinutes - base) * PX_PER_MINUTE
+}
+
+function getTotalCalendarHeight() {
+  if (timeSlots.value.length === 0) return 0
+  const first = timeSlots.value[0].total
+  const last = timeSlots.value[timeSlots.value.length - 1].total + SLOT_MINUTES
+  return (last - first) * PX_PER_MINUTE
+}
+
+/** Compute positioned appointments for a given day, including column layout for overlaps */
+function getDayAppointmentBlocks(date) {
+  const dateStr = dayjs(date).format('YYYY-MM-DD')
+  const dayAppts = weekAppointments.value.filter(a => dayjs(a.startTime).format('YYYY-MM-DD') === dateStr)
+  if (!dayAppts.length) return []
+
+  const baseMinutes = timeSlots.value.length > 0 ? timeSlots.value[0].total : 0
+  const blocks = dayAppts.map(a => {
+    const start = dayjs(a.startTime)
+    const end = dayjs(a.endTime)
+    const startMin = start.hour() * 60 + start.minute()
+    const endMin = end.hour() * 60 + end.minute()
+    return {
+      ...getAppointmentWithInfo(a),
+      startMin,
+      endMin,
+      top: (startMin - baseMinutes) * PX_PER_MINUTE,
+      height: Math.max((endMin - startMin) * PX_PER_MINUTE, 20),
+    }
+  }).sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin)
+
+  const clusters = []
+  let currentCluster = []
+  let currentClusterEnd = -1
+  for (const block of blocks) {
+    if (currentCluster.length === 0 || block.startMin < currentClusterEnd) {
+      currentCluster.push(block)
+      currentClusterEnd = Math.max(currentClusterEnd, block.endMin)
+      continue
+    }
+    clusters.push(currentCluster)
+    currentCluster = [block]
+    currentClusterEnd = block.endMin
+  }
+  if (currentCluster.length) {
+    clusters.push(currentCluster)
+  }
+
+  for (const cluster of clusters) {
+    const columnEnds = []
+    for (const block of cluster) {
+      let placedCol = -1
+      for (let col = 0; col < columnEnds.length; col++) {
+        if (columnEnds[col] <= block.startMin) {
+          placedCol = col
+          columnEnds[col] = block.endMin
+          break
+        }
+      }
+      if (placedCol === -1) {
+        placedCol = columnEnds.length
+        columnEnds.push(block.endMin)
+      }
+      block.col = placedCol
+    }
+    const totalCols = Math.max(columnEnds.length, 1)
+    for (const block of cluster) {
+      block.totalCols = totalCols
+    }
+  }
+  return blocks
+}
+
 const showCreateDialog = ref(false)
 const selectedSlotValue = ref('')
 const preferredSlotStartTime = ref('')
 const availabilityLoading = ref(false)
-const availabilityState = ref({ slots: [], duration: 0 })
+const availabilityState = ref({ slots: [], duration: 0, slotStepMinutes: DEFAULT_BOOKING_STEP_MINUTES })
 let availabilityRequestId = 0
 
 const newAppt = ref({
@@ -256,6 +383,14 @@ watch(serviceOptions, (options) => {
 
 const selectedServiceConfig = computed(() => getServiceTypeConfig(newAppt.value.serviceType))
 const requiresRoomSelection = computed(() => Boolean(selectedServiceConfig.value?.roomRequired))
+const filteredRooms = computed(() => {
+  const tag = selectedServiceConfig.value?.requiredTag
+  return settingsStore.activeRooms.filter((room) => {
+    if (!tag) return true
+    const tags = Array.isArray(room.supportTags) ? room.supportTags : []
+    return tags.length === 0 || tags.includes(tag)
+  })
+})
 const practitionerOptions = computed(() => practitioners.value.filter((item) => canPractitionerProvideService(item, newAppt.value.serviceType)))
 const availabilitySlots = computed(() => Array.isArray(availabilityState.value.slots) ? availabilityState.value.slots : [])
 const selectedAvailabilitySlot = computed(() => availabilitySlots.value.find((slot) => slot.startTime === selectedSlotValue.value) || null)
@@ -291,6 +426,7 @@ function closeCreateDialog() {
 
 function handleScheduleCellClick(date, totalMinutes) {
   if (!canCreate.value) return
+  if (isCellOccupied(date, totalMinutes)) return
   if (filterPractitioner.value && (!isWorkingSlot(date, totalMinutes) || isCellOccupied(date, totalMinutes))) return
   openCreateDialog({
     date: dayjs(date).format('YYYY-MM-DD'),
@@ -309,6 +445,11 @@ function syncSelectedSlot() {
     preferredSlotStartTime.value = ''
     return
   }
+  if (preferredSlotStartTime.value) {
+    selectedSlotValue.value = ''
+    preferredSlotStartTime.value = ''
+    return
+  }
   if (!availabilitySlots.value.some((slot) => slot.startTime === selectedSlotValue.value)) {
     selectedSlotValue.value = availabilitySlots.value[0].startTime
   }
@@ -322,7 +463,11 @@ async function loadAvailability() {
   const requestId = availabilityRequestId
 
   if (!newAppt.value.date || !newAppt.value.serviceType || (requiresRoomSelection.value && !newAppt.value.roomId)) {
-    availabilityState.value = { slots: [], duration: Number(selectedServiceConfig.value?.duration || 0) }
+    availabilityState.value = {
+      slots: [],
+      duration: Number(selectedServiceConfig.value?.duration || 0),
+      slotStepMinutes: DEFAULT_BOOKING_STEP_MINUTES,
+    }
     selectedSlotValue.value = ''
     return
   }
@@ -336,11 +481,19 @@ async function loadAvailability() {
       roomId: requiresRoomSelection.value ? newAppt.value.roomId : null,
     })
     if (requestId !== availabilityRequestId) return
-    availabilityState.value = { slots: response?.slots || [], duration: Number(response?.duration || 0) }
+    availabilityState.value = {
+      slots: response?.slots || [],
+      duration: Number(response?.duration || 0),
+      slotStepMinutes: Math.max(MIN_BOOKING_STEP_MINUTES, Number(response?.slotStepMinutes ?? DEFAULT_BOOKING_STEP_MINUTES) || DEFAULT_BOOKING_STEP_MINUTES),
+    }
     syncSelectedSlot()
   } catch (error) {
     if (requestId !== availabilityRequestId) return
-    availabilityState.value = { slots: [], duration: Number(selectedServiceConfig.value?.duration || 0) }
+    availabilityState.value = {
+      slots: [],
+      duration: Number(selectedServiceConfig.value?.duration || 0),
+      slotStepMinutes: DEFAULT_BOOKING_STEP_MINUTES,
+    }
     selectedSlotValue.value = ''
     ElMessage.error(error.message || t('common.loadFailed'))
   } finally {
@@ -486,46 +639,90 @@ const STATUS_COLORS = { booked: '#409eff', confirmed: '#2d6a4f', completed: '#88
       </div>
 
       <div class="schedule-scroll">
-        <table class="schedule-table">
-          <thead>
-            <tr>
-              <th>{{ t('appointments.timeAxis') }}</th>
-              <th v-for="day in weekDays" :key="day" :class="{ today: isToday(day) }">
-                <div>{{ dayjs(day).format('ddd') }}</div>
-                <div>{{ dayjs(day).format('MM-DD') }}</div>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="slot in timeSlots" :key="slot.label">
-              <td class="time-cell">{{ slot.label }}</td>
-              <td
-                v-for="day in weekDays"
-                :key="`${day}-${slot.label}`"
-                class="schedule-cell"
-                :class="getCellClass(day, slot.total)"
-                @click="handleScheduleCellClick(day, slot.total)"
+        <div class="schedule-grid" :style="{ '--cal-height': getTotalCalendarHeight() + 'px' }">
+          <div class="sg-header-row">
+            <div class="sg-header sg-time-col">{{ t('appointments.timeAxis') }}</div>
+            <div v-for="day in weekDays" :key="'h'+day" class="sg-header" :class="{ today: isToday(day) }">
+              <div>{{ dayjs(day).format('ddd') }}</div>
+              <div>{{ dayjs(day).format('MM-DD') }}</div>
+            </div>
+          </div>
+
+          <!-- Time axis + day columns body -->
+          <div class="sg-body-row">
+            <!-- Time labels column -->
+            <div class="sg-time-axis" :style="{ height: getTotalCalendarHeight() + 'px' }">
+              <div v-for="slot in timeSlots" :key="slot.label" class="sg-time-label" :style="{ top: getSlotTopPx(slot.total) + 'px' }">
+                {{ slot.label }}
+              </div>
+            </div>
+
+            <!-- Day columns -->
+            <div
+              v-for="day in weekDays"
+              :key="'d'+day"
+              class="sg-day-col"
+              :style="{ height: getTotalCalendarHeight() + 'px' }"
+            >
+              <!-- Grid lines at each slot -->
+              <div v-for="slot in timeSlots" :key="slot.label" class="sg-gridline" :style="{ top: getSlotTopPx(slot.total) + 'px' }" />
+
+              <!-- Working hour background bands -->
+              <template v-if="selectedPractitioner">
+                <div
+                  v-for="(range, ri) in getWorkingRanges(selectedPractitioner, day)"
+                  :key="'w'+ri"
+                  class="sg-working-band"
+                  :style="{ top: getSlotTopPx(range.startMinutes) + 'px', height: ((range.endMinutes - range.startMinutes) * PX_PER_MINUTE) + 'px' }"
+                />
+              </template>
+
+              <!-- Clickable slot areas (only when filtered by practitioner) -->
+              <template v-if="filterPractitioner">
+                <div
+                  v-for="slot in getDayClickSlots(day)"
+                  :key="'c'+slot.label"
+                  class="sg-click-area"
+                  :style="{ top: getSlotTopPx(slot.total) + 'px', height: (SLOT_MINUTES * PX_PER_MINUTE) + 'px' }"
+                  :class="{ clickable: canCreate && !isCellOccupied(day, slot.total) }"
+                  :data-testid="`appointment-slot-${dayjs(day).format('YYYY-MM-DD')}-${slot.label}`"
+                  @click="handleScheduleCellClick(day, slot.total)"
+                />
+              </template>
+              <template v-else>
+                <div
+                  v-for="slot in getDayClickSlots(day)"
+                  :key="'c'+slot.label"
+                  class="sg-click-area"
+                  :style="{ top: getSlotTopPx(slot.total) + 'px', height: (SLOT_MINUTES * PX_PER_MINUTE) + 'px' }"
+                  :class="{ clickable: canCreate && !isCellOccupied(day, slot.total) }"
+                  :data-testid="`appointment-slot-${dayjs(day).format('YYYY-MM-DD')}-${slot.label}`"
+                  @click="handleScheduleCellClick(day, slot.total)"
+                />
+              </template>
+
+              <!-- Appointment blocks -->
+              <button
+                v-for="block in getDayAppointmentBlocks(day)"
+                :key="block.id"
+                type="button"
+                class="appt-block"
+                :data-testid="`appointment-block-${block.id}`"
+                :style="{
+                  top: block.top + 'px',
+                  height: block.height + 'px',
+                  left: (block.col / block.totalCols * 100) + '%',
+                  width: (1 / block.totalCols * 100) + '%',
+                }"
+                @click.stop="viewAppt(block)"
               >
-                <template v-if="getCellAppointments(day, slot.total).length">
-                  <button
-                    v-for="appointment in getCellAppointments(day, slot.total)"
-                    :key="appointment.id"
-                    type="button"
-                    class="appt-chip"
-                    @click.stop="viewAppt(appointment)"
-                  >
-                    <div>{{ formatTime(appointment.startTime) }} - {{ formatTime(appointment.endTime) }}</div>
-                    <strong>{{ appointment.patient?.name || t('appointments.unknown') }}</strong>
-                    <div>{{ appointment.serviceLabel }}<template v-if="!filterPractitioner"> · {{ appointment.practitioner?.name || '-' }}</template></div>
-                  </button>
-                </template>
-                <span v-else-if="filterPractitioner && isWorkingSlot(day, slot.total) && !isCellOccupied(day, slot.total)" class="available-pill">
-                  {{ t('appointments.availableLabel') }}
-                </span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                <div class="appt-block-time">{{ formatTime(block.startTime) }} - {{ formatTime(block.endTime) }}</div>
+                <strong>{{ block.patient?.name || t('appointments.unknown') }}</strong>
+                <div class="appt-block-svc">{{ block.serviceLabel }}<template v-if="!filterPractitioner"> · {{ block.practitioner?.name || '-' }}</template></div>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -568,7 +765,7 @@ const STATUS_COLORS = { booked: '#409eff', confirmed: '#2d6a4f', completed: '#88
 
         <el-form-item v-if="requiresRoomSelection" :label="t('appointments.room')" required>
           <el-select v-model="newAppt.roomId" :placeholder="t('appointments.selectRoom')" style="width:100%">
-            <el-option v-for="room in settingsStore.activeRooms" :key="room.id" :label="room.name" :value="room.id" />
+            <el-option v-for="room in filteredRooms" :key="room.id" :label="room.name" :value="room.id" />
           </el-select>
         </el-form-item>
 
@@ -639,9 +836,9 @@ const STATUS_COLORS = { booked: '#409eff', confirmed: '#2d6a4f', completed: '#88
         </div>
         <div class="schedule-editor-list">
         <div v-for="(range, index) in myScheduleForm.workingHours[day]" :key="`${day}-${index}`" class="schedule-editor-row">
-            <el-time-select v-model="range.start" start="00:00" end="23:30" step="00:30" :placeholder="t('admin.profileStartTime')" size="small" style="width:140px" />
+            <el-time-select v-model="range.start" start="00:00" end="23:50" step="00:10" :placeholder="t('admin.profileStartTime')" size="small" style="width:140px" />
             <span>{{ t('admin.profileRangeSeparator') }}</span>
-            <el-time-select v-model="range.end" start="00:00" end="23:30" step="00:30" :placeholder="t('admin.profileEndTime')" size="small" style="width:140px" />
+            <el-time-select v-model="range.end" start="00:00" end="23:50" step="00:10" :placeholder="t('admin.profileEndTime')" size="small" style="width:140px" />
             <el-button size="small" text type="danger" @click="removeWorkingRangeFrom(myScheduleForm.workingHours, day, index)">{{ t('common.delete') }}</el-button>
           </div>
         </div>
@@ -703,18 +900,27 @@ const STATUS_COLORS = { booked: '#409eff', confirmed: '#2d6a4f', completed: '#88
 .dot.booked { background:#f4a261; }
 .dot.outside { background:#eceff3; }
 .schedule-scroll { overflow:auto; }
-.schedule-table { width:100%; min-width:920px; border-collapse:collapse; }
-.schedule-table th, .schedule-table td { border:1px solid #edf2f7; vertical-align:top; }
-.schedule-table th { background:#f8fafc; padding:10px 8px; text-align:center; color:#1b4332; }
-.schedule-table th.today { background:#eefbf0; }
-.time-cell { width:84px; padding:10px 8px; font-size:12px; font-weight:600; color:#64748b; background:#fbfdff; }
-.schedule-cell { min-width:120px; min-height:54px; padding:6px; background:#fff; transition:background 0.18s ease; }
-.schedule-cell.working { background:#f6fff7; }
-.schedule-cell.occupied { background:#fff0e4; }
-.schedule-cell.clickable:hover { background:#eefaf0; cursor:pointer; }
-.appt-chip { width:100%; border:0; border-radius:8px; background:#f4a261; color:#fff; padding:8px; text-align:left; display:flex; flex-direction:column; gap:2px; cursor:pointer; }
-.appt-chip + .appt-chip { margin-top:6px; }
-.available-pill { display:inline-flex; padding:4px 10px; border-radius:999px; background:#d8f3dc; color:#2d6a4f; font-size:12px; font-weight:600; }
+/* ── Proportional schedule grid ── */
+.schedule-grid { display:flex; flex-direction:column; min-width:920px; }
+.sg-header-row { display:flex; }
+.schedule-grid .sg-header { flex:1; text-align:center; padding:10px 8px; background:#f8fafc; border:1px solid #edf2f7; color:#1b4332; font-weight:600; font-size:13px; }
+.schedule-grid .sg-header.today { background:#eefbf0; }
+.schedule-grid .sg-header.sg-time-col { flex:0 0 72px; font-size:12px; color:#64748b; }
+.sg-header-row > .sg-header, .sg-body-row > .sg-time-axis, .sg-body-row > .sg-day-col { border-right:1px solid #edf2f7; }
+.sg-body-row { display:flex; flex:1; }
+.sg-time-axis { position:relative; flex:0 0 72px; background:#fbfdff; }
+.sg-time-label { position:absolute; left:0; width:100%; padding:0 8px; font-size:11px; font-weight:600; color:#64748b; transform:translateY(-7px); pointer-events:none; }
+.sg-day-col { position:relative; flex:1; min-width:120px; background:#fff; }
+.sg-gridline { position:absolute; left:0; right:0; border-top:1px solid #edf2f7; pointer-events:none; }
+.sg-working-band { position:absolute; left:0; right:0; background:#f6fff7; pointer-events:none; z-index:0; }
+.sg-click-area { position:absolute; left:0; right:0; z-index:1; }
+.sg-click-area.clickable { z-index:3; }
+.sg-click-area.clickable:hover { background:rgba(45,106,79,0.06); cursor:pointer; }
+.appt-block { position:absolute; z-index:2; box-sizing:border-box; border:0; border-radius:6px; background:#f4a261; color:#fff; padding:4px 6px; text-align:left; display:flex; flex-direction:column; gap:1px; cursor:pointer; overflow:hidden; font-size:11px; line-height:1.3; transition:box-shadow 0.15s; }
+.appt-block:hover { box-shadow:0 2px 8px rgba(0,0,0,0.18); z-index:3; }
+.appt-block-time { font-size:10px; opacity:0.9; }
+.appt-block strong { font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.appt-block-svc { font-size:10px; opacity:0.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .availability-wrapper { width:100%; display:flex; flex-direction:column; gap:10px; }
 .availability-empty { padding:16px; border:1px dashed #d1d5db; border-radius:10px; background:#fafafa; color:#6b7280; font-size:13px; }
 .availability-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:10px; }

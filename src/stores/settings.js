@@ -6,6 +6,69 @@ import { readStoredJson, writeStoredJson } from '../utils/storage'
 
 const DEFAULT_CLINIC_NAME = 'TCM Clinic Management System'
 
+function normalizeTagList(value) {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map((item) => String(item || '').trim()).filter(Boolean))]
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const text = value.trim()
+    if (text.startsWith('[') && text.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(text)
+        if (Array.isArray(parsed)) {
+          return [...new Set(parsed.map((item) => String(item || '').trim()).filter(Boolean))]
+        }
+      } catch {
+        // fall through to comma-delimited parsing
+      }
+    }
+    if (text.includes(',')) {
+      return [...new Set(text.split(',').map((item) => String(item || '').trim()).filter(Boolean))]
+    }
+    return [text]
+  }
+  return []
+}
+
+function normalizeRoom(room = {}) {
+  return {
+    ...room,
+    supportTags: normalizeTagList(room.supportTags),
+    branchId: room.branchId || null,
+    isActive: room.isActive !== false,
+  }
+}
+
+function normalizeServiceType(key, config = {}) {
+  const fallback = SERVICE_TYPES[key] || {}
+  return {
+    ...fallback,
+    ...config,
+    key,
+    requiredTag: config.requiredTag ?? fallback.requiredTag ?? '',
+    roomRequired: Boolean(config.roomRequired ?? fallback.roomRequired),
+  }
+}
+
+function normalizeRooms(rooms = []) {
+  return Array.isArray(rooms) ? rooms.map((room) => normalizeRoom(room)) : []
+}
+
+function normalizeServiceTypes(serviceTypes = {}) {
+  const entries = Array.isArray(serviceTypes)
+    ? serviceTypes.map((item) => [item?.key ?? item?.serviceKey, item])
+    : Object.entries(serviceTypes)
+  const normalized = {}
+  entries.forEach(([key, config]) => {
+    if (!key) return
+    normalized[key] = normalizeServiceType(key, config)
+  })
+  Object.entries(SERVICE_TYPES).forEach(([key, fallback]) => {
+    if (!normalized[key]) normalized[key] = { ...fallback, key }
+  })
+  return normalized
+}
+
 export const useSettingsStore = defineStore('settings', () => {
   const taxRate = ref(0.13)
   const rooms = ref([])
@@ -23,8 +86,8 @@ export const useSettingsStore = defineStore('settings', () => {
   function init() {
     const data = readStoredJson('tcm_settings', null)
     taxRate.value = data?.taxRate ?? 0.13
-    rooms.value = data?.rooms || []
-    serviceTypes.value = data?.serviceTypes || { ...SERVICE_TYPES }
+    rooms.value = normalizeRooms(data?.rooms || [])
+    serviceTypes.value = normalizeServiceTypes(data?.serviceTypes || SERVICE_TYPES)
     practitionerInterval.value = data?.practitionerInterval ?? 20
     profitRatio.value = data?.profitRatio ?? 1.0
     clinicName.value = data?.clinicName || DEFAULT_CLINIC_NAME
@@ -89,20 +152,23 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   async function addRoom(room) {
-    const newRoom = { id: `room-${Date.now()}`, ...room, branchId: room.branchId || null, isActive: true }
+    const newRoom = normalizeRoom({ id: `room-${Date.now()}`, ...room, isActive: true })
     const created = await settingsApi.addRoom(newRoom)
-    rooms.value.push(created)
+    const merged = normalizeRoom({ ...newRoom, ...created })
+    rooms.value.push(merged)
     saveState()
-    return created
+    return merged
   }
 
   async function updateRoom(id, updates) {
     const idx = rooms.value.findIndex((room) => room.id === id)
     if (idx === -1) return null
-    const updated = await settingsApi.updateRoom(id, updates)
-    rooms.value[idx] = updated
+    const payload = normalizeRoom({ ...rooms.value[idx], ...updates, id })
+    const updated = await settingsApi.updateRoom(id, payload)
+    const merged = normalizeRoom({ ...rooms.value[idx], ...updated, id })
+    rooms.value[idx] = merged
     saveState()
-    return updated
+    return merged
   }
 
   async function deleteRoom(id) {
@@ -112,8 +178,9 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   async function updateServiceType(key, updates) {
-    const updated = await settingsApi.updateServiceType(key, updates)
-    serviceTypes.value[key] = updated
+    const payload = normalizeServiceType(key, { ...serviceTypes.value[key], ...updates, key })
+    const updated = await settingsApi.updateServiceType(key, payload)
+    serviceTypes.value[key] = normalizeServiceType(key, { ...serviceTypes.value[key], ...updated, key })
     saveState()
   }
 

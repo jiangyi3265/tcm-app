@@ -91,6 +91,40 @@ export async function createPatient(request, overrides = {}) {
   })
 }
 
+export async function createPractitioner(request, overrides = {}) {
+  const { token } = await loginAsAdmin(request)
+  const suffix = uniqueSuffix()
+  return apiJson(request, '/api/users', {
+    method: 'POST',
+    token,
+    data: {
+      name: overrides.name || `E2E医师-${suffix}`,
+      email: overrides.email || `e2e-practitioner-${suffix}@clinic.com`,
+      password: overrides.password || 'admin12345',
+      roles: ['practitioner'],
+      phone: overrides.phone || `137${String(Date.now()).slice(-8)}`,
+      isActive: true,
+      ...overrides,
+    },
+  })
+}
+
+export async function createRoom(request, overrides = {}) {
+  const { token } = await loginAsAdmin(request)
+  const suffix = uniqueSuffix()
+  return apiJson(request, '/api/settings/rooms', {
+    method: 'POST',
+    token,
+    data: {
+      name: overrides.name || `E2E诊室-${suffix}`,
+      branchId: overrides.branchId || null,
+      supportTags: Array.isArray(overrides.supportTags) ? overrides.supportTags : ['acupuncture'],
+      isActive: true,
+      ...overrides,
+    },
+  })
+}
+
 export async function createDraftConsultation(request, overrides = {}) {
   const { token } = await loginAsAdmin(request)
   return apiJson(request, '/api/consultations', {

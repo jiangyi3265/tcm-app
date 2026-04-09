@@ -8,7 +8,7 @@ import { useSuppliersStore } from '../../stores/suppliers'
 import { useHerbDictStore } from '../../stores/herbDict'
 import { useSettingsStore } from '../../stores/settings'
 import { hasPermission } from '../../utils/permissions'
-import { bindHerbSelection, getInventoryHerbMeta, validateBoundHerb } from '../../utils/herbBinding'
+import { bindHerbSelection, getInventoryHerbMeta } from '../../utils/herbBinding'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t, te, locale } = useI18n()
@@ -55,10 +55,6 @@ const herbOptions = computed(() =>
   })),
 )
 
-// TCM 药材属性选项
-const HERB_NATURES = ['寒', '凉', '平', '温', '热']
-const HERB_TASTES = ['酸', '苦', '甘', '辛', '咸', '淡', '涩']
-const HERB_CHANNELS = ['肺', '大肠', '胃', '脾', '心', '小肠', '膀胱', '肾', '心包', '三焦', '胆', '肝']
 const HERB_TOXICITY = ['无毒', '小毒', '有毒', '大毒']
 
 function localizeInventoryValue(group, value) {
@@ -107,13 +103,6 @@ const newItem = ref({
   supplier: '',
   gramsPerPacket: null,
   minStockLevel: 10,
-  // TCM 属性
-  nature: '',
-  taste: [],
-  guijing: [],
-  toxicity: '无毒',
-  functionsAndIndications: '',
-  contraindications: '',
 })
 
 // 自动计算售价：进价 × (1 + 利润比例)
@@ -163,13 +152,9 @@ function getStockStatus(item) {
 }
 
 async function handleAddItem() {
-  if (newItem.value.category === 'raw_herbs') {
-    newItem.value = syncHerbBinding(newItem.value, newItem.value.herbDictId)
-    if (!validateBoundHerb(newItem.value)) {
-      return ElMessage.warning(t('inventory.selectHerbRequired'))
-    }
-  } else if (!newItem.value.name) {
-    return ElMessage.warning(t('inventory.fillName'))
+  newItem.value = syncHerbBinding(newItem.value, newItem.value.herbDictId)
+  if (!newItem.value.herbDictId) {
+    return ElMessage.warning(t('inventory.selectHerbRequired'))
   }
   try {
     await inventoryStore.addItem({ ...newItem.value, category: activeTab.value, branchId: branchesStore.currentBranchId || null })
@@ -185,8 +170,6 @@ function resetNewItem() {
   newItem.value = {
     name: '', herbDictId: null, aliases: '', category: 'powder', unit: '包', quantity: 0, purchasePrice: 0,
     pricePerUnit: 0, supplierId: '', supplier: '', gramsPerPacket: null, minStockLevel: 10,
-    nature: '', taste: [], guijing: [], toxicity: '无毒',
-    functionsAndIndications: '', contraindications: '',
   }
 }
 
@@ -240,11 +223,9 @@ function startEdit(item) {
 
 async function saveEdit(id) {
   try {
-    if (editForm.value.category === 'raw_herbs') {
-      editForm.value = syncHerbBinding(editForm.value, editForm.value.herbDictId)
-      if (!validateBoundHerb(editForm.value)) {
-        return ElMessage.warning(t('inventory.selectHerbRequired'))
-      }
+    editForm.value = syncHerbBinding(editForm.value, editForm.value.herbDictId)
+    if (!editForm.value.herbDictId) {
+      return ElMessage.warning(t('inventory.selectHerbRequired'))
     }
     await inventoryStore.updateItem(id, editForm.value)
     editingId.value = null
@@ -256,12 +237,8 @@ async function saveEdit(id) {
 
 function handleNewCategoryChange(value) {
   newItem.value.unit = CATEGORY_CONFIG.value[value]?.defaultUnit || newItem.value.unit
-  if (value === 'raw_herbs') {
-    if (newItem.value.herbDictId) {
-      newItem.value = syncHerbBinding(newItem.value, newItem.value.herbDictId)
-    }
-  } else {
-    newItem.value.herbDictId = null
+  if (newItem.value.herbDictId) {
+    newItem.value = syncHerbBinding(newItem.value, newItem.value.herbDictId)
   }
 }
 
@@ -367,23 +344,17 @@ async function openAdjustmentHistory(item) {
             <el-table-column :label="t('inventory.itemName')" min-width="180">
               <template #default="{ row }">
                 <div v-if="editingId === row.id">
-                  <template v-if="row.category === 'raw_herbs'">
-                    <el-select
-                      v-model="editForm.herbDictId"
-                      filterable
-                      clearable
-                      size="small"
-                      style="width: 100%"
-                      :placeholder="editForm.name || t('inventory.selectHerbRequired')"
-                      @change="handleEditHerbChange"
-                    >
-                      <el-option v-for="herb in herbOptions" :key="herb.value" :label="herb.label" :value="herb.value" />
-                    </el-select>
-                  </template>
-                  <template v-else>
-                    <el-input v-model="editForm.name" size="small" :placeholder="t('inventory.herbNamePh')" />
-                    <el-input v-model="editForm.aliases" size="small" :placeholder="t('inventory.aliasesOptional')" style="margin-top: 4px" />
-                  </template>
+                  <el-select
+                    v-model="editForm.herbDictId"
+                    filterable
+                    clearable
+                    size="small"
+                    style="width: 100%"
+                    :placeholder="editForm.name || t('inventory.selectHerbRequired')"
+                    @change="handleEditHerbChange"
+                  >
+                    <el-option v-for="herb in herbOptions" :key="herb.value" :label="herb.label" :value="herb.value" />
+                  </el-select>
                 </div>
                 <div v-else>
                   <div>
@@ -399,26 +370,13 @@ async function openAdjustmentHistory(item) {
           <el-table-column :label="t('inventory.natureTasteChannel')" min-width="180">
               <template #default="{ row }">
                 <div v-if="editingId === row.id">
-                  <template v-if="row.category === 'raw_herbs'">
-                    <div style="font-size: 12px">
-                      <span v-if="getHerbMeta(editForm).nature" class="tcm-badge nature">{{ localizeInventoryValue('natureOptions', getHerbMeta(editForm).nature) }}</span>
-                      <span v-for="taste in getHerbMeta(editForm).taste" :key="taste" class="tcm-badge taste">{{ localizeInventoryValue('tasteOptions', taste) }}</span>
-                    </div>
-                    <div v-if="getHerbMeta(editForm).guijing.length" style="font-size: 11px; color: #888; margin-top: 2px">
-                      {{ t('inventory.channelShort') }}：{{ getHerbMeta(editForm).guijing.map((item) => localizeInventoryValue('channelOptions', item)).join(locale === 'zh-CN' ? '、' : ', ') }}
-                    </div>
-                  </template>
-                  <template v-else>
-                    <el-select v-model="editForm.nature" size="small" :placeholder="t('inventory.nature')" style="width: 100%; margin-bottom: 4px">
-                      <el-option v-for="n in HERB_NATURES" :key="n" :label="localizeInventoryValue('natureOptions', n)" :value="n" />
-                    </el-select>
-                    <el-select v-model="editForm.taste" size="small" multiple :placeholder="t('inventory.taste')" style="width: 100%; margin-bottom: 4px">
-                      <el-option v-for="taste in HERB_TASTES" :key="taste" :label="localizeInventoryValue('tasteOptions', taste)" :value="taste" />
-                    </el-select>
-                    <el-select v-model="editForm.guijing" size="small" multiple :placeholder="t('inventory.channel')" style="width: 100%">
-                      <el-option v-for="c in HERB_CHANNELS" :key="c" :label="localizeInventoryValue('channelOptions', c)" :value="c" />
-                    </el-select>
-                  </template>
+                  <div style="font-size: 12px">
+                    <span v-if="getHerbMeta(editForm).nature" class="tcm-badge nature">{{ localizeInventoryValue('natureOptions', getHerbMeta(editForm).nature) }}</span>
+                    <span v-for="taste in getHerbMeta(editForm).taste" :key="taste" class="tcm-badge taste">{{ localizeInventoryValue('tasteOptions', taste) }}</span>
+                  </div>
+                  <div v-if="getHerbMeta(editForm).guijing.length" style="font-size: 11px; color: #888; margin-top: 2px">
+                    {{ t('inventory.channelShort') }}：{{ getHerbMeta(editForm).guijing.map((item) => localizeInventoryValue('channelOptions', item)).join(locale === 'zh-CN' ? '、' : ', ') }}
+                  </div>
                 </div>
                 <div v-else>
                   <div style="font-size: 12px">
@@ -518,26 +476,16 @@ async function openAdjustmentHistory(item) {
         <el-row :gutter="12">
           <el-col :span="14">
             <el-form-item :label="t('inventory.herbNameLabel')" required>
-              <template v-if="newItem.category === 'raw_herbs'">
-                <el-select
-                  v-model="newItem.herbDictId"
-                  filterable
-                  clearable
-                  style="width:100%"
-                  :placeholder="t('inventory.selectHerbRequired')"
-                  @change="handleNewHerbChange"
-                >
-                  <el-option v-for="herb in herbOptions" :key="herb.value" :label="herb.label" :value="herb.value" />
-                </el-select>
-              </template>
-              <template v-else>
-                <el-input v-model="newItem.name" :placeholder="t('inventory.herbNamePh')" />
-              </template>
-            </el-form-item>
-          </el-col>
-          <el-col v-if="newItem.category !== 'raw_herbs'" :span="10">
-            <el-form-item :label="t('inventory.aliases')">
-              <el-input v-model="newItem.aliases" :placeholder="t('inventory.aliasesPh')" />
+              <el-select
+                v-model="newItem.herbDictId"
+                filterable
+                clearable
+                style="width:100%"
+                :placeholder="t('inventory.selectHerbRequired')"
+                @change="handleNewHerbChange"
+              >
+                <el-option v-for="herb in herbOptions" :key="herb.value" :label="herb.label" :value="herb.value" />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -591,47 +539,7 @@ async function openAdjustmentHistory(item) {
           </el-col>
         </el-row>
 
-        <div v-if="newItem.category !== 'raw_herbs'" class="inv-form-title">{{ t('inventory.tcmProperties') }}</div>
-        <el-row v-if="newItem.category !== 'raw_herbs'" :gutter="12">
-          <el-col :span="12">
-            <el-form-item :label="t('inventory.nature')">
-              <el-select v-model="newItem.nature" :placeholder="t('inventory.selectNature')" style="width:100%">
-                <el-option v-for="n in HERB_NATURES" :key="n" :label="localizeInventoryValue('natureOptions', n)" :value="n" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item :label="t('inventory.toxicity')">
-              <el-select v-model="newItem.toxicity" style="width:100%">
-                <el-option v-for="tox in HERB_TOXICITY" :key="tox" :label="localizeInventoryValue('toxicityOptions', tox)" :value="tox" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item :label="t('inventory.taste')">
-              <el-select v-model="newItem.taste" multiple :placeholder="t('inventory.multiSelect')" style="width:100%">
-                <el-option v-for="taste in HERB_TASTES" :key="taste" :label="localizeInventoryValue('tasteOptions', taste)" :value="taste" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item :label="t('inventory.channel')">
-              <el-select v-model="newItem.guijing" multiple :placeholder="t('inventory.multiSelect')" style="width:100%">
-                <el-option v-for="c in HERB_CHANNELS" :key="c" :label="localizeInventoryValue('channelOptions', c)" :value="c" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item :label="t('inventory.functions')">
-              <el-input v-model="newItem.functionsAndIndications" type="textarea" :rows="2" :placeholder="t('inventory.functionsPh')" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item :label="t('inventory.contraindications')">
-              <el-input v-model="newItem.contraindications" :placeholder="t('inventory.contraindicationsPh')" />
-            </el-form-item>
-          </el-col>
-        </el-row>
+
       </el-form>
       <template #footer>
         <el-button @click="showAddDialog = false; resetNewItem()">{{ t('common.cancel') }}</el-button>

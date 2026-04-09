@@ -49,11 +49,12 @@ export const useAppointmentsStore = defineStore('appointments', () => {
   }
 
   // 检查时间槽是否可用（委托后端统一检查医师冲突和诊室冲突）
-  async function isSlotAvailable(practitionerId, roomId, startTime, duration, excludeId = null) {
+  async function isSlotAvailable(practitionerId, roomId, startTime, duration, excludeId = null, serviceType = null) {
     const endTime = dayjs(startTime).add(duration, 'minute').toISOString()
     return await appointmentsApi.checkSlot({
       practitionerId,
       roomId,
+      serviceType,
       startTime,
       endTime,
       duration,

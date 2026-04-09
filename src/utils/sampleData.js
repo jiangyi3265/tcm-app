@@ -682,12 +682,14 @@ export const FORMULA_DATABASE = [
 
 // 演示房间数据
 export const DEMO_ROOMS = [
-  { id: 'room-1', name: '诊疗室一号', isActive: true },
-  { id: 'room-2', name: '诊疗室二号', isActive: true },
-  { id: 'room-3', name: '诊疗室三号', isActive: true },
+  { id: 'room-1', name: '诊疗室一号', supportTags: ['consultation', 'herbs'], isActive: true },
+  { id: 'room-2', name: '诊疗室二号', supportTags: ['tuina', 'moxibustion'], isActive: true },
+  { id: 'room-3', name: '诊疗室三号', supportTags: ['acupuncture', 'moxibustion'], isActive: true },
 ]
 
 // 服务类型配置
+export const SERVICE_TAGS = ['acupuncture', 'tuina', 'consultation', 'herbs', 'moxibustion']
+
 export const SERVICE_TYPES = {
   acupuncture_new: {
     label: '针灸首诊',
@@ -695,6 +697,7 @@ export const SERVICE_TYPES = {
     practitionerTime: 20,
     roomRequired: true,
     defaultPrice: 120,
+    requiredTag: 'acupuncture',
   },
   acupuncture_followup: {
     label: '针灸复诊',
@@ -702,6 +705,7 @@ export const SERVICE_TYPES = {
     practitionerTime: 10,
     roomRequired: true,
     defaultPrice: 80,
+    requiredTag: 'acupuncture',
   },
   herbs_only: {
     label: '仅中药',
@@ -709,6 +713,23 @@ export const SERVICE_TYPES = {
     practitionerTime: 20,
     roomRequired: false,
     defaultPrice: 60,
+    requiredTag: 'herbs',
+  },
+  acupuncture_40: {
+    label: '针灸40分钟',
+    duration: 40,
+    practitionerTime: 20,
+    roomRequired: true,
+    defaultPrice: 100,
+    requiredTag: 'acupuncture',
+  },
+  tuina_40: {
+    label: '推拿40分钟',
+    duration: 40,
+    practitionerTime: 40,
+    roomRequired: true,
+    defaultPrice: 100,
+    requiredTag: 'tuina',
   },
 }
 
