@@ -1228,7 +1228,7 @@ export default {
     addWorkingRange: '添加时间段',
     profileRangeSeparator: '至',
     workingHoursIncomplete: '请把每个工作时间段的开始和结束时间都填写完整。',
-    workingHoursGranularity: '工作时间只能按 10 分钟粒度选择。',
+    workingHoursGranularity: '工作时间只能按半小时粒度选择。',
     workingHoursInvalidRange: '开始时间必须早于结束时间。',
     workingHoursOverlap: '同一天的工作时间段不能重叠。',
     workingHoursInvalid: '请检查工作时间设置是否有效。',

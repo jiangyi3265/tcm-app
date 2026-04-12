@@ -30,13 +30,13 @@ test('新建诊疗记录且包含处方时，拷贝后仍走逐处方同步', as
     persistConsultationDraft: async (options) => {
       calls.push(['draft', options])
     },
-    persistCopiedPrescriptions: async (prescriptions) => {
-      calls.push(['prescriptions', prescriptions])
+    persistCopiedPrescriptions: async (prescriptions, options) => {
+      calls.push(['prescriptions', prescriptions, options])
     },
   })
 
   assert.equal(result, 'prescriptions')
-  assert.deepEqual(calls, [['prescriptions', copiedPrescriptions]])
+  assert.deepEqual(calls, [['prescriptions', copiedPrescriptions, { syncRoute: false }]])
 })
 
 test('没有处方时，不触发额外持久化', async () => {

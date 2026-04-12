@@ -169,7 +169,7 @@ function isDiffChanged(key) {
     @update:model-value="emit('update:visible', $event)"
     :title="t('compare.title')"
     fullscreen
-    :close-on-click-modal="true"
+    :close-on-click-modal="false"
     class="compare-fullscreen-dialog"
   >
     <template v-if="historyList.length === 0">

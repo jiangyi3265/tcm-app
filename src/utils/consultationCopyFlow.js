@@ -13,6 +13,6 @@ export async function persistCopiedConsultationData({
     return 'draft'
   }
 
-  await persistCopiedPrescriptions?.(prescriptions)
+  await persistCopiedPrescriptions?.(prescriptions, { syncRoute: false })
   return 'prescriptions'
 }

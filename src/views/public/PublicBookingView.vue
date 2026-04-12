@@ -98,7 +98,6 @@ const form = ref({
   phone: '',
   email: '',
   practitionerId: '',
-  roomId: '',
   serviceType: '',
   notes: '',
   intakeFormData: {
@@ -110,12 +109,6 @@ const form = ref({
 })
 
 const selectedService = computed(() => serviceTypes.value.find((item) => item.key === form.value.serviceType) || null)
-const requiresRoomSelection = computed(() => Boolean(selectedService.value?.roomRequired))
-const activeRooms = computed(() => rooms.value.filter((item) => item?.isActive !== false))
-const filteredRooms = computed(() => {
-  const tag = selectedService.value?.requiredTag
-  return activeRooms.value.filter((room) => roomSupportsTag(room, tag))
-})
 const practitionerOptions = computed(() =>
   practitioners.value.filter((item) => {
     const serviceKeys = Array.isArray(item.serviceKeys) ? item.serviceKeys : []
@@ -344,22 +337,15 @@ watch(practitionerOptions, (items) => {
   if (form.value.practitionerId && !items.some((item) => String(item.id) === String(form.value.practitionerId))) {
     form.value.practitionerId = ''
   }
-})
-
-watch(filteredRooms, (items) => {
-  if (form.value.roomId && !items.some((item) => String(item.id) === String(form.value.roomId))) {
-    form.value.roomId = ''
+  if (!form.value.practitionerId && items.length === 1) {
+    form.value.practitionerId = items[0].id
   }
-})
-
-watch(requiresRoomSelection, (required) => {
-  if (!required) form.value.roomId = ''
 })
 
 let scheduleRequestId = 0
 
 async function loadSchedule() {
-  if (!form.value.serviceType || (requiresRoomSelection.value && !form.value.roomId)) {
+  if (!form.value.serviceType) {
     scheduleSlots.value = []
     selectedSlotValue.value = ''
     return
@@ -372,7 +358,7 @@ async function loadSchedule() {
       weekStart: weekStart.value.format('YYYY-MM-DD'),
       serviceType: form.value.serviceType,
       practitionerId: form.value.practitionerId || null,
-      roomId: requiresRoomSelection.value ? form.value.roomId : null,
+      roomId: null,
     })
     if (requestId !== scheduleRequestId) return
     scheduleStepMinutes.value = (() => {
@@ -400,7 +386,7 @@ async function loadSchedule() {
 }
 
 watch(
-  [() => form.value.serviceType, () => form.value.practitionerId, () => form.value.roomId, weekStart],
+  [() => form.value.serviceType, () => form.value.practitionerId, weekStart],
   () => { void loadSchedule() },
   { immediate: true },
 )
@@ -427,7 +413,6 @@ async function submitBooking() {
   if (!form.value.patientName.trim()) return ElMessage.warning(t('publicBooking.nameRequired'))
   if (!form.value.phone.trim()) return ElMessage.warning(t('publicBooking.phoneRequired'))
   if (!form.value.serviceType) return ElMessage.warning(t('appointments.selectServiceType'))
-  if (requiresRoomSelection.value && !form.value.roomId) return ElMessage.warning(t('appointments.selectRoomFirst'))
   if (!selectedSlot.value) return ElMessage.warning(t('publicBooking.selectSlotHint'))
 
   try {
@@ -436,7 +421,7 @@ async function submitBooking() {
       phone: form.value.phone.trim(),
       email: form.value.email.trim(),
       practitionerId: form.value.practitionerId || selectedSlot.value.assignedPractitionerId || null,
-      roomId: requiresRoomSelection.value ? form.value.roomId : null,
+      roomId: null,
       serviceType: form.value.serviceType,
       startTime: selectedSlot.value.startTime,
       endTime: selectedSlot.value.endTime,
@@ -476,7 +461,7 @@ async function bookAnother() {
 }
 
 watch(
-  [() => form.value.serviceType, () => form.value.practitionerId, () => form.value.roomId],
+  [() => form.value.serviceType, () => form.value.practitionerId],
   () => {
     selectedSlotValue.value = ''
   },
@@ -534,12 +519,7 @@ onMounted(() => {
               <el-option v-for="practitioner in practitionerOptions" :key="practitioner.id" :label="practitioner.name" :value="practitioner.id" />
             </el-select>
           </el-form-item>
-          <el-form-item v-if="requiresRoomSelection" :label="t('appointments.room')" required>
-            <el-select v-model="form.roomId" :placeholder="t('appointments.selectRoom')" style="width:100%">
-              <el-option v-for="room in filteredRooms" :key="room.id" :label="room.name" :value="room.id" />
-            </el-select>
-          </el-form-item>
-          <div v-else />
+          <div />
         </div>
 
         <div v-if="!form.practitionerId" class="auto-match-banner">
@@ -568,7 +548,7 @@ onMounted(() => {
         <div class="schedule-scroll">
           <div v-if="scheduleLoading" class="schedule-empty">{{ t('common.loading') }}</div>
           <div v-else-if="!timeRows.length || !scheduleSlots.length" class="schedule-empty">
-            {{ requiresRoomSelection && !form.roomId ? t('appointments.selectRoomFirst') : t('publicBooking.noScheduleSlots') }}
+            {{ t('publicBooking.noScheduleSlots') }}
           </div>
           <table v-else class="schedule-table">
             <thead>

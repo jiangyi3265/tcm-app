@@ -1222,7 +1222,7 @@ export default {
     addWorkingRange: 'Add time range',
     profileRangeSeparator: 'to',
     workingHoursIncomplete: 'Please fill in both start and end times for each working range.',
-    workingHoursGranularity: 'Working hours can only be picked in 10-minute increments.',
+    workingHoursGranularity: 'Working hours can only be picked in half-hour increments.',
     workingHoursInvalidRange: 'The start time must be earlier than the end time.',
     workingHoursOverlap: 'Working ranges on the same day cannot overlap.',
     workingHoursInvalid: 'Please check that the working hours are valid.',

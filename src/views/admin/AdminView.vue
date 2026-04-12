@@ -1030,9 +1030,9 @@ async function deleteTemplate(tmpl) {
               </div>
               <div class="schedule-range-list">
                 <div v-for="(range, index) in profileForm.workingHours[day]" :key="`${day}-${index}`" class="schedule-range-row">
-                  <el-time-select v-model="range.start" start="00:00" end="23:50" step="00:10" :placeholder="t('admin.profileStartTime')" size="small" style="width:140px" />
+                  <el-time-select v-model="range.start" start="00:00" end="23:30" step="00:30" :placeholder="t('admin.profileStartTime')" size="small" style="width:140px" />
                   <span style="color:#999">{{ t('admin.profileRangeSeparator') }}</span>
-                  <el-time-select v-model="range.end" start="00:00" end="23:50" step="00:10" :placeholder="t('admin.profileEndTime')" size="small" style="width:140px" />
+                  <el-time-select v-model="range.end" start="00:00" end="23:30" step="00:30" :placeholder="t('admin.profileEndTime')" size="small" style="width:140px" />
                   <el-button size="small" text type="danger" @click="removeWorkingHourRange(day, index)">{{ t('common.delete') }}</el-button>
                 </div>
               </div>
