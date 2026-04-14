@@ -21,6 +21,13 @@ export const useConsultationsStore = defineStore('consultations', () => {
   const consultations = ref([])
   const inventoryStore = useInventoryStore()
 
+  function normalizeConsultation(consultation) {
+    return {
+      ...consultation,
+      diff: consultation?.diff ? normalizeDiff(consultation.diff) : emptyDiff(),
+    }
+  }
+
   function hasDispensingCompleted(consultation) {
     if (!consultation) return false
     if (consultation.dispensingCompleted) return true
@@ -31,14 +38,18 @@ export const useConsultationsStore = defineStore('consultations', () => {
   function init() {
     const stored = readStoredJson('tcm_consultations', []) || []
     // 兼容旧数据：规范化所有 diff 字段
-    consultations.value = stored.map(c => ({
-      ...c,
-      diff: c.diff ? normalizeDiff(c.diff) : emptyDiff(),
-    }))
+    consultations.value = stored.map(normalizeConsultation)
   }
 
   function saveState() {
     writeStoredJson('tcm_consultations', consultations.value)
+  }
+
+  async function refreshFromApi() {
+    const list = await consultationsApi.list()
+    consultations.value = (Array.isArray(list) ? list : []).map(normalizeConsultation)
+    saveState()
+    return consultations.value
   }
 
   async function refreshInventoryAfterPrescriptionChange() {
@@ -288,6 +299,7 @@ export const useConsultationsStore = defineStore('consultations', () => {
     hasDispensingCompleted,
     getOutstandingAmount,
     getPaymentStatus,
+    refreshFromApi,
     getConsultation, getPatientConsultations, getPractitionerConsultations, getLastConsultation,
     createConsultation, updateConsultation, completeConsultation, markAsPaid,
     deleteConsultation, restoreConsultation, physicalDeleteConsultation,

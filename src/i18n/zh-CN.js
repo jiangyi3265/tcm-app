@@ -434,7 +434,12 @@ export default {
     scheduleSaved: '我的排班已保存',
     unknown: '未知',
     noAppointments: '无预约',
+    noAppointmentsThisWeek: '本周暂无预约',
     timeAxis: '时间',
+    calendarView: '时间视图',
+    listView: '列表视图',
+    listViewTitle: '预约列表',
+    listViewHelp: '按预约开始时间排序，可继续按医师筛选并直接查看或编辑预约。',
     scheduleHintFiltered: '当前医师周排班',
     scheduleHintFilteredHelp: '绿色为空闲工作时间，橙色为已预约时间段。点击空白工作格可直接创建预约。',
     scheduleHintAll: '全部医师预约概览',
@@ -446,6 +451,7 @@ export default {
 
     // 新建预约对话框
     newAppointmentDialog: '新建预约',
+    editAppointmentDialog: '编辑预约',
     patient: '病人',
     searchPatient: '搜索选择病人',
     practitioner: '医师',
@@ -476,6 +482,7 @@ export default {
     medicalHistory: '病史',
     medicalHistoryPlaceholder: '重要病史...',
     confirmAppointment: '确认预约',
+    saveAppointmentChanges: '保存预约修改',
 
     // 验证
     selectPatient: '请选择病人',
@@ -486,6 +493,7 @@ export default {
     selectRoomFirst: '请先选择诊室后再查看可预约时间',
     slotUnavailable: '该时间不可预约',
     appointmentCreated: '预约已创建',
+    appointmentUpdated: '预约已更新',
     autoAssignedPractitioner: '系统分配医师：',
     matchingPractitioners: '同时可接诊医师：',
 

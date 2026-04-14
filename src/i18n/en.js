@@ -433,7 +433,12 @@ export default {
     scheduleSaved: 'My schedule has been saved',
     unknown: 'Unknown',
     noAppointments: 'No appointments',
+    noAppointmentsThisWeek: 'No appointments for this week',
     timeAxis: 'Time',
+    calendarView: 'Calendar',
+    listView: 'List',
+    listViewTitle: 'Appointment List',
+    listViewHelp: 'Sorted by start time. You can keep the practitioner filter and open or edit bookings directly.',
     scheduleHintFiltered: 'Weekly schedule for the selected practitioner',
     scheduleHintFilteredHelp: 'Green cells are working-time openings. Orange blocks are booked appointments. Click an empty working cell to create a booking.',
     scheduleHintAll: 'All-practitioner booking overview',
@@ -445,6 +450,7 @@ export default {
 
     // Create dialog
     newAppointmentDialog: 'New Appointment',
+    editAppointmentDialog: 'Edit Appointment',
     patient: 'Patient',
     searchPatient: 'Search and select patient',
     practitioner: 'Practitioner',
@@ -475,6 +481,7 @@ export default {
     medicalHistory: 'Medical History',
     medicalHistoryPlaceholder: 'Important medical history...',
     confirmAppointment: 'Confirm Appointment',
+    saveAppointmentChanges: 'Save Changes',
 
     // Validation
     selectPatient: 'Please select a patient',
@@ -485,6 +492,7 @@ export default {
     selectRoomFirst: 'Please choose a room before loading available times',
     slotUnavailable: 'This time slot is unavailable',
     appointmentCreated: 'Appointment created',
+    appointmentUpdated: 'Appointment updated',
     autoAssignedPractitioner: 'Auto-assigned practitioner: ',
     matchingPractitioners: 'Also available: ',
 

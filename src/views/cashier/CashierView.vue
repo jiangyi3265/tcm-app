@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConsultationsStore } from '../../stores/consultations'
 import { usePatientsStore } from '../../stores/patients'
@@ -31,6 +31,12 @@ const activeTab = ref('pending')
 const selectedConsult = ref(null)
 const showInvoiceDialog = ref(false)
 const selectedPaymentMethod = ref('cash')
+
+onMounted(() => {
+  consultationsStore.refreshFromApi().catch((error) => {
+    console.warn('收银台刷新问诊失败:', error.message)
+  })
+})
 
 function toAmount(value) {
   const n = Number(value)

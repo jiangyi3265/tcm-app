@@ -8,6 +8,7 @@ import { useSettingsStore } from '../../stores/settings'
 import { useBranchesStore } from '../../stores/branches'
 import { hasPermission, canPractitionerProvideService } from '../../utils/permissions'
 import { formatDate, formatTime, formatDateTime, dayjs } from '../../utils/dateUtils'
+import { buildDayAppointmentLayout } from '../../utils/appointmentLayout'
 import {
   WEEKDAYS,
   createEmptyWorkingRange,
@@ -36,8 +37,10 @@ const roles = computed(() => authStore.roles)
 const canCreate = computed(() => hasPermission(roles.value, 'appointment.create'))
 const canCancel = computed(() => hasPermission(roles.value, 'appointment.cancel'))
 const canEditOwnSchedule = computed(() => roles.value.includes('practitioner') || roles.value.includes('doctor'))
+const canEditAppointments = computed(() => hasPermission(roles.value, 'appointment.create'))
 
 const currentDate = ref(new Date())
+const viewMode = ref('calendar')
 const weekStart = computed(() => dayjs(currentDate.value).startOf('week'))
 const weekDays = computed(() => Array.from({ length: 7 }, (_, index) => weekStart.value.add(index, 'day').toDate()))
 function prevWeek() { currentDate.value = dayjs(currentDate.value).subtract(7, 'day').toDate() }
@@ -123,6 +126,10 @@ function getAppointmentWithInfo(appointment) {
   }
 }
 
+function buildEmptyIntakeForm() {
+  return { chiefComplaint: '', allergies: '', currentMedications: '', medicalHistory: '' }
+}
+
 const practitioners = computed(() => authStore.getPractitioners())
 const filterPractitioner = ref('')
 
@@ -165,6 +172,10 @@ const weekAppointments = computed(() => {
     })
     .sort((left, right) => new Date(left.startTime) - new Date(right.startTime))
 })
+
+const weekAppointmentRows = computed(() =>
+  weekAppointments.value.map((appointment) => getAppointmentWithInfo(appointment)),
+)
 
 const timeSlots = computed(() => {
   let minMinutes = 8 * 60
@@ -249,50 +260,18 @@ function getTotalCalendarHeight() {
 /** Compute positioned appointments for a given day, including column layout for overlaps */
 function getDayAppointmentBlocks(date) {
   const dateStr = dayjs(date).format('YYYY-MM-DD')
-  const dayAppts = weekAppointments.value.filter(a => dayjs(a.startTime).format('YYYY-MM-DD') === dateStr)
-  if (!dayAppts.length) return []
-
   const baseMinutes = timeSlots.value.length > 0 ? timeSlots.value[0].total : 0
-  const blocks = dayAppts.map(a => {
-    const start = dayjs(a.startTime)
-    const end = dayjs(a.endTime)
-    const startMin = start.hour() * 60 + start.minute()
-    const endMin = end.hour() * 60 + end.minute()
-    return {
-      ...getAppointmentWithInfo(a),
-      startMin,
-      endMin,
-      top: (startMin - baseMinutes) * PX_PER_MINUTE,
-      height: Math.max((endMin - startMin) * PX_PER_MINUTE, 20),
-    }
-  }).sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin)
-
-  // Assign columns for overlapping appointments
-  const columns = []
-  for (const block of blocks) {
-    let placed = false
-    for (let col = 0; col < columns.length; col++) {
-      const lastInCol = columns[col][columns[col].length - 1]
-      if (lastInCol.endMin <= block.startMin) {
-        columns[col].push(block)
-        block.col = col
-        placed = true
-        break
-      }
-    }
-    if (!placed) {
-      block.col = columns.length
-      columns.push([block])
-    }
-  }
-  const totalCols = columns.length || 1
-  for (const block of blocks) {
-    block.totalCols = totalCols
-  }
-  return blocks
+  const dayAppts = weekAppointmentRows.value.filter((appointment) => dayjs(appointment.startTime).format('YYYY-MM-DD') === dateStr)
+  return buildDayAppointmentLayout(dayAppts, {
+    baseMinutes,
+    pxPerMinute: PX_PER_MINUTE,
+    minHeight: 20,
+  })
 }
 
 const showCreateDialog = ref(false)
+const appointmentDialogMode = ref('create')
+const editingAppointmentId = ref('')
 const selectedSlotValue = ref('')
 const preferredSlotStartTime = ref('')
 const availabilityLoading = ref(false)
@@ -308,6 +287,14 @@ const newAppt = ref({
   notes: '',
   intakeFormData: { chiefComplaint: '', allergies: '', currentMedications: '', medicalHistory: '' },
 })
+
+const isEditingAppointment = computed(() =>
+  appointmentDialogMode.value === 'edit' && !!editingAppointmentId.value,
+)
+
+const appointmentDialogTitle = computed(() =>
+  isEditingAppointment.value ? t('appointments.editAppointmentDialog') : t('appointments.newAppointmentDialog'),
+)
 
 watch(serviceOptions, (options) => {
   if (!options.length) return
@@ -339,6 +326,8 @@ watch([() => newAppt.value.serviceType, practitionerOptions], () => {
 })
 
 function openCreateDialog({ date, practitionerId, preferredStartTime } = {}) {
+  appointmentDialogMode.value = 'create'
+  editingAppointmentId.value = ''
   newAppt.value = {
     patientId: '',
     practitionerId: practitionerId ?? filterPractitioner.value ?? '',
@@ -353,8 +342,32 @@ function openCreateDialog({ date, practitionerId, preferredStartTime } = {}) {
   showCreateDialog.value = true
 }
 
+function openEditDialog(appointment = selectedAppt.value) {
+  if (!appointment?.id) return
+  appointmentDialogMode.value = 'edit'
+  editingAppointmentId.value = appointment.id
+  newAppt.value = {
+    patientId: appointment.patientId || '',
+    practitionerId: appointment.practitionerId || '',
+    roomId: appointment.roomId || '',
+    serviceType: appointment.serviceType || serviceOptions.value[0]?.key || 'acupuncture_new',
+    date: dayjs(appointment.startTime).format('YYYY-MM-DD'),
+    notes: appointment.notes || '',
+    intakeFormData: {
+      ...buildEmptyIntakeForm(),
+      ...(appointment.intakeFormData || {}),
+    },
+  }
+  preferredSlotStartTime.value = appointment.startTime || ''
+  selectedSlotValue.value = appointment.startTime || ''
+  showDetailDialog.value = false
+  showCreateDialog.value = true
+}
+
 function closeCreateDialog() {
   showCreateDialog.value = false
+  appointmentDialogMode.value = 'create'
+  editingAppointmentId.value = ''
   preferredSlotStartTime.value = ''
   selectedSlotValue.value = ''
 }
@@ -404,6 +417,7 @@ async function loadAvailability() {
       serviceType: newAppt.value.serviceType,
       practitionerId: newAppt.value.practitionerId || null,
       roomId: requiresRoomSelection.value ? newAppt.value.roomId : null,
+      excludeId: isEditingAppointment.value ? editingAppointmentId.value : null,
     })
     if (requestId !== availabilityRequestId) return
     availabilityState.value = {
@@ -462,6 +476,37 @@ async function createAppointment() {
     selectedAppt.value = getAppointmentWithInfo(created)
     ElMessage.success(t('appointments.appointmentCreated'))
     closeCreateDialog()
+  } catch (error) {
+    ElMessage.error(error.message || t('appointments.slotUnavailable'))
+  }
+}
+
+async function submitAppointment() {
+  if (!newAppt.value.patientId) return ElMessage.warning(t('appointments.selectPatient'))
+  if (!newAppt.value.serviceType) return ElMessage.warning(t('appointments.selectServiceType'))
+  if (requiresRoomSelection.value && !newAppt.value.roomId) return ElMessage.warning(t('appointments.selectRoomFirst'))
+  if (!selectedAvailabilitySlot.value) {
+    return ElMessage.warning(availabilitySlots.value.length ? t('appointments.selectStartTime') : t('appointments.noAvailableSlots'))
+  }
+
+  const payload = {
+    ...newAppt.value,
+    practitionerId: newAppt.value.practitionerId || selectedAvailabilitySlot.value.assignedPractitionerId || null,
+    roomId: requiresRoomSelection.value ? newAppt.value.roomId : null,
+    startTime: selectedAvailabilitySlot.value.startTime,
+    endTime: selectedAvailabilitySlot.value.endTime,
+    branchId: branchesStore.currentBranchId || null,
+  }
+
+  try {
+    if (isEditingAppointment.value) {
+      const updated = await appointmentsStore.updateAppointment(editingAppointmentId.value, payload)
+      selectedAppt.value = getAppointmentWithInfo(updated)
+      closeCreateDialog()
+      ElMessage.success(t('appointments.appointmentUpdated'))
+      return
+    }
+    await createAppointment()
   } catch (error) {
     ElMessage.error(error.message || t('appointments.slotUnavailable'))
   }
@@ -528,6 +573,33 @@ async function confirmAppt(id) {
 }
 
 const STATUS_COLORS = { booked: '#409eff', confirmed: '#2d6a4f', completed: '#889096', cancelled: '#c0c4cc' }
+const BLOCK_PALETTES = {
+  booked: { bg: '#f4a261', accent: '#d97706', footer: '#d97706', text: '#fff' },
+  confirmed: { bg: '#6abf7b', accent: '#2d6a4f', footer: '#2d6a4f', text: '#fff' },
+  completed: { bg: '#a8b1bd', accent: '#64748b', footer: '#64748b', text: '#fff' },
+  cancelled: { bg: '#d1d5db', accent: '#9ca3af', footer: '#9ca3af', text: '#374151' },
+}
+
+function getStatusTagType(status) {
+  if (status === 'confirmed') return 'success'
+  if (status === 'completed') return 'info'
+  if (status === 'cancelled') return 'info'
+  return 'warning'
+}
+
+function getAppointmentBlockStyle(block) {
+  const palette = BLOCK_PALETTES[block?.status] || BLOCK_PALETTES.booked
+  return {
+    top: `${block.top}px`,
+    height: `${block.height}px`,
+    left: `calc(${block.leftPct}% + 3px)`,
+    width: `calc(${block.widthPct}% - 6px)`,
+    background: palette.bg,
+    color: palette.text,
+    '--block-accent': palette.accent,
+    '--block-footer': palette.footer,
+  }
+}
 </script>
 
 <template>
@@ -543,6 +615,10 @@ const STATUS_COLORS = { booked: '#409eff', confirmed: '#2d6a4f', completed: '#88
         <el-select v-model="filterPractitioner" clearable size="small" style="width:180px" :placeholder="t('appointments.allPractitioners')">
           <el-option v-for="practitioner in practitioners" :key="practitioner.id" :label="practitioner.name" :value="practitioner.id" />
         </el-select>
+        <el-radio-group v-model="viewMode" size="small">
+          <el-radio-button value="calendar">{{ t('appointments.calendarView') }}</el-radio-button>
+          <el-radio-button value="list">{{ t('appointments.listView') }}</el-radio-button>
+        </el-radio-group>
         <el-button v-if="canEditOwnSchedule" size="small" plain @click="openMyScheduleDrawer">{{ t('appointments.mySchedule') }}</el-button>
         <el-button v-if="canCreate" type="primary" size="small" @click="openCreateDialog()">
           <el-icon><Plus /></el-icon> {{ t('appointments.newAppointment') }}
@@ -553,17 +629,25 @@ const STATUS_COLORS = { booked: '#409eff', confirmed: '#2d6a4f', completed: '#88
     <div class="schedule-panel">
       <div class="schedule-meta">
         <div>
-          <div class="schedule-title">{{ filterPractitioner ? t('appointments.scheduleHintFiltered') : t('appointments.scheduleHintAll') }}</div>
-          <div class="schedule-subtitle">{{ filterPractitioner ? t('appointments.scheduleHintFilteredHelp') : t('appointments.scheduleHintAllHelp') }}</div>
+          <div class="schedule-title">
+            {{ viewMode === 'calendar'
+              ? (filterPractitioner ? t('appointments.scheduleHintFiltered') : t('appointments.scheduleHintAll'))
+              : t('appointments.listViewTitle') }}
+          </div>
+          <div class="schedule-subtitle">
+            {{ viewMode === 'calendar'
+              ? (filterPractitioner ? t('appointments.scheduleHintFilteredHelp') : t('appointments.scheduleHintAllHelp'))
+              : t('appointments.listViewHelp') }}
+          </div>
         </div>
-        <div class="schedule-legend">
+        <div v-if="viewMode === 'calendar'" class="schedule-legend">
           <span><i class="dot available" />{{ t('appointments.scheduleLegendAvailable') }}</span>
           <span><i class="dot booked" />{{ t('appointments.scheduleLegendBooked') }}</span>
           <span v-if="filterPractitioner"><i class="dot outside" />{{ t('appointments.scheduleLegendOutside') }}</span>
         </div>
       </div>
 
-      <div class="schedule-scroll">
+      <div v-if="viewMode === 'calendar'" class="schedule-scroll">
         <div class="schedule-grid" :style="{ '--cal-height': getTotalCalendarHeight() + 'px' }">
           <!-- Header row -->
           <div class="sg-header sg-time-col">{{ t('appointments.timeAxis') }}</div>
@@ -632,27 +716,78 @@ const STATUS_COLORS = { booked: '#409eff', confirmed: '#2d6a4f', completed: '#88
                 type="button"
                 class="appt-block"
                 :data-testid="`appointment-block-${block.id}`"
-                :style="{
-                  top: block.top + 'px',
-                  height: block.height + 'px',
-                  left: (block.col / block.totalCols * 100) + '%',
-                  width: (1 / block.totalCols * 100) + '%',
-                }"
+                :class="{ 'appt-block-overlap': block.hasOverlap }"
+                :style="getAppointmentBlockStyle(block)"
                 @click.stop="viewAppt(block)"
               >
-                <div class="appt-block-time">{{ formatTime(block.startTime) }} - {{ formatTime(block.endTime) }}</div>
-                <strong>{{ block.patient?.name || t('appointments.unknown') }}</strong>
-                <div class="appt-block-svc">{{ block.serviceLabel }}<template v-if="!filterPractitioner"> · {{ block.practitioner?.name || '-' }}</template></div>
+                <span
+                  v-for="(segment, index) in block.overlapSegments"
+                  :key="`${block.id}-overlap-${index}`"
+                  class="appt-block-overlap-segment"
+                  :style="{ top: `${segment.top}px`, height: `${segment.height}px` }"
+                />
+                <div class="appt-block-content">
+                  <div class="appt-block-time">{{ formatTime(block.startTime) }} - {{ formatTime(block.endTime) }}</div>
+                  <strong>{{ block.patient?.name || t('appointments.unknown') }}</strong>
+                  <div class="appt-block-svc">{{ block.serviceLabel }}<template v-if="!filterPractitioner"> · {{ block.practitioner?.name || '-' }}</template></div>
+                </div>
               </button>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div v-else class="appointment-list-panel">
+        <div v-if="weekAppointmentRows.length === 0" class="empty-state">
+          <el-empty :description="t('appointments.noAppointmentsThisWeek')" />
+        </div>
+        <div v-else class="wide-table-wrap">
+          <el-table :data="weekAppointmentRows" stripe>
+            <el-table-column :label="t('common.date')" width="110">
+              <template #default="{ row }">{{ formatDate(row.startTime) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('common.time')" width="150">
+              <template #default="{ row }">{{ formatTime(row.startTime) }} - {{ formatTime(row.endTime) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('appointments.patient')" min-width="110">
+              <template #default="{ row }">{{ row.patient?.name || t('appointments.unknown') }}</template>
+            </el-table-column>
+            <el-table-column :label="t('appointments.service')" min-width="140">
+              <template #default="{ row }">{{ row.serviceLabel }}</template>
+            </el-table-column>
+            <el-table-column :label="t('appointments.practitioner')" min-width="100">
+              <template #default="{ row }">{{ row.practitioner?.name || '-' }}</template>
+            </el-table-column>
+            <el-table-column :label="t('appointments.room')" min-width="100">
+              <template #default="{ row }">{{ row.room?.name || '-' }}</template>
+            </el-table-column>
+            <el-table-column :label="t('common.status')" width="100">
+              <template #default="{ row }">
+                <el-tag :type="getStatusTagType(row.status)" size="small">{{ t('appointmentStatus.' + row.status) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.operation')" width="180">
+              <template #default="{ row }">
+                <el-button size="small" text type="primary" @click="viewAppt(row)">{{ t('common.view') }}</el-button>
+                <el-button
+                  v-if="canEditAppointments && row.status !== 'cancelled'"
+                  size="small"
+                  text
+                  type="warning"
+                  @click="openEditDialog(row)"
+                >
+                  {{ t('common.edit') }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
         </div>
       </div>
     </div>
 
     <el-drawer
       v-model="showCreateDialog"
-      :title="t('appointments.newAppointmentDialog')"
+      :title="appointmentDialogTitle"
       size="640px"
       direction="rtl"
       :close-on-press-escape="true"
@@ -748,7 +883,9 @@ const STATUS_COLORS = { booked: '#409eff', confirmed: '#2d6a4f', completed: '#88
       </el-form>
       <template #footer>
         <el-button @click="closeCreateDialog">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="createAppointment">{{ t('appointments.confirmAppointment') }}</el-button>
+        <el-button type="primary" @click="submitAppointment">
+          {{ isEditingAppointment ? t('appointments.saveAppointmentChanges') : t('appointments.confirmAppointment') }}
+        </el-button>
       </template>
     </el-drawer>
 
@@ -788,6 +925,14 @@ const STATUS_COLORS = { booked: '#409eff', confirmed: '#2d6a4f', completed: '#88
       </div>
       <template #footer>
         <el-button @click="showDetailDialog = false">{{ t('common.close') }}</el-button>
+        <el-button
+          v-if="canEditAppointments && selectedAppt?.status !== 'cancelled'"
+          type="warning"
+          size="small"
+          @click="openEditDialog(selectedAppt)"
+        >
+          {{ t('common.edit') }}
+        </el-button>
         <el-button v-if="canCreate && selectedAppt?.status === 'booked'" type="success" size="small" @click="confirmAppt(selectedAppt.id)">{{ t('appointments.confirmAppt') }}</el-button>
         <el-button v-if="canCancel && ['booked', 'confirmed'].includes(selectedAppt?.status)" type="danger" size="small" @click="cancelAppt(selectedAppt.id)">{{ t('appointments.cancelAppt') }}</el-button>
         <el-button v-if="selectedAppt?.patient" type="primary" size="small" @click="$router.push(`/patients/${selectedAppt.patientId}`); showDetailDialog = false">{{ t('appointments.viewPatient') }}</el-button>
@@ -824,6 +969,8 @@ const STATUS_COLORS = { booked: '#409eff', confirmed: '#2d6a4f', completed: '#88
 .dot.booked { background:#f4a261; }
 .dot.outside { background:#eceff3; }
 .schedule-scroll { overflow:auto; }
+.appointment-list-panel { padding: 0 16px 16px; }
+.wide-table-wrap { width:100%; overflow:auto; }
 /* ── Proportional schedule grid ── */
 .schedule-grid { display:flex; flex-direction:column; min-width:920px; }
 .schedule-grid .sg-header { flex:1; text-align:center; padding:10px 8px; background:#f8fafc; border:1px solid #edf2f7; color:#1b4332; font-weight:600; font-size:13px; }
@@ -839,8 +986,11 @@ const STATUS_COLORS = { booked: '#409eff', confirmed: '#2d6a4f', completed: '#88
 .sg-working-band { position:absolute; left:0; right:0; background:#f6fff7; pointer-events:none; z-index:0; }
 .sg-click-area { position:absolute; left:0; right:0; z-index:1; }
 .sg-click-area.clickable:hover { background:rgba(45,106,79,0.06); cursor:pointer; }
-.appt-block { position:absolute; z-index:2; box-sizing:border-box; border:0; border-radius:6px; background:#f4a261; color:#fff; padding:4px 6px; text-align:left; display:flex; flex-direction:column; gap:1px; cursor:pointer; overflow:hidden; font-size:11px; line-height:1.3; transition:box-shadow 0.15s; }
-.appt-block:hover { box-shadow:0 2px 8px rgba(0,0,0,0.18); z-index:3; }
+.appt-block { position:absolute; z-index:2; box-sizing:border-box; border:0; border-radius:8px; padding:0; text-align:left; cursor:pointer; overflow:hidden; font-size:11px; line-height:1.3; transition:box-shadow 0.15s, transform 0.15s; box-shadow:0 3px 10px rgba(15,23,42,0.14); }
+.appt-block::after { content:''; position:absolute; left:0; right:0; bottom:0; height:4px; background:var(--block-footer); opacity:0.45; }
+.appt-block:hover { box-shadow:0 6px 18px rgba(15,23,42,0.2); z-index:3; transform:translateY(-1px); }
+.appt-block-content { position:relative; z-index:1; display:flex; flex-direction:column; gap:1px; padding:5px 11px 7px 6px; height:100%; }
+.appt-block-overlap-segment { position:absolute; right:0; width:5px; border-radius:4px 0 0 4px; background:var(--block-accent); opacity:0.95; z-index:1; }
 .appt-block-time { font-size:10px; opacity:0.9; }
 .appt-block strong { font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .appt-block-svc { font-size:10px; opacity:0.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -868,5 +1018,9 @@ const STATUS_COLORS = { booked: '#409eff', confirmed: '#2d6a4f', completed: '#88
   .toolbar-right { width:100%; }
   .toolbar-right :deep(.el-select), .toolbar-right :deep(.el-button) { width:100%; }
   .availability-list { grid-template-columns:1fr; }
+  .toolbar-right :deep(.el-radio-group) { width:100%; display:flex; }
+  .toolbar-right :deep(.el-radio-button) { flex:1; }
+  .appointment-list-panel { padding: 0 12px 12px; }
+  .wide-table-wrap :deep(.el-table) { min-width: 880px; }
 }
 </style>

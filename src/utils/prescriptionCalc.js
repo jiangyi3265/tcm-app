@@ -42,9 +42,13 @@ export function findInventoryMatches(herbName, category, inventoryItems, herbDic
   )
   if (byCategory.length > 0) return byCategory
 
-  // 兜底：不限分类
+  // 仅兼容没有分类的旧数据，避免草药误匹配到粉剂/成药库存
   return inventoryItems.filter(
-    (i) => i.isActive && !i.deletedAt && i.name.toLowerCase().includes(q),
+    (i) =>
+      i.isActive &&
+      !i.deletedAt &&
+      i.name.toLowerCase().includes(q) &&
+      (!i.category || String(i.category).trim() === ''),
   )
 }
 

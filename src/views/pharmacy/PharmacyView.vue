@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, inject } from 'vue'
+import { ref, computed, inject, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConsultationsStore } from '../../stores/consultations'
 import { usePatientsStore } from '../../stores/patients'
@@ -31,6 +31,12 @@ const selectedRow = ref(null)
 const showDetailDialog = ref(false)
 const drawerSize = computed(() => (isMobile.value ? '100%' : '560px'))
 const selectedPaymentMethod = ref('cash')
+
+onMounted(() => {
+  consultationsStore.refreshFromApi().catch((error) => {
+    console.warn('发药台刷新问诊失败:', error.message)
+  })
+})
 
 const CATEGORY_MAP = { raw_herbs: 'raw_herbs', powder: 'powder', pills: 'pills' }
 

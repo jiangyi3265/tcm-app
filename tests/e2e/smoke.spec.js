@@ -3,6 +3,8 @@ import dayjs from 'dayjs'
 import { createDraftConsultation, createPatient, createPractitioner, createRoom, withTemporaryPractitionerSchedule } from './helpers/api.js'
 import { chooseSelectOption, seedSession, setPreferredLocale } from './helpers/ui.js'
 
+const WEEKDAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+
 test.describe.serial('最小浏览器级冒烟', () => {
   test('公开预约页可匿名完成预约', async ({ page, request }) => {
     const practitioner = await createPractitioner(request, {
@@ -24,7 +26,6 @@ test.describe.serial('最小浏览器级冒烟', () => {
 
       const form = page.locator('.public-form')
       await chooseSelectOption(page, form, '医师', practitioner.name)
-      await chooseSelectOption(page, form, '诊室', room.name)
 
       await expect(page.locator('.schedule-empty').filter({ hasText: '加载中...' })).toBeHidden({ timeout: 15000 })
       const slotCard = page.locator('.slot-card').first()
@@ -54,8 +55,9 @@ test.describe.serial('最小浏览器级冒烟', () => {
     const practitioner = await createPractitioner(request, {
       name: `E2E排班医师-${Date.now()}`,
     })
+    const todayKey = WEEKDAY_KEYS[dayjs().day()]
     await withTemporaryPractitionerSchedule(request, practitioner.id, {
-      wednesday: [{ start: '14:20', end: '16:20' }],
+      [todayKey]: [{ start: '14:20', end: '16:20' }],
     }, async () => {
       const patient = await createPatient(request, {
         name: `E2E排班联动-${Date.now()}`,
@@ -73,7 +75,7 @@ test.describe.serial('最小浏览器级冒烟', () => {
       const slot1420 = page.locator(`[data-testid="appointment-slot-${slotPrefix}-14:20"].clickable`)
       const slot1430 = page.locator(`[data-testid="appointment-slot-${slotPrefix}-14:30"].clickable`)
       await expect(slot1420).toBeVisible()
-      await expect(slot1430).toHaveCount(0)
+      await expect(slot1430).toBeVisible()
       await slot1420.click()
 
       const drawer = page.locator('.el-drawer').filter({ hasText: '新建预约' }).last()
