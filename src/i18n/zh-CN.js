@@ -1311,6 +1311,7 @@ export default {
     defaultPrice: '默认价格（¥）',
     requiredTag: '服务标签',
     roomRequired: '需要诊室',
+    publicVisible: '公共页面显示',
     tagNone: '未设置',
 
     // 报价单

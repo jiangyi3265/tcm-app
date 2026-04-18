@@ -1305,6 +1305,7 @@ export default {
     defaultPrice: 'Default Price (¥)',
     requiredTag: 'Service Tag',
     roomRequired: 'Room Required',
+    publicVisible: 'Public Visible',
     tagNone: 'Not set',
 
     // Price Lists

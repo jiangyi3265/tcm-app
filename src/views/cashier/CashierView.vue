@@ -279,6 +279,14 @@ function handlePrintInvoice(consultation) {
           <span><strong>{{ t('cashier.patientLabel') }}</strong>{{ selectedConsult.patient?.name }}</span>
           <span><strong>{{ t('cashier.dateLabel') }}</strong>{{ formatDate(selectedConsult.date) }}</span>
         </div>
+        <div class="inv-patient-row">
+          <span><strong>地址：</strong>{{ [selectedConsult.patient?.addressStreet, selectedConsult.patient?.addressCity, selectedConsult.patient?.addressState, selectedConsult.patient?.addressPostal].filter(Boolean).join(', ') || selectedConsult.patient?.address || '-' }}</span>
+        </div>
+        <div class="inv-patient-row">
+          <span><strong>针灸师：</strong>{{ selectedConsult.practitioner?.name || '-' }}</span>
+          <span><strong>组织：</strong>{{ selectedConsult.practitioner?.regulatoryBody || '-' }}</span>
+          <span><strong>号码：</strong>{{ selectedConsult.practitioner?.registrationNumber || '-' }}</span>
+        </div>
         <el-divider />
         <el-table :data="selectedConsult.services || []" size="small">
           <el-table-column prop="name" :label="t('cashier.serviceItem')" />
@@ -295,6 +303,20 @@ function handlePrintInvoice(consultation) {
             </template>
           </el-table-column>
         </el-table>
+        <div v-if="(selectedConsult.prescriptions || []).length > 0" style="margin-top:12px">
+          <div style="font-weight:600; color:#555; margin-bottom:6px">药品收费</div>
+          <el-table :data="selectedConsult.prescriptions || []" size="small">
+            <el-table-column :label="'方剂'" min-width="120">
+              <template #default="{ row }">{{ row.formulaName || '-' }}</template>
+            </el-table-column>
+            <el-table-column :label="'剂数'" width="60" align="center">
+              <template #default="{ row }">{{ row.quantity || 1 }}</template>
+            </el-table-column>
+            <el-table-column :label="'小计'" width="100" align="right">
+              <template #default="{ row }">${{ formatAmount(row.subtotal) }}</template>
+            </el-table-column>
+          </el-table>
+        </div>
         <div class="inv-totals">
           <div class="inv-row"><span>{{ t('cashier.subtotal') }}</span><span>${{ formatAmount(selectedConsult.totalAmount - selectedConsult.taxAmount) }}</span></div>
           <div class="inv-row"><span>{{ t('cashier.salesTax', { rate: (toAmount(settingsStore.taxRate) * 100).toFixed(0) }) }}</span><span>${{ formatAmount(selectedConsult.taxAmount) }}</span></div>

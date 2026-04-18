@@ -119,16 +119,23 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function updateUser(id, updates) {
     const updated = await usersApi.update(id, updates)
+    const merged = { ...(updates || {}), ...(updated || {}) }
+    // Preserve UI-only fields the backend may strip (color/overlap1/overlap2/regulatoryBody/registrationNumber)
+    ;['color', 'overlap1', 'overlap2', 'regulatoryBody', 'registrationNumber'].forEach((key) => {
+      if (updates && Object.prototype.hasOwnProperty.call(updates, key) && (merged[key] === undefined || merged[key] === null)) {
+        merged[key] = updates[key]
+      }
+    })
     const idx = users.value.findIndex((u) => u.id === id)
     if (idx !== -1) {
-      users.value[idx] = updated
+      users.value[idx] = merged
       saveUsers()
       if (currentUser.value?.id === id) {
-        currentUser.value = { ...currentUser.value, ...updated }
+        currentUser.value = { ...currentUser.value, ...merged }
         saveState()
       }
     }
-    return updated
+    return merged
   }
 
   function syncUser(user) {

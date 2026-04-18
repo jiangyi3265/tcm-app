@@ -264,7 +264,10 @@ export function printInvoice(consultation, patient, practitioner, clinicName, ta
         <div class="info-item"><span class="info-label">Invoice ID</span><span>${escapeHtml(consultation?.consultationId || consultation?.id || '-')}</span></div>
         <div class="info-item"><span class="info-label">Date</span><span>${escapeHtml(consultation?.date || '-')}</span></div>
         <div class="info-item"><span class="info-label">Patient</span><span>${escapeHtml(patient?.name || '-')}</span></div>
+        <div class="info-item"><span class="info-label">Patient Address</span><span>${escapeHtml([patient?.addressStreet, patient?.addressCity, patient?.addressState, patient?.addressPostal].filter(Boolean).join(', ') || patient?.address || '-')}</span></div>
         <div class="info-item"><span class="info-label">Practitioner</span><span>${escapeHtml(practitioner?.name || '-')}</span></div>
+        <div class="info-item"><span class="info-label">Organization</span><span>${escapeHtml(practitioner?.regulatoryBody || '-')}</span></div>
+        <div class="info-item"><span class="info-label">Registration No.</span><span>${escapeHtml(practitioner?.registrationNumber || '-')}</span></div>
       </div>
     </div>
 
@@ -274,6 +277,11 @@ export function printInvoice(consultation, patient, practitioner, clinicName, ta
         <tr><th>Service</th><th>Qty</th><th>Price</th><th>Discount</th><th>Extended</th><th>Taxable</th><th>Tax</th></tr>
         ${serviceRows}
       </table>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Prescriptions / Medicines</div>
+      ${buildPrescriptionTables(consultation?.prescriptions || [], currency)}
     </div>
 
     <div class="section">

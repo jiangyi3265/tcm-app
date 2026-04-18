@@ -47,6 +47,7 @@ function normalizeServiceType(key, config = {}) {
     key,
     requiredTag: config.requiredTag ?? fallback.requiredTag ?? '',
     roomRequired: Boolean(config.roomRequired ?? fallback.roomRequired),
+    publicVisible: config.publicVisible !== undefined ? Boolean(config.publicVisible) : true,
   }
 }
 
@@ -135,9 +136,10 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function setPractitionerInterval(practitionerId, minutes) {
     const previous = { ...practitionerIntervals.value }
-    const parsedMinutes = Number(minutes)
+    const isOverlapKey = minutes === 'overlap1' || minutes === 'overlap2'
+    const parsedMinutes = isOverlapKey ? minutes : Number(minutes)
     try {
-      if (!practitionerId || !Number.isFinite(parsedMinutes) || parsedMinutes <= 0) {
+      if (!practitionerId || (!isOverlapKey && (!Number.isFinite(parsedMinutes) || parsedMinutes <= 0))) {
         delete practitionerIntervals.value[practitionerId]
       } else {
         practitionerIntervals.value[practitionerId] = parsedMinutes
@@ -163,7 +165,7 @@ export const useSettingsStore = defineStore('settings', () => {
   async function addRoom(room) {
     const newRoom = normalizeRoom({ id: `room-${Date.now()}`, ...room, isActive: true })
     const created = await settingsApi.addRoom(newRoom)
-    const merged = normalizeRoom({ ...newRoom, ...created })
+    const merged = normalizeRoom({ ...newRoom, ...created, color: created?.color || newRoom.color })
     rooms.value.push(merged)
     saveState()
     return merged
@@ -174,7 +176,7 @@ export const useSettingsStore = defineStore('settings', () => {
     if (idx === -1) return null
     const payload = normalizeRoom({ ...rooms.value[idx], ...updates, id })
     const updated = await settingsApi.updateRoom(id, payload)
-    const merged = normalizeRoom({ ...rooms.value[idx], ...updated, id })
+    const merged = normalizeRoom({ ...rooms.value[idx], ...updated, id, color: updated?.color || updates?.color || rooms.value[idx].color })
     rooms.value[idx] = merged
     saveState()
     return merged

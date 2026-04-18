@@ -15,6 +15,7 @@ import { useHerbDictStore } from '../../stores/herbDict'
 import { useMeridiansStore } from '../../stores/meridians'
 import { useTemplatesStore } from '../../stores/templates'
 import { ROLE_LABELS, ROLE_COLORS } from '../../utils/permissions'
+import { PRACTITIONER_COLORS, ROOM_COLORS, resolvePractitionerColor, resolveRoomColor } from '../../utils/colorPalette'
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
 import {
   WEEKDAYS,
@@ -103,7 +104,22 @@ function validateFormulaHerbs(items = []) {
 
 // ========== User management ==========
 const showAddUserDialog = ref(false)
-const newUser = ref({ name: '', email: '', password: '', roles: ['practitioner'], phone: '' })
+const newUser = ref({ name: '', email: '', password: '', roles: ['practitioner'], phone: '', color: PRACTITIONER_COLORS[0], regulatoryBody: '', registrationNumber: '', overlap1: 20, overlap2: 10 })
+
+const APPOINTMENT_INTERVAL_PRESETS = [10, 20, 30, 40, 50, 60]
+
+function resolveInterval(raw, user) {
+  if (raw === 'overlap1') return Number(user?.overlap1 ?? 20) || 20
+  if (raw === 'overlap2') return Number(user?.overlap2 ?? 10) || 10
+  const num = Number(raw)
+  return Number.isFinite(num) && num > 0 ? num : null
+}
+
+function formatIntervalOption(value, user) {
+  if (value === 'overlap1') return `overlap1 (${Number(user?.overlap1 ?? 20) || 20}min)`
+  if (value === 'overlap2') return `overlap2 (${Number(user?.overlap2 ?? 10) || 10}min)`
+  return `${value}min`
+}
 
 async function handleAddUser() {
   if (!newUser.value.name || !newUser.value.email || !newUser.value.password) {
@@ -122,7 +138,11 @@ async function handleAddUser() {
     }
     ElMessage.success(t('admin.userCreated'))
     showAddUserDialog.value = false
-    newUser.value = { name: '', email: '', password: '', roles: ['practitioner'], phone: '' }
+    newUser.value = {
+      name: '', email: '', password: '', roles: ['practitioner'], phone: '',
+      color: PRACTITIONER_COLORS[Math.floor(Math.random() * PRACTITIONER_COLORS.length)],
+      regulatoryBody: '', registrationNumber: '', overlap1: 20, overlap2: 10,
+    }
   } catch (e) {
     ElMessage.error(e.message || t('admin.userCreateFailed'))
   }
@@ -152,6 +172,11 @@ function startEditUser(user) {
     ...user,
     roles: userRoles,
     appointmentInterval: settingsStore.getPractitionerInterval(user.id),
+    color: user.color || resolvePractitionerColor(user),
+    regulatoryBody: user.regulatoryBody || '',
+    registrationNumber: user.registrationNumber || '',
+    overlap1: Number(user.overlap1 ?? 20) || 20,
+    overlap2: Number(user.overlap2 ?? 10) || 10,
   }
 }
 
@@ -380,14 +405,20 @@ async function handleExportData() {
 const showAddRoomDialog = ref(false)
 const newRoomName = ref('')
 const newRoomTags = ref([])
+const newRoomColor = ref(ROOM_COLORS[0])
 
 async function handleAddRoom() {
   if (!newRoomName.value) return ElMessage.warning(t('admin.fillRoomName'))
-  await settingsStore.addRoom({ name: newRoomName.value, supportTags: newRoomTags.value })
+  await settingsStore.addRoom({ name: newRoomName.value, supportTags: newRoomTags.value, color: newRoomColor.value })
   ElMessage.success(t('admin.roomAdded'))
   showAddRoomDialog.value = false
   newRoomName.value = ''
   newRoomTags.value = []
+  newRoomColor.value = ROOM_COLORS[Math.floor(Math.random() * ROOM_COLORS.length)]
+}
+
+async function updateRoomColor(room, color) {
+  await settingsStore.updateRoom(room.id, { color })
 }
 
 async function deleteRoom(room) {
@@ -420,6 +451,7 @@ function startEditService(key) {
   serviceEditForm.value = {
     roomRequired: true,
     requiredTag: '',
+    publicVisible: true,
     ...settingsStore.serviceTypes[key],
   }
 }
@@ -431,6 +463,7 @@ async function saveServiceEdit() {
     practitionerTime: Number(serviceEditForm.value.practitionerTime),
     roomRequired: Boolean(serviceEditForm.value.roomRequired),
     requiredTag: serviceEditForm.value.requiredTag || '',
+    publicVisible: Boolean(serviceEditForm.value.publicVisible),
   })
   editingServiceKey.value = null
   ElMessage.success(t('admin.saved'))
@@ -866,7 +899,7 @@ async function deleteTemplate(tmpl) {
                 <el-input v-model="editUserForm.name" size="small" />
               </div>
               <div v-else style="display:flex; align-items:center; gap: 8px">
-                <el-avatar :size="28" style="background: var(--color-primary); font-size: 12px">{{ (row.name || '?').charAt(0) }}</el-avatar>
+                <el-avatar :size="28" :style="{ background: resolvePractitionerColor(row), fontSize: '12px', color: '#fff' }">{{ (row.name || '?').charAt(0) }}</el-avatar>
                 {{ row.name }}
               </div>
             </template>
@@ -930,15 +963,59 @@ async function deleteTemplate(tmpl) {
               <span v-else style="color:#bbb">-</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('admin.appointmentInterval')" width="130">
+          <el-table-column :label="t('admin.appointmentInterval')" width="180">
             <template #default="{ row }">
               <div v-if="editingUserId === row.id && (row.role === 'practitioner' || (row.roles || []).includes('practitioner'))">
-                <el-input-number v-model="editUserForm.appointmentInterval" size="small" :min="5" :max="120" :step="5" style="width:100px" />
+                <el-select v-model="editUserForm.appointmentInterval" size="small" style="width:160px">
+                  <el-option v-for="n in APPOINTMENT_INTERVAL_PRESETS" :key="n" :label="formatIntervalOption(n, editUserForm)" :value="n" />
+                  <el-option label="overlap1(首诊)" value="overlap1" />
+                  <el-option label="overlap2(复诊)" value="overlap2" />
+                </el-select>
               </div>
               <span v-else-if="row.role === 'practitioner' || (row.roles || []).includes('practitioner')">
-                {{ settingsStore.getPractitionerInterval(row.id) }}min
+                {{ formatIntervalOption(settingsStore.getPractitionerInterval(row.id), row) }}
               </span>
               <span v-else style="color:#bbb">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="首诊时长(overlap1)" width="130">
+            <template #default="{ row }">
+              <div v-if="editingUserId === row.id && (row.role === 'practitioner' || (row.roles || []).includes('practitioner'))">
+                <el-input-number v-model="editUserForm.overlap1" size="small" :min="5" :max="120" :step="5" style="width:110px" />
+              </div>
+              <span v-else-if="row.role === 'practitioner' || (row.roles || []).includes('practitioner')">
+                {{ row.overlap1 || 20 }}min
+              </span>
+              <span v-else style="color:#bbb">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="复诊时长(overlap2)" width="130">
+            <template #default="{ row }">
+              <div v-if="editingUserId === row.id && (row.role === 'practitioner' || (row.roles || []).includes('practitioner'))">
+                <el-input-number v-model="editUserForm.overlap2" size="small" :min="5" :max="120" :step="5" style="width:110px" />
+              </div>
+              <span v-else-if="row.role === 'practitioner' || (row.roles || []).includes('practitioner')">
+                {{ row.overlap2 || 10 }}min
+              </span>
+              <span v-else style="color:#bbb">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="颜色" width="90" align="center">
+            <template #default="{ row }">
+              <el-color-picker v-if="editingUserId === row.id" v-model="editUserForm.color" size="small" :predefine="PRACTITIONER_COLORS" />
+              <span v-else :style="{ display:'inline-block', width:'22px', height:'22px', borderRadius:'4px', background: resolvePractitionerColor(row) }" />
+            </template>
+          </el-table-column>
+          <el-table-column label="组织" width="130">
+            <template #default="{ row }">
+              <el-input v-if="editingUserId === row.id" v-model="editUserForm.regulatoryBody" size="small" placeholder="如 CTCMPAO" />
+              <span v-else>{{ row.regulatoryBody || '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="注册号码" width="120">
+            <template #default="{ row }">
+              <el-input v-if="editingUserId === row.id" v-model="editUserForm.registrationNumber" size="small" placeholder="如 6995" />
+              <span v-else>{{ row.registrationNumber || '-' }}</span>
             </template>
           </el-table-column>
           <el-table-column :label="t('admin.createdDate')" width="120">
@@ -1219,6 +1296,11 @@ async function deleteTemplate(tmpl) {
               </el-checkbox-group>
             </template>
           </el-table-column>
+          <el-table-column label="颜色" width="90" align="center">
+            <template #default="{ row }">
+              <el-color-picker :model-value="resolveRoomColor(row)" :predefine="ROOM_COLORS" size="small" @change="(c) => updateRoomColor(row, c)" />
+            </template>
+          </el-table-column>
           <el-table-column :label="t('admin.status')" width="100">
             <template #default="{ row }">
               <el-tag :type="row.isActive ? 'success' : 'info'" size="small">
@@ -1285,6 +1367,14 @@ async function deleteTemplate(tmpl) {
                 <el-switch v-model="serviceEditForm.roomRequired" />
               </div>
               <el-tag v-else :type="row.roomRequired ? '' : 'info'" size="small">{{ row.roomRequired ? t('common.yes') : t('common.no') }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('admin.publicVisible')" width="130">
+            <template #default="{ row }">
+              <div v-if="editingServiceKey === row.key">
+                <el-switch v-model="serviceEditForm.publicVisible" />
+              </div>
+              <el-tag v-else :type="row.publicVisible !== false ? 'success' : 'danger'" size="small">{{ row.publicVisible !== false ? t('common.yes') : t('common.no') }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column :label="t('admin.operation')" width="130">
@@ -1994,6 +2084,21 @@ async function deleteTemplate(tmpl) {
         <el-form-item :label="t('admin.phone')">
           <el-input v-model="newUser.phone" />
         </el-form-item>
+        <el-form-item label="显示颜色">
+          <el-color-picker v-model="newUser.color" :predefine="PRACTITIONER_COLORS" />
+        </el-form-item>
+        <el-form-item label="组织">
+          <el-input v-model="newUser.regulatoryBody" placeholder="如: CTCMPAO" />
+        </el-form-item>
+        <el-form-item label="注册号码">
+          <el-input v-model="newUser.registrationNumber" placeholder="如: 6995" />
+        </el-form-item>
+        <el-form-item label="首诊时长(overlap1)">
+          <el-input-number v-model="newUser.overlap1" :min="5" :max="120" :step="5" />
+        </el-form-item>
+        <el-form-item label="复诊时长(overlap2)">
+          <el-input-number v-model="newUser.overlap2" :min="5" :max="120" :step="5" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showAddUserDialog = false">{{ t('common.cancel') }}</el-button>
@@ -2015,6 +2120,9 @@ async function deleteTemplate(tmpl) {
             <el-checkbox label="herbs">{{ t('admin.tagHerbs') }}</el-checkbox>
             <el-checkbox label="moxibustion">{{ t('admin.tagMoxibustion') }}</el-checkbox>
           </el-checkbox-group>
+        </el-form-item>
+        <el-form-item label="颜色">
+          <el-color-picker v-model="newRoomColor" :predefine="ROOM_COLORS" />
         </el-form-item>
       </el-form>
       <template #footer>

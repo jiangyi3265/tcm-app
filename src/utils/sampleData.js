@@ -698,6 +698,7 @@ export const SERVICE_TYPES = {
     roomRequired: true,
     defaultPrice: 120,
     requiredTag: 'acupuncture',
+    publicVisible: true,
   },
   acupuncture_followup: {
     label: '针灸复诊',
@@ -706,6 +707,7 @@ export const SERVICE_TYPES = {
     roomRequired: true,
     defaultPrice: 80,
     requiredTag: 'acupuncture',
+    publicVisible: true,
   },
   herbs_only: {
     label: '仅中药',
@@ -714,6 +716,7 @@ export const SERVICE_TYPES = {
     roomRequired: true,
     defaultPrice: 60,
     requiredTag: 'herbs',
+    publicVisible: true,
   },
   acupuncture_40: {
     label: '针灸40分钟',
@@ -722,6 +725,7 @@ export const SERVICE_TYPES = {
     roomRequired: true,
     defaultPrice: 100,
     requiredTag: 'acupuncture',
+    publicVisible: true,
   },
   tuina_40: {
     label: '推拿40分钟',
@@ -730,6 +734,7 @@ export const SERVICE_TYPES = {
     roomRequired: true,
     defaultPrice: 100,
     requiredTag: 'tuina',
+    publicVisible: true,
   },
 }
 

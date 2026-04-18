@@ -17,13 +17,14 @@ import {
   validateWorkingHours,
 } from '../../utils/workingHours'
 import { SERVICE_TYPES } from '../../utils/sampleData'
+import { resolvePractitionerColor, resolveRoomColor } from '../../utils/colorPalette'
 import { useEmailSimulator } from '../../utils/emailSimulator'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t, te } = useI18n()
 
 const SLOT_MINUTES = 10
-const INTERNAL_VIEW_DAYS = 3
+const INTERNAL_VIEW_DAYS = 7
 const WEEKDAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
 const WEEKDAY_LABELS = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' }
 
@@ -42,7 +43,7 @@ const canEditAppointments = computed(() => hasPermission(roles.value, 'appointme
 
 const currentDate = ref(new Date())
 const viewMode = ref('calendar')
-const weekStart = computed(() => dayjs(currentDate.value).startOf('week'))
+const weekStart = computed(() => dayjs(currentDate.value).startOf('day'))
 const weekDays = computed(() => Array.from({ length: INTERNAL_VIEW_DAYS }, (_, index) => weekStart.value.add(index, 'day').toDate()))
 function prevWeek() { currentDate.value = dayjs(currentDate.value).subtract(INTERNAL_VIEW_DAYS, 'day').toDate() }
 function nextWeek() { currentDate.value = dayjs(currentDate.value).add(INTERNAL_VIEW_DAYS, 'day').toDate() }
@@ -319,11 +320,19 @@ const availabilitySlots = computed(() => Array.isArray(availabilityState.value.s
 const selectedAvailabilitySlot = computed(() => availabilitySlots.value.find((slot) => slot.startTime === selectedSlotValue.value) || null)
 const appointmentEndTimeLabel = computed(() => selectedAvailabilitySlot.value?.endTime ? formatTime(selectedAvailabilitySlot.value.endTime) : '')
 
-watch([() => newAppt.value.serviceType, practitionerOptions], () => {
+watch([() => newAppt.value.serviceType, practitionerOptions, filteredRooms], () => {
   if (newAppt.value.practitionerId && !practitionerOptions.value.some((item) => String(item.id) === String(newAppt.value.practitionerId))) {
     newAppt.value.practitionerId = ''
   }
-  if (!requiresRoomSelection.value) newAppt.value.roomId = ''
+  if (!requiresRoomSelection.value) {
+    newAppt.value.roomId = ''
+    return
+  }
+  const rooms = filteredRooms.value
+  if (rooms.length === 0) return
+  if (!newAppt.value.roomId || !rooms.some((r) => String(r.id) === String(newAppt.value.roomId))) {
+    newAppt.value.roomId = rooms[0].id
+  }
 })
 
 function openCreateDialog({ date, practitionerId, preferredStartTime } = {}) {
@@ -454,6 +463,7 @@ function getAvailablePractitionerNames(slot) {
 
 async function createAppointment() {
   if (!newAppt.value.patientId) return ElMessage.warning(t('appointments.selectPatient'))
+  if (!newAppt.value.practitionerId) return ElMessage.warning('请选择医师')
   if (!newAppt.value.serviceType) return ElMessage.warning(t('appointments.selectServiceType'))
   if (requiresRoomSelection.value && !newAppt.value.roomId) return ElMessage.warning(t('appointments.selectRoomFirst'))
   if (!selectedAvailabilitySlot.value) {
@@ -483,6 +493,7 @@ async function createAppointment() {
 
 async function submitAppointment() {
   if (!newAppt.value.patientId) return ElMessage.warning(t('appointments.selectPatient'))
+  if (!newAppt.value.practitionerId) return ElMessage.warning('请选择医师')
   if (!newAppt.value.serviceType) return ElMessage.warning(t('appointments.selectServiceType'))
   if (requiresRoomSelection.value && !newAppt.value.roomId) return ElMessage.warning(t('appointments.selectRoomFirst'))
   if (!selectedAvailabilitySlot.value) {
@@ -587,17 +598,32 @@ function getStatusTagType(status) {
   return 'warning'
 }
 
+function hexToRgb(hex) {
+  const clean = String(hex || '').replace('#', '')
+  const full = clean.length === 3 ? clean.split('').map((c) => c + c).join('') : clean
+  const n = parseInt(full, 16)
+  return Number.isFinite(n) ? { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 } : { r: 244, g: 162, b: 97 }
+}
+
+function textColorOn(bg) {
+  const { r, g, b } = hexToRgb(bg)
+  return (r * 299 + g * 587 + b * 114) / 1000 > 150 ? '#1f2937' : '#fff'
+}
+
 function getAppointmentBlockStyle(block) {
-  const palette = BLOCK_PALETTES[block?.status] || BLOCK_PALETTES.booked
+  const practitionerColor = resolvePractitionerColor(block.practitioner)
+  const roomColor = block.room ? resolveRoomColor(block.room) : (BLOCK_PALETTES[block?.status] || BLOCK_PALETTES.booked).bg
+  const statusFooter = (BLOCK_PALETTES[block?.status] || BLOCK_PALETTES.booked).footer
   return {
     top: `${block.top}px`,
     height: `${block.height}px`,
     left: `calc(${block.leftPct}% + 3px)`,
     width: `calc(${block.widthPct}% - 6px)`,
-    background: palette.bg,
-    color: palette.text,
-    '--block-accent': palette.accent,
-    '--block-footer': palette.footer,
+    background: roomColor,
+    color: textColorOn(roomColor),
+    borderLeft: `5px solid ${practitionerColor}`,
+    '--block-accent': practitionerColor,
+    '--block-footer': statusFooter,
   }
 }
 </script>
@@ -791,8 +817,8 @@ function getAppointmentBlockStyle(block) {
           </el-select>
         </el-form-item>
 
-        <el-form-item :label="t('appointments.practitioner')">
-          <el-select v-model="newAppt.practitionerId" clearable :placeholder="t('appointments.allPractitioners')" style="width:100%">
+        <el-form-item :label="t('appointments.practitioner')" required>
+          <el-select v-model="newAppt.practitionerId" :placeholder="t('appointments.allPractitioners')" style="width:100%">
             <el-option v-for="practitioner in practitionerOptions" :key="practitioner.id" :label="practitioner.name" :value="practitioner.id" />
           </el-select>
         </el-form-item>
@@ -808,11 +834,7 @@ function getAppointmentBlockStyle(block) {
           </el-select>
         </el-form-item>
 
-        <el-form-item v-if="requiresRoomSelection" :label="t('appointments.room')" required>
-          <el-select v-model="newAppt.roomId" :placeholder="t('appointments.selectRoom')" style="width:100%">
-            <el-option v-for="room in filteredRooms" :key="room.id" :label="room.name" :value="room.id" />
-          </el-select>
-        </el-form-item>
+        <!-- 诊室已改为自动分配, 不在此处选择 -->
 
         <el-form-item :label="t('appointments.dateLabel')" required>
           <el-date-picker v-model="newAppt.date" type="date" value-format="YYYY-MM-DD" style="width:100%" />
