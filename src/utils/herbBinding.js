@@ -107,6 +107,12 @@ export function getInventoryHerbMeta(item = {}, herbById) {
         item?.taste,
       ),
     ),
+    toxicity: normalizeText(
+      pickValue(
+        herbDict?.toxicity,
+        item?.toxicity,
+      ),
+    ),
     guijing: normalizeList(
       pickValue(
         herbDict?.meridianTropism,

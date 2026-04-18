@@ -711,7 +711,7 @@ export const SERVICE_TYPES = {
     label: '仅中药',
     duration: 20,
     practitionerTime: 20,
-    roomRequired: false,
+    roomRequired: true,
     defaultPrice: 60,
     requiredTag: 'herbs',
   },

@@ -45,6 +45,37 @@ const templatesStore = useTemplatesStore()
 const activeTab = ref('users')
 
 const herbOptions = computed(() => herbDictStore.activeHerbs)
+const TOXICITY_OPTIONS = ['无毒', '小毒', '有毒', '大毒']
+const SERVICE_TAG_OPTIONS = computed(() => ([
+  { value: 'acupuncture', label: t('admin.tagAcupuncture') },
+  { value: 'moxibustion', label: t('admin.tagMoxibustion') },
+  { value: 'herbs', label: t('admin.tagHerbs') },
+  { value: 'tuina', label: t('admin.tagTuina') },
+  { value: 'consultation', label: t('admin.tagConsultation') },
+]))
+
+function getServiceTagLabel(tag) {
+  const matched = SERVICE_TAG_OPTIONS.value.find((item) => item.value === tag)
+  return matched?.label || tag || t('admin.tagNone')
+}
+
+function createHerbDraft() {
+  return {
+    name: '',
+    alias: '',
+    pinyin: '',
+    category: '',
+    nature: '',
+    taste: '',
+    toxicity: '无毒',
+    meridianTropism: '',
+    efficacy: '',
+    indication: '',
+    dosageRange: '',
+    contraindication: '',
+    notes: '',
+  }
+}
 
 function createFormulaHerbDraft() {
   return { herbDictId: null, herbName: '', dosage: 0, unit: 'g', notes: '' }
@@ -307,6 +338,9 @@ async function handleResetPwd() {
 const settingsForm = reactive({
   taxRate: settingsStore.taxRate,
   practitionerInterval: settingsStore.practitionerInterval,
+  publicBookingAdvanceDays: settingsStore.publicBookingAdvanceDays,
+  publicBookingDripWindowDays: settingsStore.publicBookingDripWindowDays,
+  publicBookingDripMinutes: settingsStore.publicBookingDripMinutes,
   profitRatio: settingsStore.profitRatio,
   clinicName: settingsStore.clinicName,
   clinicAddress: settingsStore.clinicAddress,
@@ -317,6 +351,9 @@ async function saveSettings() {
   await settingsStore.updateSettings({
     taxRate: Number(settingsForm.taxRate),
     practitionerInterval: Number(settingsForm.practitionerInterval),
+    publicBookingAdvanceDays: Number(settingsForm.publicBookingAdvanceDays),
+    publicBookingDripWindowDays: Number(settingsForm.publicBookingDripWindowDays),
+    publicBookingDripMinutes: Number(settingsForm.publicBookingDripMinutes),
     profitRatio: Number(settingsForm.profitRatio),
     clinicName: settingsForm.clinicName,
     clinicAddress: settingsForm.clinicAddress,
@@ -380,7 +417,11 @@ const editingServiceKey = ref(null)
 
 function startEditService(key) {
   editingServiceKey.value = key
-  serviceEditForm.value = { ...settingsStore.serviceTypes[key] }
+  serviceEditForm.value = {
+    roomRequired: true,
+    requiredTag: '',
+    ...settingsStore.serviceTypes[key],
+  }
 }
 
 async function saveServiceEdit() {
@@ -388,6 +429,8 @@ async function saveServiceEdit() {
     defaultPrice: Number(serviceEditForm.value.defaultPrice),
     duration: Number(serviceEditForm.value.duration),
     practitionerTime: Number(serviceEditForm.value.practitionerTime),
+    roomRequired: Boolean(serviceEditForm.value.roomRequired),
+    requiredTag: serviceEditForm.value.requiredTag || '',
   })
   editingServiceKey.value = null
   ElMessage.success(t('admin.saved'))
@@ -703,7 +746,7 @@ async function deleteConversion(c) {
 
 // ========== Herb dictionary management ==========
 const showAddHerbDialog = ref(false)
-const newHerb = ref({ name: '', alias: '', pinyin: '', category: '', nature: '', taste: '', meridianTropism: '', efficacy: '', indication: '', dosageRange: '', contraindication: '', notes: '' })
+const newHerb = ref(createHerbDraft())
 const herbSearchQuery = ref('')
 const herbCategoryFilter = ref('')
 
@@ -722,12 +765,12 @@ async function handleAddHerb() {
   await herbDictStore.addHerb({ ...newHerb.value })
   ElMessage.success(t('admin.herbCreated'))
   showAddHerbDialog.value = false
-  newHerb.value = { name: '', alias: '', pinyin: '', category: '', nature: '', taste: '', meridianTropism: '', efficacy: '', indication: '', dosageRange: '', contraindication: '', notes: '' }
+  newHerb.value = createHerbDraft()
 }
 
 const editingHerbId = ref(null)
 const editHerbForm = ref({})
-function startEditHerb(herb) { editingHerbId.value = herb.id; editHerbForm.value = { ...herb } }
+function startEditHerb(herb) { editingHerbId.value = herb.id; editHerbForm.value = { toxicity: '无毒', ...herb } }
 async function saveEditHerb() {
   await herbDictStore.updateHerb(editingHerbId.value, editHerbForm.value)
   editingHerbId.value = null; ElMessage.success(t('admin.herbUpdated'))
@@ -1098,6 +1141,39 @@ async function deleteTemplate(tmpl) {
                 {{ t('admin.intervalDesc', { min: settingsForm.practitionerInterval }) }}
               </span>
             </el-form-item>
+            <el-form-item :label="t('admin.publicBookingAdvanceDays')">
+              <el-input-number
+                v-model="settingsForm.publicBookingAdvanceDays"
+                :min="1"
+                :max="90"
+                :step="1"
+              />
+              <span style="margin-left: 8px; color: #888; font-size: 13px">
+                {{ t('admin.publicBookingAdvanceDaysDesc', { days: settingsForm.publicBookingAdvanceDays }) }}
+              </span>
+            </el-form-item>
+            <el-form-item :label="t('admin.publicBookingDripWindowDays')">
+              <el-input-number
+                v-model="settingsForm.publicBookingDripWindowDays"
+                :min="1"
+                :max="30"
+                :step="1"
+              />
+              <span style="margin-left: 8px; color: #888; font-size: 13px">
+                {{ t('admin.publicBookingDripWindowDaysDesc', { days: settingsForm.publicBookingDripWindowDays }) }}
+              </span>
+            </el-form-item>
+            <el-form-item :label="t('admin.publicBookingDripMinutes')">
+              <el-input-number
+                v-model="settingsForm.publicBookingDripMinutes"
+                :min="10"
+                :max="240"
+                :step="10"
+              />
+              <span style="margin-left: 8px; color: #888; font-size: 13px">
+                {{ t('admin.publicBookingDripMinutesDesc', { minutes: settingsForm.publicBookingDripMinutes }) }}
+              </span>
+            </el-form-item>
             <el-form-item :label="t('admin.profitRatio')">
               <el-input-number
                 v-model="settingsForm.profitRatio"
@@ -1188,9 +1264,27 @@ async function deleteTemplate(tmpl) {
               <span v-else>CNY {{ row.defaultPrice }}</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('admin.roomRequired')" width="90">
+          <el-table-column :label="t('admin.requiredTag')" width="130">
             <template #default="{ row }">
-              <el-tag :type="row.roomRequired ? '' : 'info'" size="small">{{ row.roomRequired ? t('common.yes') : t('common.no') }}</el-tag>
+              <div v-if="editingServiceKey === row.key">
+                <el-select v-model="serviceEditForm.requiredTag" size="small" clearable style="width: 110px">
+                  <el-option
+                    v-for="option in SERVICE_TAG_OPTIONS"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
+              </div>
+              <span v-else>{{ getServiceTagLabel(row.requiredTag) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('admin.roomRequired')" width="110">
+            <template #default="{ row }">
+              <div v-if="editingServiceKey === row.key">
+                <el-switch v-model="serviceEditForm.roomRequired" />
+              </div>
+              <el-tag v-else :type="row.roomRequired ? '' : 'info'" size="small">{{ row.roomRequired ? t('common.yes') : t('common.no') }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column :label="t('admin.operation')" width="130">
@@ -1704,6 +1798,7 @@ async function deleteTemplate(tmpl) {
           <el-table-column :label="t('admin.herbCategory')" width="90" prop="category" />
           <el-table-column :label="t('admin.herbNature')" width="60" prop="nature" />
           <el-table-column :label="t('admin.herbTaste')" width="100" prop="taste" />
+          <el-table-column :label="t('admin.herbToxicity')" width="80"><template #default="{ row }"><span>{{ row.toxicity || '无毒' }}</span></template></el-table-column>
           <el-table-column :label="t('admin.herbMeridianTropism')" width="120"><template #default="{ row }"><span style="font-size:12px; color:#555">{{ row.meridianTropism || '-' }}</span></template></el-table-column>
           <el-table-column :label="t('admin.herbEfficacy')" min-width="140"><template #default="{ row }"><span style="font-size:12px; color:#555">{{ row.efficacy || '-' }}</span></template></el-table-column>
           <el-table-column :label="t('admin.herbDosageRange')" width="80"><template #default="{ row }"><span style="font-size:12px">{{ row.dosageRange || '-' }}</span></template></el-table-column>
@@ -1723,6 +1818,11 @@ async function deleteTemplate(tmpl) {
             <el-row :gutter="12"><el-col :span="8"><el-form-item :label="t('admin.herbCategory')"><el-input v-model="editHerbForm.category" /></el-form-item></el-col>
             <el-col :span="8"><el-form-item :label="t('admin.herbNature')"><el-input v-model="editHerbForm.nature" :placeholder="t('admin.herbNaturePh')" /></el-form-item></el-col>
             <el-col :span="8"><el-form-item :label="t('admin.herbTaste')"><el-input v-model="editHerbForm.taste" /></el-form-item></el-col></el-row>
+            <el-form-item :label="t('admin.herbToxicity')">
+              <el-select v-model="editHerbForm.toxicity" style="width:100%">
+                <el-option v-for="option in TOXICITY_OPTIONS" :key="option" :label="option" :value="option" />
+              </el-select>
+            </el-form-item>
             <el-form-item :label="t('admin.herbMeridianTropism')"><el-input v-model="editHerbForm.meridianTropism" /></el-form-item>
             <el-form-item :label="t('admin.herbEfficacy')"><el-input v-model="editHerbForm.efficacy" type="textarea" :rows="2" /></el-form-item>
             <el-row :gutter="12"><el-col :span="12"><el-form-item :label="t('admin.herbDosageRange')"><el-input v-model="editHerbForm.dosageRange" /></el-form-item></el-col>
@@ -1864,8 +1964,8 @@ async function deleteTemplate(tmpl) {
             <el-table-column :label="t('admin.operation')" width="200">
               <template #default="{ row }">
                 <el-button size="small" text type="success" @click="restoreInventoryItem(row.id)">{{ t('admin.restore') }}</el-button>
-                <el-button size="small" text type="danger" :disabled="!canPhysicalDelete(row.deletedAt)" @click="physicalDeleteInventoryItem(row.id)">
-                  {{ t('admin.permanentDelete') }}{{ canPhysicalDelete(row.deletedAt) ? '' : t('admin.notYet3Months') }}
+                <el-button size="small" text type="danger" @click="physicalDeleteInventoryItem(row.id)">
+                  {{ t('admin.permanentDelete') }}
                 </el-button>
               </template>
             </el-table-column>
@@ -2188,6 +2288,7 @@ async function deleteTemplate(tmpl) {
           <el-col :span="8"><el-form-item :label="t('admin.herbCategory')"><el-input v-model="newHerb.category" :placeholder="t('admin.herbCategoryPh')" /></el-form-item></el-col>
           <el-col :span="8"><el-form-item :label="t('admin.herbNature')"><el-input v-model="newHerb.nature" :placeholder="t('admin.herbNaturePh')" /></el-form-item></el-col>
           <el-col :span="8"><el-form-item :label="t('admin.herbTaste')"><el-input v-model="newHerb.taste" :placeholder="t('admin.herbTastePh')" /></el-form-item></el-col>
+          <el-col :span="8"><el-form-item :label="t('admin.herbToxicity')"><el-select v-model="newHerb.toxicity" style="width:100%"><el-option v-for="option in TOXICITY_OPTIONS" :key="option" :label="option" :value="option" /></el-select></el-form-item></el-col>
           <el-col :span="12"><el-form-item :label="t('admin.herbMeridianTropism')"><el-input v-model="newHerb.meridianTropism" :placeholder="t('admin.herbMeridianTropismPh')" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item :label="t('admin.herbDosageRange')"><el-input v-model="newHerb.dosageRange" :placeholder="t('admin.herbDosageRangePh')" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item :label="t('admin.herbContraindication')"><el-input v-model="newHerb.contraindication" :placeholder="t('admin.herbContraindicationPh')" /></el-form-item></el-col>

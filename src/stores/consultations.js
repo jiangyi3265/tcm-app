@@ -203,6 +203,7 @@ export const useConsultationsStore = defineStore('consultations', () => {
     const updated = await consultationsApi.softDelete(id)
     consultations.value[idx] = updated
     saveState()
+    await refreshInventoryAfterPrescriptionChange()
     return true
   }
 
@@ -212,6 +213,7 @@ export const useConsultationsStore = defineStore('consultations', () => {
       const updated = await consultationsApi.restore(id)
       consultations.value[idx] = updated
       saveState()
+      await refreshInventoryAfterPrescriptionChange()
     }
   }
 

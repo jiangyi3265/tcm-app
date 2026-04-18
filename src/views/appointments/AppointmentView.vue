@@ -23,6 +23,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 const { t, te } = useI18n()
 
 const SLOT_MINUTES = 10
+const INTERNAL_VIEW_DAYS = 3
 const WEEKDAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
 const WEEKDAY_LABELS = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' }
 
@@ -42,9 +43,9 @@ const canEditAppointments = computed(() => hasPermission(roles.value, 'appointme
 const currentDate = ref(new Date())
 const viewMode = ref('calendar')
 const weekStart = computed(() => dayjs(currentDate.value).startOf('week'))
-const weekDays = computed(() => Array.from({ length: 7 }, (_, index) => weekStart.value.add(index, 'day').toDate()))
-function prevWeek() { currentDate.value = dayjs(currentDate.value).subtract(7, 'day').toDate() }
-function nextWeek() { currentDate.value = dayjs(currentDate.value).add(7, 'day').toDate() }
+const weekDays = computed(() => Array.from({ length: INTERNAL_VIEW_DAYS }, (_, index) => weekStart.value.add(index, 'day').toDate()))
+function prevWeek() { currentDate.value = dayjs(currentDate.value).subtract(INTERNAL_VIEW_DAYS, 'day').toDate() }
+function nextWeek() { currentDate.value = dayjs(currentDate.value).add(INTERNAL_VIEW_DAYS, 'day').toDate() }
 function goToday() { currentDate.value = new Date() }
 function isToday(date) { return dayjs(date).isSame(dayjs(), 'day') }
 
@@ -162,7 +163,7 @@ function isWorkingSlot(date, totalMinutes) {
 
 const weekAppointments = computed(() => {
   const start = weekStart.value.startOf('day')
-  const end = weekStart.value.add(6, 'day').endOf('day')
+  const end = weekStart.value.add(INTERNAL_VIEW_DAYS - 1, 'day').endOf('day')
   return appointmentsStore.getBranchAppointments(branchesStore.currentBranchId)
     .filter((appointment) => appointment.status !== 'cancelled')
     .filter((appointment) => {
@@ -238,7 +239,7 @@ function getCellClass(date, totalMinutes) {
   return {
     working: isWorkingSlot(date, totalMinutes),
     occupied: isCellOccupied(date, totalMinutes),
-    clickable: canCreate.value && (!filterPractitioner.value || (isWorkingSlot(date, totalMinutes) && !isCellOccupied(date, totalMinutes))),
+    clickable: canCreate.value,
   }
 }
 
@@ -374,7 +375,6 @@ function closeCreateDialog() {
 
 function handleScheduleCellClick(date, totalMinutes) {
   if (!canCreate.value) return
-  if (filterPractitioner.value && (!isWorkingSlot(date, totalMinutes) || isCellOccupied(date, totalMinutes))) return
   openCreateDialog({
     date: dayjs(date).format('YYYY-MM-DD'),
     practitionerId: filterPractitioner.value || '',
@@ -609,7 +609,7 @@ function getAppointmentBlockStyle(block) {
         <el-button size="small" @click="goToday">{{ t('appointments.today') }}</el-button>
         <el-button circle size="small" :icon="'ArrowLeft'" @click="prevWeek" />
         <el-button circle size="small" :icon="'ArrowRight'" @click="nextWeek" />
-        <span class="week-label">{{ formatDate(weekDays[0]) }} - {{ formatDate(weekDays[6]) }}</span>
+        <span class="week-label">{{ formatDate(weekDays[0]) }} - {{ formatDate(weekDays[weekDays.length - 1]) }}</span>
       </div>
       <div class="toolbar-right">
         <el-select v-model="filterPractitioner" clearable size="small" style="width:180px" :placeholder="t('appointments.allPractitioners')">
@@ -685,29 +685,15 @@ function getAppointmentBlockStyle(block) {
                 />
               </template>
 
-              <!-- Clickable slot areas (only when filtered by practitioner) -->
-              <template v-if="filterPractitioner">
-                <div
-                  v-for="slot in timeSlots"
-                  :key="'c'+slot.label"
-                  class="sg-click-area"
-                  :style="{ top: getSlotTopPx(slot.total) + 'px', height: (SLOT_MINUTES * PX_PER_MINUTE) + 'px' }"
-                  :class="{ clickable: canCreate && isWorkingSlot(day, slot.total) && !isCellOccupied(day, slot.total) }"
-                  :data-testid="`appointment-slot-${dayjs(day).format('YYYY-MM-DD')}-${slot.label}`"
-                  @click="handleScheduleCellClick(day, slot.total)"
-                />
-              </template>
-              <template v-else>
-                <div
-                  v-for="slot in timeSlots"
-                  :key="'c'+slot.label"
-                  class="sg-click-area"
-                  :style="{ top: getSlotTopPx(slot.total) + 'px', height: (SLOT_MINUTES * PX_PER_MINUTE) + 'px' }"
-                  :class="{ clickable: canCreate }"
-                  :data-testid="`appointment-slot-${dayjs(day).format('YYYY-MM-DD')}-${slot.label}`"
-                  @click="handleScheduleCellClick(day, slot.total)"
-                />
-              </template>
+              <div
+                v-for="slot in timeSlots"
+                :key="'c'+slot.label"
+                class="sg-click-area"
+                :style="{ top: getSlotTopPx(slot.total) + 'px', height: (SLOT_MINUTES * PX_PER_MINUTE) + 'px' }"
+                :class="{ clickable: canCreate }"
+                :data-testid="`appointment-slot-${dayjs(day).format('YYYY-MM-DD')}-${slot.label}`"
+                @click="handleScheduleCellClick(day, slot.total)"
+              />
 
               <!-- Appointment blocks -->
               <button

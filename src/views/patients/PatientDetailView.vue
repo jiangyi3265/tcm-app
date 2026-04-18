@@ -46,6 +46,38 @@ const consultations = computed(() =>
   ),
 )
 const practitioners = computed(() => authStore.getPractitioners())
+const latestIntakeForm = computed(() => {
+  const formData = patient.value?.latestIntakeFormData
+  return formData && typeof formData === 'object' && !Array.isArray(formData) ? formData : {}
+})
+const latestIntakeHistory = computed(() => {
+  const historyParts = [
+    latestIntakeForm.value.medicalHistory,
+    latestIntakeForm.value.pastMedicalHistory,
+  ]
+    .map(value => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean)
+
+  return [...new Set(historyParts)].join('\n')
+})
+const latestIntakeSummaryVisible = computed(() => {
+  return !!(
+    patient.value?.latestIntakeSubmittedAt
+    || patient.value?.latestIntakeSource
+    || latestIntakeForm.value.chiefComplaint
+    || latestIntakeForm.value.allergies
+    || latestIntakeForm.value.currentMedications
+    || latestIntakeHistory.value
+    || latestIntakeForm.value.additionalNotes
+  )
+})
+const latestIntakeSourceLabel = computed(() => {
+  const source = patient.value?.latestIntakeSource
+  if (!source) return '-'
+  const key = `patientDetail.intakeSource.${source}`
+  const translated = t(key)
+  return translated === key ? source : translated
+})
 const firstConsultation = computed(() => {
   if (!consultations.value.length) return null
   return [...consultations.value].sort((a, b) => {
@@ -531,6 +563,36 @@ const fileTree = computed(() => {
                   </el-descriptions-item>
                   <el-descriptions-item v-if="patient.notes" :label="t('common.notes')">
                     <div style="white-space: pre-wrap; line-height: 1.6">{{ patient.notes }}</div>
+                  </el-descriptions-item>
+                </el-descriptions>
+
+                <div class="section-title" style="margin-top: 20px">{{ t('patientDetail.latestIntakeSummary') }}</div>
+                <el-descriptions :column="1" border size="small" class="info-desc">
+                  <template v-if="latestIntakeSummaryVisible">
+                    <el-descriptions-item :label="t('patientDetail.intakeSubmittedAt')">
+                      {{ patient.latestIntakeSubmittedAt ? formatDateTime(patient.latestIntakeSubmittedAt) : '-' }}
+                    </el-descriptions-item>
+                    <el-descriptions-item :label="t('patientDetail.intakeSourceLabel')">
+                      {{ latestIntakeSourceLabel }}
+                    </el-descriptions-item>
+                    <el-descriptions-item v-if="latestIntakeForm.chiefComplaint" :label="t('patientDetail.intakeChiefComplaint')">
+                      <div style="white-space: pre-wrap; line-height: 1.6">{{ latestIntakeForm.chiefComplaint }}</div>
+                    </el-descriptions-item>
+                    <el-descriptions-item v-if="latestIntakeForm.allergies" :label="t('patientDetail.intakeAllergies')">
+                      <div style="white-space: pre-wrap; line-height: 1.6">{{ latestIntakeForm.allergies }}</div>
+                    </el-descriptions-item>
+                    <el-descriptions-item v-if="latestIntakeForm.currentMedications" :label="t('patientDetail.intakeCurrentMedications')">
+                      <div style="white-space: pre-wrap; line-height: 1.6">{{ latestIntakeForm.currentMedications }}</div>
+                    </el-descriptions-item>
+                    <el-descriptions-item v-if="latestIntakeHistory" :label="t('patientDetail.intakeMedicalHistory')">
+                      <div style="white-space: pre-wrap; line-height: 1.6">{{ latestIntakeHistory }}</div>
+                    </el-descriptions-item>
+                    <el-descriptions-item v-if="latestIntakeForm.additionalNotes" :label="t('patientDetail.intakeAdditionalNotes')">
+                      <div style="white-space: pre-wrap; line-height: 1.6">{{ latestIntakeForm.additionalNotes }}</div>
+                    </el-descriptions-item>
+                  </template>
+                  <el-descriptions-item v-else :label="t('common.status')">
+                    {{ t('patientDetail.latestIntakeEmpty') }}
                   </el-descriptions-item>
                 </el-descriptions>
               </el-col>

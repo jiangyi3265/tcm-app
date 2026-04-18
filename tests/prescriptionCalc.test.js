@@ -100,3 +100,54 @@ test('草药换算在缺少草药库存时，不应回退匹配到粉剂库存',
   assert.equal(result.items[0].convertedUnit, 'g')
   assert.equal(result.items[0].outOfStock, true)
 })
+
+test('calculatePrescription 在传入 inventoryId 后优先保持当前库存匹配', () => {
+  const result = calculatePrescription(
+    [
+      {
+        herbName: '人参',
+        herbDictId: 'herb-rs',
+        dosage: 6,
+        unit: 'g',
+        inventoryId: 'powder-b',
+        supplierId: 'supplier-b',
+      },
+    ],
+    7,
+    'powder',
+    [
+      {
+        id: 'powder-a',
+        name: '人参',
+        herbDictId: 'herb-rs',
+        category: 'powder',
+        gramsPerPacket: 3,
+        quantity: 100,
+        pricePerUnit: 2.5,
+        supplierId: 'supplier-a',
+        supplier: '供应商A',
+        isActive: true,
+        deletedAt: null,
+      },
+      {
+        id: 'powder-b',
+        name: '人参',
+        herbDictId: 'herb-rs',
+        category: 'powder',
+        gramsPerPacket: 6,
+        quantity: 80,
+        pricePerUnit: 3.2,
+        supplierId: 'supplier-b',
+        supplier: '供应商B',
+        isActive: true,
+        deletedAt: null,
+      },
+    ],
+  )
+
+  assert.equal(result.items[0].inventoryId, 'powder-b')
+  assert.equal(result.items[0].supplierId, 'supplier-b')
+  assert.equal(result.items[0].packetsPerDose, 1)
+  assert.equal(result.items[0].convertedQty, 7)
+  assert.equal(result.items[0].subtotal, 22.4)
+})

@@ -720,6 +720,102 @@ function formatSupplierOption(candidate) {
   return formatSupplierDisplay(candidate?.supplier || 'Supplier', candidate?.gramsPerPacket)
 }
 
+const herbSelectionGuard = new WeakSet()
+const rxAutocompleteActive = ref(false)
+let rxAutocompleteIdleTimer = null
+
+function clearRxAutocompleteIdleTimer() {
+  if (!rxAutocompleteIdleTimer) return
+  clearTimeout(rxAutocompleteIdleTimer)
+  rxAutocompleteIdleTimer = null
+}
+
+function markRxAutocompleteActivity(idleMs = 800) {
+  rxAutocompleteActive.value = true
+  clearRxAutocompleteIdleTimer()
+  rxAutocompleteIdleTimer = setTimeout(() => {
+    rxAutocompleteActive.value = false
+    rxAutocompleteIdleTimer = null
+    if (hasUnsavedRxDialogChanges.value) {
+      scheduleRxAutosave()
+    }
+  }, idleMs)
+}
+
+function handleRxAutocompleteFocus() {
+  markRxAutocompleteActivity()
+}
+
+function handleRxAutocompleteBlur() {
+  markRxAutocompleteActivity(150)
+}
+
+function getPrescriptionInventoryCategory(type = rxForm.value.prescriptionType) {
+  const categoryMap = {
+    powder: 'powder',
+    raw_herbs: 'raw_herbs',
+    pills: 'pills',
+  }
+  return categoryMap[type] || 'raw_herbs'
+}
+
+function normalizeSuggestionKeyword(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function listScopedInventoryItems(category) {
+  const branchId = branchesStore.currentBranchId
+  return (inventoryStore.items || []).filter((item) => {
+    if (!item?.isActive || item?.deletedAt) return false
+    if (item.category !== category) return false
+    return !branchId || item.branchId === branchId || !item.branchId
+  })
+}
+
+function buildInventorySuggestion(item) {
+  return {
+    value: item.name,
+    source: 'inventory',
+    herbDictId: item.herbDictId || null,
+    inventoryId: item.id,
+    supplierId: item.supplierId || null,
+    supplierName: item.supplier || '',
+    stock: Number(item.quantity || 0),
+    stockUnit: item.unit || '',
+    category: item.category,
+    gramsPerPacket: item.gramsPerPacket || null,
+  }
+}
+
+function formatHerbSuggestionSecondary(item) {
+  if (item?.source === 'inventory') {
+    const supplier = item.supplierName || 'Inventory'
+    const stockText = `${item.stock ?? 0}${item.stockUnit || ''}`
+    const gramsText = item.gramsPerPacket ? ` · ${item.gramsPerPacket}g` : ''
+    return `${supplier} · ${stockText}${gramsText}`
+  }
+  return 'Herb Dict'
+}
+
+function clearRxItemInventoryBinding(row, { clearHerbDict = false } = {}) {
+  row.inventoryId = null
+  row.supplierId = null
+  row.supplierName = ''
+  row.inventoryStock = 0
+  row.stockSufficient = false
+  row.outOfStock = false
+  row.allCandidates = []
+  row.gramsPerPacket = null
+  row.packetsPerDose = null
+  row.convertedQty = rxForm.value.prescriptionType === 'none' ? null : row.convertedQty
+  row.convertedUnit = rxForm.value.prescriptionType === 'none' ? '' : row.convertedUnit
+  row.pricePerUnit = rxForm.value.prescriptionType === 'none' ? 0 : row.pricePerUnit
+  row.subtotal = rxForm.value.prescriptionType === 'none' ? 0 : row.subtotal
+  if (clearHerbDict) {
+    row.herbDictId = null
+  }
+}
+
 function hasDispensingCompleted(source = form.value) {
   if (!source) return false
   if (source.dispensingCompleted) return true
@@ -940,6 +1036,14 @@ async function waitForRxAutosaveToFinish({ ignoreErrors = false } = {}) {
 function scheduleRxAutosave() {
   clearRxAutosaveTimer()
   if (!showRxDialog.value || suspendRxAutosave.value || isReadOnly.value) return
+  if (rxAutocompleteActive.value) {
+    rxAutosaveTimer = setTimeout(() => {
+      if (hasUnsavedRxDialogChanges.value) {
+        scheduleRxAutosave()
+      }
+    }, 250)
+    return
+  }
   rxAutosaveTimer = setTimeout(async () => {
     try {
       await syncPrescriptionDraft({ silent: true })
@@ -1136,7 +1240,25 @@ function handlePrintRx(target) {
 }
 
 function addRxItem() {
-  rxForm.value.items.push({ name: '', dosage: 0, unit: 'g', category: '', guijing: '', nature: '', taste: '', pricePerUnit: 0, subtotal: 0 })
+  rxForm.value.items.push({
+    name: '',
+    herbDictId: null,
+    dosage: 0,
+    unit: 'g',
+    category: '',
+    guijing: '',
+    nature: '',
+    taste: '',
+    inventoryId: null,
+    supplierId: null,
+    supplierName: '',
+    allCandidates: [],
+    inventoryStock: 0,
+    stockSufficient: false,
+    outOfStock: false,
+    pricePerUnit: 0,
+    subtotal: 0,
+  })
 }
 
 function removeRxItem(idx) {
@@ -1211,14 +1333,26 @@ function applyFormulaToDialog(formula) {
 // Recalculate prescription dialog items
 function recalcRxItems() {
   const prescType = rxForm.value.prescriptionType || 'raw_herbs'
+  if (rxForm.value.items.length === 0) return
+  if (prescType === 'none') {
+    rxForm.value.items.forEach((item) => {
+      clearRxItemInventoryBinding(item)
+      item.convertedQty = null
+      item.convertedUnit = ''
+      item.pricePerUnit = 0
+      item.subtotal = 0
+    })
+    return
+  }
   const qty = rxForm.value.quantity || 7
-  if (prescType === 'none' || rxForm.value.items.length === 0) return
 
   const formulaItems = rxForm.value.items.map(i => ({
     herbName: i.name,
     herbDictId: i.herbDictId,
     dosage: i.dosage,
     unit: i.unit || 'g',
+    inventoryId: i.inventoryId || null,
+    supplierId: i.supplierId || null,
   }))
   const result = calculatePrescription(
     formulaItems, qty, prescType, inventoryStore.items, null,
@@ -1257,13 +1391,66 @@ function recalcRxItems() {
 }
 
 // ============ Search Helpers ============
-function queryHerbs(queryString, cb) {
-  const matches = herbDictStore.findByName(queryString)
-  cb(matches.map(h => ({ value: h.name, id: h.id })))
+function queryHerbs(row, queryString, cb) {
+  const category = getPrescriptionInventoryCategory()
+  const keyword = normalizeSuggestionKeyword(queryString || row?.name)
+  const inventorySuggestions = listScopedInventoryItems(category)
+    .filter((item) => {
+      if (!keyword) return true
+      const herb = item.herbDictId ? herbDictStore.getHerb(item.herbDictId) : null
+      const haystack = normalizeSuggestionKeyword([
+        item.name,
+        item.supplier,
+        item.alias,
+        item.aliases,
+        herb?.alias,
+        herb?.pinyin,
+      ].filter(Boolean).join(' '))
+      return haystack.includes(keyword)
+    })
+    .map(buildInventorySuggestion)
+    .slice(0, 20)
+
+  const inventoryHerbIds = new Set(inventorySuggestions.map((item) => item.herbDictId).filter(Boolean))
+  const herbMatches = keyword
+    ? herbDictStore.findByName(queryString)
+    : herbDictStore.activeHerbs.slice(0, 12)
+  const herbSuggestions = herbMatches
+    .filter((herb) => !inventoryHerbIds.has(herb.id))
+    .map((herb) => ({
+      value: herb.name,
+      source: 'herbDict',
+      herbDictId: herb.id,
+      pinyin: herb.pinyin || '',
+    }))
+    .slice(0, 12)
+
+  markRxAutocompleteActivity()
+
+  cb([...inventorySuggestions, ...herbSuggestions])
 }
 function handleHerbSelect(item, row) {
+  clearRxAutocompleteIdleTimer()
+  rxAutocompleteActive.value = false
   row.name = item.value
-  row.herbDictId = item.id
+  row.herbDictId = item.herbDictId || item.id || null
+  if (item.source === 'inventory') {
+    row.inventoryId = item.inventoryId || null
+    row.supplierId = item.supplierId || null
+    row.supplierName = item.supplierName || ''
+  } else {
+    clearRxItemInventoryBinding(row)
+  }
+  herbSelectionGuard.add(row)
+  recalcRxItems()
+}
+
+function handleHerbInputChange(row) {
+  if (herbSelectionGuard.has(row)) {
+    herbSelectionGuard.delete(row)
+    return
+  }
+  clearRxItemInventoryBinding(row, { clearHerbDict: true })
   recalcRxItems()
 }
 
@@ -3008,13 +3195,22 @@ function handleSendReport() {
             <template #default="{ row }">
               <el-autocomplete
                 v-model="row.name"
-                :fetch-suggestions="queryHerbs"
+                :fetch-suggestions="(query, cb) => queryHerbs(row, query, cb)"
                 size="small"
                 :placeholder="t('consultation.herbNamePlaceholder')"
                 @select="(item) => handleHerbSelect(item, row)"
+                @focus="handleRxAutocompleteFocus"
+                @blur="handleRxAutocompleteBlur"
                 style="width:100%"
-                @change="recalcRxItems"
-              />
+                @change="() => handleHerbInputChange(row)"
+              >
+                <template #default="{ item }">
+                  <div style="display:flex; flex-direction:column; gap:2px">
+                    <span style="font-weight:600">{{ item.value }}</span>
+                    <span style="font-size:11px; color:#888">{{ formatHerbSuggestionSecondary(item) }}</span>
+                  </div>
+                </template>
+              </el-autocomplete>
             </template>
           </el-table-column>
           <el-table-column :label="localizeMixedLabel('Dosage(g) 剂量')" width="110">

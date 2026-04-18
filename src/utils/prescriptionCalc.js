@@ -15,17 +15,28 @@
  * @param {string} category - 库存分类 'powder'|'raw_herbs'|'pills'
  * @param {Array} inventoryItems - 全部库存数据
  * @param {string|null} herbDictId - 中药字典ID（可选）
+ * @param {string|null} preferredInventoryId - 优先库存ID（可选）
  * @returns {Array} 匹配的库存条目
  */
-export function findInventoryMatches(herbName, category, inventoryItems, herbDictId = null) {
+export function findInventoryMatches(herbName, category, inventoryItems, herbDictId = null, preferredInventoryId = null) {
   if (!inventoryItems) return []
+
+  const preferredCandidate = preferredInventoryId
+    ? inventoryItems.find(
+      (i) => i.isActive && !i.deletedAt && i.id === preferredInventoryId && i.category === category,
+    ) || null
+    : null
 
   // Bug 7/10: 优先使用 herbDictId 精确匹配
   if (herbDictId) {
     const byId = inventoryItems.filter(
       (i) => i.isActive && !i.deletedAt && i.herbDictId === herbDictId && i.category === category,
     )
-    if (byId.length > 0) return byId
+    if (byId.length > 0) {
+      return preferredCandidate
+        ? [preferredCandidate, ...byId.filter((item) => item.id !== preferredCandidate.id)]
+        : byId
+    }
   }
 
   // 降级到名称匹配（兼容旧数据）
@@ -40,16 +51,23 @@ export function findInventoryMatches(herbName, category, inventoryItems, herbDic
       i.name.toLowerCase().includes(q) &&
       i.category === category,
   )
-  if (byCategory.length > 0) return byCategory
+  if (byCategory.length > 0) {
+    return preferredCandidate
+      ? [preferredCandidate, ...byCategory.filter((item) => item.id !== preferredCandidate.id)]
+      : byCategory
+  }
 
   // 仅兼容没有分类的旧数据，避免草药误匹配到粉剂/成药库存
-  return inventoryItems.filter(
+  const legacyMatches = inventoryItems.filter(
     (i) =>
       i.isActive &&
       !i.deletedAt &&
       i.name.toLowerCase().includes(q) &&
       (!i.category || String(i.category).trim() === ''),
   )
+  return preferredCandidate
+    ? [preferredCandidate, ...legacyMatches.filter((item) => item.id !== preferredCandidate.id)]
+    : legacyMatches
 }
 
 /**
@@ -58,8 +76,12 @@ export function findInventoryMatches(herbName, category, inventoryItems, herbDic
  * @param {string|null} preferredSupplierId - 优先供应商ID
  * @returns {Array} 排序后的候选项
  */
-export function sortBySupplierPreference(candidates, preferredSupplierId) {
+export function sortBySupplierPreference(candidates, preferredSupplierId, preferredInventoryId = null) {
   return [...candidates].sort((a, b) => {
+    if (preferredInventoryId) {
+      if (a.id === preferredInventoryId && b.id !== preferredInventoryId) return -1
+      if (b.id === preferredInventoryId && a.id !== preferredInventoryId) return 1
+    }
     // 优先选指定供应商
     if (preferredSupplierId) {
       if (
@@ -104,6 +126,7 @@ export function convertSingleHerb(
   prescriptionType,
   inventoryItems,
   preferredSupplierId = null,
+  preferredInventoryId = null,
 ) {
   const categoryMap = {
     powder: 'powder',
@@ -120,7 +143,11 @@ export function convertSingleHerb(
     category,
     inventoryItems,
     item.herbDictId || null,
+    preferredInventoryId,
   )
+  const preferredCandidate = preferredInventoryId
+    ? candidates.find((candidate) => candidate.id === preferredInventoryId) || null
+    : null
 
   let convertedQty, convertedUnit, pricePerUnit, subtotal
   let matched = null
@@ -136,6 +163,18 @@ export function convertSingleHerb(
         convertedUnit = '包'
         pricePerUnit = 0
         subtotal = 0
+        break
+      }
+
+      if (preferredCandidate) {
+        matched = preferredCandidate
+        sorted = sortBySupplierPreference(candidates, preferredSupplierId, preferredInventoryId)
+        const gpp = matched.gramsPerPacket || 1
+        const packetsPerDose = Math.ceil(dosagePerDose / gpp)
+        convertedQty = packetsPerDose * quantity
+        convertedUnit = '包'
+        pricePerUnit = matched?.pricePerUnit || 0
+        subtotal = convertedQty * pricePerUnit
         break
       }
 
@@ -189,7 +228,7 @@ export function convertSingleHerb(
           console.warn(`粉剂换算: ${item.herbName || item.name} 的所有库存记录缺少 gramsPerPacket 字段，使用默认值 1g/包`)
         }
         // 退回到按供应商偏好选择
-        sorted = sortBySupplierPreference(candidates, preferredSupplierId)
+        sorted = sortBySupplierPreference(candidates, preferredSupplierId, preferredInventoryId)
         matched = sorted[0]
         const gpp = matched?.gramsPerPacket || 1  // Bug 6: 兜底 1g/包
         const pPerDose = Math.ceil(dosagePerDose / gpp)
@@ -206,7 +245,7 @@ export function convertSingleHerb(
       break
     }
     case 'raw_herbs': {
-      sorted = sortBySupplierPreference(candidates, preferredSupplierId)
+      sorted = sortBySupplierPreference(candidates, preferredSupplierId, preferredInventoryId)
       matched = sorted[0] || null
       convertedQty = totalGrams
       convertedUnit = 'g'
@@ -215,7 +254,7 @@ export function convertSingleHerb(
       break
     }
     case 'pills': {
-      sorted = sortBySupplierPreference(candidates, preferredSupplierId)
+      sorted = sortBySupplierPreference(candidates, preferredSupplierId, preferredInventoryId)
       matched = sorted[0] || null
       convertedQty = item.dosage || 0
       convertedUnit = '盒'
@@ -279,7 +318,8 @@ export function calculatePrescription(
       quantity,
       prescriptionType,
       inventoryItems,
-      preferredSupplierId,
+      item?.supplierId ?? preferredSupplierId,
+      item?.inventoryId || null,
     ),
   )
 

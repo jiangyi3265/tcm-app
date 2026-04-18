@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useInventoryStore } from '../../stores/inventory'
 import { useAuthStore } from '../../stores/auth'
@@ -55,8 +55,6 @@ const herbOptions = computed(() =>
   })),
 )
 
-const HERB_TOXICITY = ['无毒', '小毒', '有毒', '大毒']
-
 function localizeInventoryValue(group, value) {
   if (!value) return value
   const key = `inventory.${group}.${value}`
@@ -85,6 +83,16 @@ function getHerbMeta(item) {
   return getInventoryHerbMeta(item, herbById)
 }
 
+function getItemToxicity(item) {
+  return getHerbMeta(item).toxicity || '无毒'
+}
+
+function formatUsageAmount(value) {
+  const amount = Number(value || 0)
+  if (!Number.isFinite(amount)) return '0'
+  return Number.isInteger(amount) ? String(amount) : amount.toFixed(2)
+}
+
 function syncHerbBinding(target, herbId) {
   const herb = herbById.value.get(herbId) || herbById.value.get(String(herbId)) || null
   return bindHerbSelection(target, herb)
@@ -94,7 +102,6 @@ const newItem = ref({
   name: '',
   herbDictId: null,
   aliases: '',
-  category: 'powder',
   unit: '包',
   quantity: 0,
   purchasePrice: 0, // 购买价格(进价)
@@ -104,6 +111,20 @@ const newItem = ref({
   gramsPerPacket: null,
   minStockLevel: 10,
 })
+
+function syncNewItemDefaults() {
+  newItem.value.unit = CATEGORY_CONFIG.value[activeTab.value]?.defaultUnit || newItem.value.unit
+  if (activeTab.value !== 'powder') {
+    newItem.value.gramsPerPacket = null
+  }
+}
+
+watch(activeTab, () => {
+  syncNewItemDefaults()
+  if (newItem.value.herbDictId) {
+    newItem.value = syncHerbBinding(newItem.value, newItem.value.herbDictId)
+  }
+}, { immediate: true })
 
 // 自动计算售价：进价 × (1 + 利润比例)
 function autoCalcSellingPrice(item) {
@@ -168,7 +189,7 @@ async function handleAddItem() {
 
 function resetNewItem() {
   newItem.value = {
-    name: '', herbDictId: null, aliases: '', category: 'powder', unit: '包', quantity: 0, purchasePrice: 0,
+    name: '', herbDictId: null, aliases: '', unit: CATEGORY_CONFIG.value[activeTab.value]?.defaultUnit || '包', quantity: 0, purchasePrice: 0,
     pricePerUnit: 0, supplierId: '', supplier: '', gramsPerPacket: null, minStockLevel: 10,
   }
 }
@@ -227,7 +248,12 @@ async function saveEdit(id) {
     if (!editForm.value.herbDictId) {
       return ElMessage.warning(t('inventory.selectHerbRequired'))
     }
-    await inventoryStore.updateItem(id, editForm.value)
+    const {
+      toxicity,
+      last30DaysUsage,
+      ...payload
+    } = editForm.value
+    await inventoryStore.updateItem(id, payload)
     editingId.value = null
     ElMessage.success(t('inventory.saved'))
   } catch (e) {
@@ -235,14 +261,8 @@ async function saveEdit(id) {
   }
 }
 
-function handleNewCategoryChange(value) {
-  newItem.value.unit = CATEGORY_CONFIG.value[value]?.defaultUnit || newItem.value.unit
-  if (newItem.value.herbDictId) {
-    newItem.value = syncHerbBinding(newItem.value, newItem.value.herbDictId)
-  }
-}
-
 function handleNewHerbChange(herbId) {
+  syncNewItemDefaults()
   newItem.value = syncHerbBinding(newItem.value, herbId)
 }
 
@@ -399,12 +419,14 @@ async function openAdjustmentHistory(item) {
                 </span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('inventory.alertLevel')" min-width="110">
+            <el-table-column :label="t('inventory.last30DaysUsage')" min-width="130">
               <template #default="{ row }">
                 <div v-if="editingId === row.id">
+                  <div style="font-size: 13px; color: #555; margin-bottom: 6px">{{ formatUsageAmount(row.last30DaysUsage) }} {{ getUnitLabel(row.unit) }}</div>
                   <el-input-number v-model="editForm.minStockLevel" :min="0" size="small" controls-position="right" style="width: 100%" />
+                  <div style="font-size: 11px; color: #888; margin-top: 4px">{{ t('inventory.alertShort') }}：{{ editForm.minStockLevel }} {{ getUnitLabel(row.unit) }}</div>
                 </div>
-                <span v-else style="font-size: 13px; color: #888">{{ row.minStockLevel }} {{ getUnitLabel(row.unit) }}</span>
+                <span v-else style="font-size: 13px; color: #888">{{ formatUsageAmount(row.last30DaysUsage) }} {{ getUnitLabel(row.unit) }}</span>
               </template>
             </el-table-column>
             <el-table-column :label="t('inventory.unitPrice')" min-width="120">
@@ -436,17 +458,11 @@ async function openAdjustmentHistory(item) {
             </el-table-column>
             <el-table-column :label="t('inventory.toxicity')" min-width="100">
               <template #default="{ row }">
-                <div v-if="editingId === row.id">
-                  <el-select v-model="editForm.toxicity" size="small" style="width: 100%">
-                    <el-option v-for="tox in HERB_TOXICITY" :key="tox" :label="localizeInventoryValue('toxicityOptions', tox)" :value="tox" />
-                  </el-select>
-                </div>
                 <el-tag
-                  v-else
-                  :type="getToxicityTagType(row.toxicity || '无毒')"
+                  :type="getToxicityTagType(getItemToxicity(editingId === row.id ? editForm : row))"
                   size="small"
                 >
-                  {{ localizeInventoryValue('toxicityOptions', row.toxicity || '无毒') }}
+                  {{ localizeInventoryValue('toxicityOptions', getItemToxicity(editingId === row.id ? editForm : row)) }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -490,9 +506,7 @@ async function openAdjustmentHistory(item) {
           </el-col>
           <el-col :span="12">
             <el-form-item :label="t('inventory.categoryLabel')">
-              <el-select v-model="newItem.category" @change="handleNewCategoryChange">
-                <el-option v-for="(c, k) in CATEGORY_CONFIG" :key="k" :label="c.label" :value="k" />
-              </el-select>
+              <el-input :model-value="CATEGORY_CONFIG[activeTab]?.label || activeTab" disabled />
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -532,7 +546,7 @@ async function openAdjustmentHistory(item) {
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col v-if="newItem.category === 'powder'" :span="12">
+          <el-col v-if="activeTab === 'powder'" :span="12">
             <el-form-item :label="t('inventory.gramsPerBag')">
               <el-input-number v-model="newItem.gramsPerPacket" :min="1" style="width:100%" />
             </el-form-item>
@@ -549,17 +563,17 @@ async function openAdjustmentHistory(item) {
 
     <!-- 药材详情对话框 -->
     <el-drawer v-model="showDetailDialog" :title="detailItem?.name" size="500px" direction="rtl">
-      <el-descriptions v-if="detailItem" :column="2" border size="small">
-        <el-descriptions-item :label="t('inventory.aliases')" :span="2">{{ detailItem.aliases || '-' }}</el-descriptions-item>
-        <el-descriptions-item :label="t('inventory.categoryLabel')">{{ CATEGORY_CONFIG[detailItem.category]?.label || detailItem.category }}</el-descriptions-item>
-        <el-descriptions-item :label="t('inventory.toxicity')">
-          <el-tag :type="getToxicityTagType(detailItem.toxicity || '无毒')" size="small">
-            {{ localizeInventoryValue('toxicityOptions', detailItem.toxicity || '无毒') }}
+        <el-descriptions v-if="detailItem" :column="2" border size="small">
+          <el-descriptions-item :label="t('inventory.aliases')" :span="2">{{ getHerbMeta(detailItem).alias || '-' }}</el-descriptions-item>
+          <el-descriptions-item :label="t('inventory.categoryLabel')">{{ CATEGORY_CONFIG[detailItem.category]?.label || detailItem.category }}</el-descriptions-item>
+          <el-descriptions-item :label="t('inventory.toxicity')">
+          <el-tag :type="getToxicityTagType(getItemToxicity(detailItem))" size="small">
+            {{ localizeInventoryValue('toxicityOptions', getItemToxicity(detailItem)) }}
           </el-tag>
         </el-descriptions-item>
-        <el-descriptions-item :label="t('inventory.nature')">{{ detailItem.nature ? localizeInventoryValue('natureOptions', detailItem.nature) : '-' }}</el-descriptions-item>
-        <el-descriptions-item :label="t('inventory.taste')">{{ normalizeArray(detailItem.taste).map((item) => localizeInventoryValue('tasteOptions', item)).join(locale === 'zh-CN' ? '、' : ', ') || '-' }}</el-descriptions-item>
-        <el-descriptions-item :label="t('inventory.channel')" :span="2">{{ normalizeArray(detailItem.guijing).map((item) => localizeInventoryValue('channelOptions', item)).join(locale === 'zh-CN' ? '、' : ', ') || '-' }}</el-descriptions-item>
+        <el-descriptions-item :label="t('inventory.nature')">{{ getHerbMeta(detailItem).nature ? localizeInventoryValue('natureOptions', getHerbMeta(detailItem).nature) : '-' }}</el-descriptions-item>
+        <el-descriptions-item :label="t('inventory.taste')">{{ getHerbMeta(detailItem).taste.map((item) => localizeInventoryValue('tasteOptions', item)).join(locale === 'zh-CN' ? '、' : ', ') || '-' }}</el-descriptions-item>
+        <el-descriptions-item :label="t('inventory.channel')" :span="2">{{ getHerbMeta(detailItem).guijing.map((item) => localizeInventoryValue('channelOptions', item)).join(locale === 'zh-CN' ? '、' : ', ') || '-' }}</el-descriptions-item>
         <el-descriptions-item :label="t('inventory.currentStock')" :span="2">
           <span :class="{ 'low-stock': detailItem.quantity <= detailItem.minStockLevel, 'out-of-stock': detailItem.quantity === 0 }">
             {{ detailItem.quantity }} {{ getUnitLabel(detailItem.unit) }}

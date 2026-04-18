@@ -74,6 +74,9 @@ export const useSettingsStore = defineStore('settings', () => {
   const rooms = ref([])
   const serviceTypes = ref({ ...SERVICE_TYPES })
   const practitionerInterval = ref(20)
+  const publicBookingAdvanceDays = ref(15)
+  const publicBookingDripWindowDays = ref(7)
+  const publicBookingDripMinutes = ref(60)
   const profitRatio = ref(1.0)
   const clinicName = ref(DEFAULT_CLINIC_NAME)
   const clinicAddress = ref('')
@@ -89,6 +92,9 @@ export const useSettingsStore = defineStore('settings', () => {
     rooms.value = normalizeRooms(data?.rooms || [])
     serviceTypes.value = normalizeServiceTypes(data?.serviceTypes || SERVICE_TYPES)
     practitionerInterval.value = data?.practitionerInterval ?? 20
+    publicBookingAdvanceDays.value = data?.publicBookingAdvanceDays ?? 15
+    publicBookingDripWindowDays.value = data?.publicBookingDripWindowDays ?? 7
+    publicBookingDripMinutes.value = data?.publicBookingDripMinutes ?? 60
     profitRatio.value = data?.profitRatio ?? 1.0
     clinicName.value = data?.clinicName || DEFAULT_CLINIC_NAME
     clinicAddress.value = data?.clinicAddress || ''
@@ -104,6 +110,9 @@ export const useSettingsStore = defineStore('settings', () => {
       rooms: rooms.value,
       serviceTypes: serviceTypes.value,
       practitionerInterval: practitionerInterval.value,
+      publicBookingAdvanceDays: publicBookingAdvanceDays.value,
+      publicBookingDripWindowDays: publicBookingDripWindowDays.value,
+      publicBookingDripMinutes: publicBookingDripMinutes.value,
       profitRatio: profitRatio.value,
       clinicName: clinicName.value,
       clinicAddress: clinicAddress.value,
@@ -187,6 +196,9 @@ export const useSettingsStore = defineStore('settings', () => {
   async function updateSettings(updates) {
     if (updates.taxRate !== undefined) taxRate.value = updates.taxRate
     if (updates.practitionerInterval !== undefined) practitionerInterval.value = updates.practitionerInterval
+    if (updates.publicBookingAdvanceDays !== undefined) publicBookingAdvanceDays.value = updates.publicBookingAdvanceDays
+    if (updates.publicBookingDripWindowDays !== undefined) publicBookingDripWindowDays.value = updates.publicBookingDripWindowDays
+    if (updates.publicBookingDripMinutes !== undefined) publicBookingDripMinutes.value = updates.publicBookingDripMinutes
     if (updates.profitRatio !== undefined) profitRatio.value = updates.profitRatio
     if (updates.clinicName !== undefined) clinicName.value = updates.clinicName
     if (updates.clinicAddress !== undefined) clinicAddress.value = updates.clinicAddress
@@ -238,6 +250,9 @@ export const useSettingsStore = defineStore('settings', () => {
     activeRooms,
     serviceTypes,
     practitionerInterval,
+    publicBookingAdvanceDays,
+    publicBookingDripWindowDays,
+    publicBookingDripMinutes,
     practitionerIntervals,
     profitRatio,
     clinicName,

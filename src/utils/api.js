@@ -206,7 +206,10 @@ export const consultationsApi = {
 }
 
 export const inventoryApi = {
-  list() { return request('/api/inventory') },
+  list(options = {}) {
+    const params = buildQuery({ includeDeleted: options.includeDeleted ? true : undefined })
+    return request(`/api/inventory${params}`)
+  },
   create(data) { return request('/api/inventory', { method: 'POST', body: data }) },
   update(id, data) { return request(`/api/inventory/${id}`, { method: 'PUT', body: data }) },
   softDelete(id) { return request(`/api/inventory/${id}/delete`, { method: 'PATCH' }) },

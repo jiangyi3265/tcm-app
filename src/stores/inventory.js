@@ -56,7 +56,7 @@ export const useInventoryStore = defineStore('inventory', () => {
     items.value.push(created)
     saveState()
     // 从后端重新刷新确保数据一致性
-    refreshFromApi().catch(() => {})
+    await refreshFromApi()
     return created
   }
 
@@ -67,7 +67,7 @@ export const useInventoryStore = defineStore('inventory', () => {
       items.value[idx] = updated
       saveState()
       // 从后端重新刷新确保数据一致性
-      refreshFromApi().catch(() => {})
+      await refreshFromApi()
       return updated
     }
     return null
@@ -78,7 +78,7 @@ export const useInventoryStore = defineStore('inventory', () => {
     const idx = items.value.findIndex((i) => i.id === id)
     if (idx !== -1) items.value[idx] = updated
     saveState()
-    refreshFromApi().catch(() => {})
+    await refreshFromApi()
   }
 
   async function restoreItem(id) {
@@ -86,7 +86,7 @@ export const useInventoryStore = defineStore('inventory', () => {
     const idx = items.value.findIndex((i) => i.id === id)
     if (idx !== -1) items.value[idx] = updated
     saveState()
-    refreshFromApi().catch(() => {})
+    await refreshFromApi()
   }
 
   async function physicalDeleteItem(id) {
@@ -109,13 +109,13 @@ export const useInventoryStore = defineStore('inventory', () => {
     const updated = await inventoryApi.adjust(id, delta, reason)
     items.value[idx] = updated
     saveState()
-    refreshFromApi().catch(() => {})
+    await refreshFromApi()
     return true
   }
 
   async function refreshFromApi() {
     try {
-      const list = await inventoryApi.list()
+      const list = await inventoryApi.list({ includeDeleted: true })
       items.value = list
       saveState()
     } catch (e) {
