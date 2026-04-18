@@ -25,6 +25,7 @@ const { t, te } = useI18n()
 
 const SLOT_MINUTES = 10
 const INTERNAL_VIEW_DAYS = 7
+const VISIBLE_DAYS = 3
 const WEEKDAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
 const WEEKDAY_LABELS = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' }
 
@@ -43,11 +44,42 @@ const canEditAppointments = computed(() => hasPermission(roles.value, 'appointme
 
 const currentDate = ref(new Date())
 const viewMode = ref('calendar')
+// pageOffset tracks which 3-day page within the 7-day window: 0→days 0-2, 1→days 3-5, 2→days 6-8 (wraps)
+const pageOffset = ref(0)
 const weekStart = computed(() => dayjs(currentDate.value).startOf('day'))
+// Full 7-day window for data fetching
 const weekDays = computed(() => Array.from({ length: INTERNAL_VIEW_DAYS }, (_, index) => weekStart.value.add(index, 'day').toDate()))
-function prevWeek() { currentDate.value = dayjs(currentDate.value).subtract(INTERNAL_VIEW_DAYS, 'day').toDate() }
-function nextWeek() { currentDate.value = dayjs(currentDate.value).add(INTERNAL_VIEW_DAYS, 'day').toDate() }
-function goToday() { currentDate.value = new Date() }
+// Visible 3-day slice that cycles: page0=day0-2, page1=day3-5, page2=day6 + next week day0-1
+const visibleDays = computed(() => {
+  const startIdx = pageOffset.value * VISIBLE_DAYS
+  return Array.from({ length: VISIBLE_DAYS }, (_, i) => {
+    const idx = startIdx + i
+    // If idx goes beyond 6, wrap into next week
+    return weekStart.value.add(idx, 'day').toDate()
+  })
+})
+function prevPage() {
+  if (pageOffset.value > 0) {
+    pageOffset.value--
+  } else {
+    // Go to previous 7-day window, last page
+    currentDate.value = dayjs(currentDate.value).subtract(INTERNAL_VIEW_DAYS, 'day').toDate()
+    pageOffset.value = Math.ceil(INTERNAL_VIEW_DAYS / VISIBLE_DAYS) - 1
+  }
+}
+function nextPage() {
+  const maxPage = Math.ceil(INTERNAL_VIEW_DAYS / VISIBLE_DAYS) - 1
+  if (pageOffset.value < maxPage) {
+    pageOffset.value++
+  } else {
+    // Go to next 7-day window, first page
+    currentDate.value = dayjs(currentDate.value).add(INTERNAL_VIEW_DAYS, 'day').toDate()
+    pageOffset.value = 0
+  }
+}
+function prevWeek() { currentDate.value = dayjs(currentDate.value).subtract(INTERNAL_VIEW_DAYS, 'day').toDate(); pageOffset.value = 0 }
+function nextWeek() { currentDate.value = dayjs(currentDate.value).add(INTERNAL_VIEW_DAYS, 'day').toDate(); pageOffset.value = 0 }
+function goToday() { currentDate.value = new Date(); pageOffset.value = 0 }
 function isToday(date) { return dayjs(date).isSame(dayjs(), 'day') }
 
 function toMinutes(timeText) {
@@ -164,7 +196,8 @@ function isWorkingSlot(date, totalMinutes) {
 
 const weekAppointments = computed(() => {
   const start = weekStart.value.startOf('day')
-  const end = weekStart.value.add(INTERNAL_VIEW_DAYS - 1, 'day').endOf('day')
+  // Extend end to cover wrap-around days when on last page (day 6 + 2 extra days)
+  const end = weekStart.value.add(INTERNAL_VIEW_DAYS + VISIBLE_DAYS - 1, 'day').endOf('day')
   return appointmentsStore.getBranchAppointments(branchesStore.currentBranchId)
     .filter((appointment) => appointment.status !== 'cancelled')
     .filter((appointment) => {
@@ -328,11 +361,9 @@ watch([() => newAppt.value.serviceType, practitionerOptions, filteredRooms], () 
     newAppt.value.roomId = ''
     return
   }
-  const rooms = filteredRooms.value
-  if (rooms.length === 0) return
-  if (!newAppt.value.roomId || !rooms.some((r) => String(r.id) === String(newAppt.value.roomId))) {
-    newAppt.value.roomId = rooms[0].id
-  }
+  // 诊室由后端自动分配，前端不再固定选择
+  // 清空 roomId 让后端在所有符合条件的诊室中查找
+  newAppt.value.roomId = ''
 })
 
 function openCreateDialog({ date, practitionerId, preferredStartTime } = {}) {
@@ -413,7 +444,7 @@ async function loadAvailability() {
   availabilityRequestId += 1
   const requestId = availabilityRequestId
 
-  if (!newAppt.value.date || !newAppt.value.serviceType || (requiresRoomSelection.value && !newAppt.value.roomId)) {
+  if (!newAppt.value.date || !newAppt.value.serviceType) {
     availabilityState.value = { slots: [], duration: Number(selectedServiceConfig.value?.duration || 0) }
     selectedSlotValue.value = ''
     return
@@ -425,7 +456,7 @@ async function loadAvailability() {
       date: newAppt.value.date,
       serviceType: newAppt.value.serviceType,
       practitionerId: newAppt.value.practitionerId || null,
-      roomId: requiresRoomSelection.value ? newAppt.value.roomId : null,
+      roomId: null,
       excludeId: isEditingAppointment.value ? editingAppointmentId.value : null,
     })
     if (requestId !== availabilityRequestId) return
@@ -465,7 +496,6 @@ async function createAppointment() {
   if (!newAppt.value.patientId) return ElMessage.warning(t('appointments.selectPatient'))
   if (!newAppt.value.practitionerId) return ElMessage.warning('请选择医师')
   if (!newAppt.value.serviceType) return ElMessage.warning(t('appointments.selectServiceType'))
-  if (requiresRoomSelection.value && !newAppt.value.roomId) return ElMessage.warning(t('appointments.selectRoomFirst'))
   if (!selectedAvailabilitySlot.value) {
     return ElMessage.warning(availabilitySlots.value.length ? t('appointments.selectStartTime') : t('appointments.noAvailableSlots'))
   }
@@ -474,7 +504,7 @@ async function createAppointment() {
     const created = await appointmentsStore.createAppointment({
       ...newAppt.value,
       practitionerId: newAppt.value.practitionerId || selectedAvailabilitySlot.value.assignedPractitionerId || null,
-      roomId: requiresRoomSelection.value ? newAppt.value.roomId : null,
+      roomId: selectedAvailabilitySlot.value.roomId || newAppt.value.roomId || null,
       startTime: selectedAvailabilitySlot.value.startTime,
       endTime: selectedAvailabilitySlot.value.endTime,
       branchId: branchesStore.currentBranchId || null,
@@ -495,7 +525,6 @@ async function submitAppointment() {
   if (!newAppt.value.patientId) return ElMessage.warning(t('appointments.selectPatient'))
   if (!newAppt.value.practitionerId) return ElMessage.warning('请选择医师')
   if (!newAppt.value.serviceType) return ElMessage.warning(t('appointments.selectServiceType'))
-  if (requiresRoomSelection.value && !newAppt.value.roomId) return ElMessage.warning(t('appointments.selectRoomFirst'))
   if (!selectedAvailabilitySlot.value) {
     return ElMessage.warning(availabilitySlots.value.length ? t('appointments.selectStartTime') : t('appointments.noAvailableSlots'))
   }
@@ -503,7 +532,7 @@ async function submitAppointment() {
   const payload = {
     ...newAppt.value,
     practitionerId: newAppt.value.practitionerId || selectedAvailabilitySlot.value.assignedPractitionerId || null,
-    roomId: requiresRoomSelection.value ? newAppt.value.roomId : null,
+    roomId: selectedAvailabilitySlot.value.roomId || newAppt.value.roomId || null,
     startTime: selectedAvailabilitySlot.value.startTime,
     endTime: selectedAvailabilitySlot.value.endTime,
     branchId: branchesStore.currentBranchId || null,
@@ -633,9 +662,9 @@ function getAppointmentBlockStyle(block) {
     <div class="appt-toolbar">
       <div class="toolbar-left">
         <el-button size="small" @click="goToday">{{ t('appointments.today') }}</el-button>
-        <el-button circle size="small" :icon="'ArrowLeft'" @click="prevWeek" />
-        <el-button circle size="small" :icon="'ArrowRight'" @click="nextWeek" />
-        <span class="week-label">{{ formatDate(weekDays[0]) }} - {{ formatDate(weekDays[weekDays.length - 1]) }}</span>
+        <el-button circle size="small" :icon="'ArrowLeft'" @click="prevPage" />
+        <el-button circle size="small" :icon="'ArrowRight'" @click="nextPage" />
+        <span class="week-label">{{ formatDate(visibleDays[0]) }} – {{ formatDate(visibleDays[visibleDays.length - 1]) }}</span>
       </div>
       <div class="toolbar-right">
         <el-select v-model="filterPractitioner" clearable size="small" style="width:180px" :placeholder="t('appointments.allPractitioners')">
@@ -677,7 +706,7 @@ function getAppointmentBlockStyle(block) {
         <div class="schedule-grid" :style="{ '--cal-height': getTotalCalendarHeight() + 'px' }">
           <!-- Header row -->
           <div class="sg-header sg-time-col">{{ t('appointments.timeAxis') }}</div>
-          <div v-for="day in weekDays" :key="'h'+day" class="sg-header" :class="{ today: isToday(day) }">
+          <div v-for="day in visibleDays" :key="'h'+day" class="sg-header" :class="{ today: isToday(day) }">
             <div>{{ dayjs(day).format('ddd') }}</div>
             <div>{{ dayjs(day).format('MM-DD') }}</div>
           </div>
@@ -693,7 +722,7 @@ function getAppointmentBlockStyle(block) {
 
             <!-- Day columns -->
             <div
-              v-for="day in weekDays"
+              v-for="day in visibleDays"
               :key="'d'+day"
               class="sg-day-col"
               :style="{ height: getTotalCalendarHeight() + 'px' }"

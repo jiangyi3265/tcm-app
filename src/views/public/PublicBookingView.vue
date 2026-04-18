@@ -73,6 +73,7 @@ function normalizeServiceTypes(source) {
         roomRequired: Boolean(item.roomRequired ?? fallback.roomRequired),
       }
     })
+    .filter((item) => item.publicVisible !== false)
 }
 
 function alignWeekStart(value) {

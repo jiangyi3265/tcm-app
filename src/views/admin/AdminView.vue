@@ -107,6 +107,7 @@ const showAddUserDialog = ref(false)
 const newUser = ref({ name: '', email: '', password: '', roles: ['practitioner'], phone: '', color: PRACTITIONER_COLORS[0], regulatoryBody: '', registrationNumber: '', overlap1: 20, overlap2: 10 })
 
 const APPOINTMENT_INTERVAL_PRESETS = [10, 20, 30, 40, 50, 60]
+const PRACTITIONER_TIME_PRESETS = [10, 20, 30, 40, 50, 60]
 
 function resolveInterval(raw, user) {
   if (raw === 'overlap1') return Number(user?.overlap1 ?? 20) || 20
@@ -457,10 +458,12 @@ function startEditService(key) {
 }
 
 async function saveServiceEdit() {
+  const ptVal = serviceEditForm.value.practitionerTime
+  const practitionerTime = (ptVal === 'overlap1' || ptVal === 'overlap2') ? ptVal : Number(ptVal)
   await settingsStore.updateServiceType(editingServiceKey.value, {
     defaultPrice: Number(serviceEditForm.value.defaultPrice),
     duration: Number(serviceEditForm.value.duration),
-    practitionerTime: Number(serviceEditForm.value.practitionerTime),
+    practitionerTime,
     roomRequired: Boolean(serviceEditForm.value.roomRequired),
     requiredTag: serviceEditForm.value.requiredTag || '',
     publicVisible: Boolean(serviceEditForm.value.publicVisible),
@@ -1330,12 +1333,16 @@ async function deleteTemplate(tmpl) {
               <span v-else>{{ row.duration }}</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('admin.practitionerTime')" width="150">
+          <el-table-column :label="t('admin.practitionerTime')" width="180">
             <template #default="{ row }">
               <div v-if="editingServiceKey === row.key">
-                <el-input-number v-model="serviceEditForm.practitionerTime" :min="5" size="small" style="width: 90px" />
+                <el-select v-model="serviceEditForm.practitionerTime" size="small" style="width: 150px">
+                  <el-option v-for="n in PRACTITIONER_TIME_PRESETS" :key="n" :label="n + ' min'" :value="n" />
+                  <el-option label="overlap1(首诊)" value="overlap1" />
+                  <el-option label="overlap2(复诊)" value="overlap2" />
+                </el-select>
               </div>
-              <span v-else>{{ row.practitionerTime }}</span>
+              <span v-else>{{ row.practitionerTime === 'overlap1' ? 'overlap1(首诊)' : row.practitionerTime === 'overlap2' ? 'overlap2(复诊)' : row.practitionerTime + ' min' }}</span>
             </template>
           </el-table-column>
           <el-table-column :label="t('admin.defaultPrice')" width="140">
