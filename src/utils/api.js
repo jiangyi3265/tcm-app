@@ -258,6 +258,9 @@ export const settingsApi = {
   updateServiceType(key, data) {
     return request(`/api/settings/service-types/${key}`, { method: 'PUT', body: data })
   },
+  addServiceType(data) {
+    return request('/api/settings/service-types', { method: 'POST', body: data })
+  },
   addPriceList(data) { return request('/api/settings/price-lists', { method: 'POST', body: data }) },
   updatePriceList(id, data) {
     return request(`/api/settings/price-lists/${id}`, { method: 'PUT', body: data })
@@ -416,10 +419,10 @@ export const consentPublicApi = {
   getInfo(token) {
     return request(`/api/consent/${token}`, { auth: false })
   },
-  sign(token, signatureName) {
+  sign(token, signatureName, sectionAcknowledgements = {}) {
     return request(`/api/consent/${token}/sign`, {
       method: 'POST',
-      body: { signatureName },
+      body: { signatureName, sectionAcknowledgements },
       auth: false,
     })
   },
@@ -433,6 +436,12 @@ export const intakePublicApi = {
     return request(`/api/intake/${token}/submit`, {
       method: 'POST',
       body: formData,
+      auth: false,
+    })
+  },
+  cancel(token) {
+    return request(`/api/intake/${token}/cancel`, {
+      method: 'POST',
       auth: false,
     })
   },
@@ -450,6 +459,16 @@ export const publicBookingApi = {
   },
   create(data) {
     return request('/api/public-booking', {
+      method: 'POST',
+      body: data,
+      auth: false,
+    })
+  },
+  manageInfo(token) {
+    return request(`/api/public-booking/manage/${token}`, { auth: false })
+  },
+  cancel(token, data = {}) {
+    return request(`/api/public-booking/manage/${token}/cancel`, {
       method: 'POST',
       body: data,
       auth: false,

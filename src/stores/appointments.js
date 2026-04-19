@@ -74,7 +74,7 @@ export const useAppointmentsStore = defineStore('appointments', () => {
 
   async function createAppointment(data) {
     const newAppt = {
-      patientId: data.patientId,
+      patientId: data.patientId || null,
       practitionerId: data.practitionerId || null,
       roomId: data.roomId || null,
       serviceType: data.serviceType,
@@ -88,6 +88,20 @@ export const useAppointmentsStore = defineStore('appointments', () => {
     }
     const created = await appointmentsApi.create(newAppt)
     return upsertAppointment(created)
+  }
+
+  async function createTimeBlock({ practitionerId, startTime, endTime, reason, branchId }) {
+    return createAppointment({
+      patientId: null,
+      practitionerId,
+      roomId: null,
+      serviceType: 'time_block',
+      startTime,
+      endTime,
+      status: 'blocked',
+      notes: reason || '',
+      branchId: branchId || null,
+    })
   }
 
   async function updateAppointment(id, updates) {
@@ -151,6 +165,7 @@ export const useAppointmentsStore = defineStore('appointments', () => {
     getAvailability,
     getBranchAppointments,
     createAppointment,
+    createTimeBlock,
     updateAppointment,
     cancelAppointment,
     confirmAppointment,

@@ -121,7 +121,7 @@ export const useAuthStore = defineStore('auth', () => {
     const updated = await usersApi.update(id, updates)
     const merged = { ...(updates || {}), ...(updated || {}) }
     // Preserve UI-only fields the backend may strip (color/overlap1/overlap2/regulatoryBody/registrationNumber)
-    ;['color', 'overlap1', 'overlap2', 'regulatoryBody', 'registrationNumber'].forEach((key) => {
+    ;['color', 'overlap1', 'overlap2', 'regulatoryBody', 'registrationNumber', 'dripEnabled'].forEach((key) => {
       if (updates && Object.prototype.hasOwnProperty.call(updates, key) && (merged[key] === undefined || merged[key] === null)) {
         merged[key] = updates[key]
       }

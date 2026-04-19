@@ -151,6 +151,7 @@ export default {
     confirmed: 'Confirmed',
     completed: 'Completed',
     cancelled: 'Cancelled',
+    blocked: 'Time Block',
   },
 
   // ── Consultation Status ──
@@ -577,6 +578,8 @@ export default {
     successTime: 'Appointment time: {time}',
     successPractitioner: 'Practitioner: {name}',
     bookAnother: 'Book Another',
+    copyLink: 'Copy Link',
+    linkCopied: 'Booking link copied to clipboard',
   },
 
   publicIntake: {
@@ -607,6 +610,11 @@ export default {
     historyTitle: 'History & Background',
     submitting: 'Submitting...',
     submit: 'Submit Intake Form',
+    cancelAppointment: 'Cancel This Appointment',
+    cancelling: 'Cancelling...',
+    cancelFailed: 'Failed to cancel appointment',
+    cancelledTitle: 'Appointment Cancelled',
+    cancelledDesc: 'This appointment has been cancelled. Future reminder and follow-up emails will stop.',
     summaryFields: {
       allergiesLabel: 'Allergies',
       allergiesPlaceholder: 'Drug, food, or other allergies (enter "none" if not applicable)',
@@ -648,6 +656,25 @@ export default {
       pathologicalChangesLabel: 'Pathological Changes',
       pathologicalChangesPlaceholder: 'Add palpation findings, tenderness, or abnormal locations',
     },
+  },
+
+  publicManage: {
+    pageTitle: 'Manage Appointment',
+    pageSubtitle: 'Review the booking details below and cancel the appointment if needed.',
+    loading: 'Loading...',
+    loadFailed: 'Unable to load appointment information',
+    invalidTitle: 'Unable to process this request',
+    patientLabel: 'Patient',
+    timeLabel: 'Appointment Time',
+    serviceLabel: 'Service',
+    practitionerLabel: 'Practitioner',
+    roomLabel: 'Room',
+    addressLabel: 'Clinic Address',
+    cancelButton: 'Cancel Appointment',
+    cancelling: 'Cancelling...',
+    cancelFailed: 'Failed to cancel appointment',
+    cancelledTitle: 'Appointment Cancelled',
+    cancelledDesc: 'This appointment has been cancelled and no further reminder emails will be sent.',
   },
 
   publicConsent: {
@@ -1236,6 +1263,8 @@ export default {
     profileRegulatoryBodyPh: 'e.g., CTCMPAO',
     profileRegistrationNo: 'Organization / Registration No.',
     profileRegistrationNoPh: 'e.g., 6995',
+    profileDripEnabled: 'Drip Scheduling',
+    profileDripEnabledHint: 'When enabled, only release time slots near existing appointments for the next 7 days',
     profilePractitionerSortOrder: 'Auto-assignment Priority',
     profileServiceScope: 'Authorized Services',
     profileServiceScopePh: 'Leave empty to allow all services',

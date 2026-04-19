@@ -38,6 +38,42 @@ const isApprenticeReadonly = computed(() => roles.value.includes('apprentice'))
 
 const patientId = route.params.id
 const patient = computed(() => patientsStore.getPatient(patientId))
+const PUBLIC_LINK_STORAGE_PREFIX = 'patient_public_links_'
+
+function getPublicBaseUrl() {
+  return `${window.location.origin.replace(/\/$/, '')}/`
+}
+
+function loadStoredPublicLinks() {
+  try {
+    const raw = localStorage.getItem(`${PUBLIC_LINK_STORAGE_PREFIX}${patientId}`)
+    if (!raw) return { consent: '', intake: '' }
+    const parsed = JSON.parse(raw)
+    return {
+      consent: parsed?.consent || '',
+      intake: parsed?.intake || '',
+    }
+  } catch {
+    return { consent: '', intake: '' }
+  }
+}
+
+function persistPublicLinks(links) {
+  try {
+    localStorage.setItem(`${PUBLIC_LINK_STORAGE_PREFIX}${patientId}`, JSON.stringify({
+      consent: links?.consent || '',
+      intake: links?.intake || '',
+    }))
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function clearStoredConsentLink() {
+  publicLinks.value.consent = ''
+  persistPublicLinks(publicLinks.value)
+}
+
 const consultations = computed(() =>
   filterAccessibleConsultations(
     roles.value,
@@ -46,6 +82,24 @@ const consultations = computed(() =>
   ),
 )
 const practitioners = computed(() => authStore.getPractitioners())
+const publicLinks = ref(loadStoredPublicLinks())
+const patientAppointments = computed(() => appointmentsStore.getPatientAppointments(patientId))
+const latestManageAppointment = computed(() => {
+  const activeAppointments = patientAppointments.value.filter(item => item?.manageToken)
+  return activeAppointments[0] || null
+})
+const consentPublicLink = computed(() => publicLinks.value.consent || '')
+const intakePublicLink = computed(() => {
+  if (patient.value?.intakeToken) {
+    return `${getPublicBaseUrl()}intake/${patient.value.intakeToken}`
+  }
+  return publicLinks.value.intake || ''
+})
+const managePublicLink = computed(() => {
+  const token = latestManageAppointment.value?.manageToken
+  if (!token) return ''
+  return `${getPublicBaseUrl()}manage/${token}`
+})
 const latestIntakeForm = computed(() => {
   const formData = patient.value?.latestIntakeFormData
   return formData && typeof formData === 'object' && !Array.isArray(formData) ? formData : {}
@@ -86,13 +140,28 @@ const firstConsultation = computed(() => {
     return new Date(a.createdAt || 0) - new Date(b.createdAt || 0)
   })[0] || null
 })
+
+function getConsultationHistoryText(consultationRecord) {
+  return consultationRecord?.historyAndMedicationSnapshot
+    || consultationRecord?.historyAndMedication
+    || ''
+}
+
 const consultationDrivenHistory = computed(() => {
-  return firstConsultation.value?.historyAndMedicationSnapshot
-    || firstConsultation.value?.historyAndMedication
+  if (firstConsultation.value) {
+    const firstConsultText = getConsultationHistoryText(firstConsultation.value)
+    if (firstConsultText) return firstConsultText
+  }
+  return patient.value?.historyAndMedicationSnapshot
     || patient.value?.historyAndMedication
     || ''
 })
-const consultationDrivenHistoryDate = computed(() => firstConsultation.value?.date || '')
+const consultationDrivenHistoryDate = computed(() => {
+  return firstConsultation.value?.date
+    || patient.value?.historyAndMedicationSourceConsultDate
+    || patient.value?.historySourceConsultDate
+    || ''
+})
 const hasConsultationDrivenHistory = computed(() => !!firstConsultation.value)
 
 const activeTab = ref('summary')
@@ -100,6 +169,12 @@ const activeTab = ref('summary')
 watch(isApprenticeReadonly, (readonly) => {
   if (readonly && activeTab.value !== 'consultations') {
     activeTab.value = 'consultations'
+  }
+}, { immediate: true })
+
+watch(() => patient.value?.consentSigned, (signed) => {
+  if (signed) {
+    clearStoredConsentLink()
   }
 }, { immediate: true })
 
@@ -300,6 +375,10 @@ async function sendConsentByEmail() {
       clinicName: settingsStore.clinicName || '',
       appBaseUrl: window.location.origin,
     })
+    if (res?.publicLink) {
+      publicLinks.value.consent = res.publicLink
+      persistPublicLinks(publicLinks.value)
+    }
     if (res?.sent === false) {
       ElMessage.warning(res.message || t('patientDetail.consentEmailFailed'))
     } else {
@@ -325,6 +404,10 @@ async function sendIntakeByEmail() {
       clinicName: settingsStore.clinicName || '',
       appBaseUrl: window.location.origin,
     })
+    if (res?.publicLink) {
+      publicLinks.value.intake = res.publicLink
+      persistPublicLinks(publicLinks.value)
+    }
     if (res?.sent === false) {
       ElMessage.warning(res.message || t('patientDetail.intakeEmailFailed'))
     } else {
@@ -334,6 +417,19 @@ async function sendIntakeByEmail() {
     ElMessage.error(e.message || t('patientDetail.intakeEmailFailed'))
   } finally {
     sendingIntakeEmail.value = false
+  }
+}
+
+async function copyPublicLink(link, label) {
+  if (!link) {
+    ElMessage.warning(`${label}链接暂不可用`)
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(link)
+    ElMessage.success(`${label}链接已复制`)
+  } catch {
+    ElMessage.error(`${label}链接复制失败`)
   }
 }
 
@@ -656,6 +752,27 @@ const fileTree = computed(() => {
                     <el-button size="small" type="warning" plain :loading="sendingIntakeEmail" @click="sendIntakeByEmail">
                       <el-icon><EditPen /></el-icon> 发送问诊单
                     </el-button>
+                  </div>
+                  <div style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed #eee; display: flex; flex-direction: column; gap: 8px;">
+                    <div style="font-size: 12px; color: #888;">公开链接</div>
+                    <div v-if="!patient.consentSigned && consentPublicLink" style="display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap;">
+                      <span style="min-width: 88px; font-size: 12px; color: #555;">知情同意书</span>
+                      <el-text style="flex:1; word-break: break-all;">{{ consentPublicLink }}</el-text>
+                      <el-button size="small" text type="primary" @click="copyPublicLink(consentPublicLink, '知情同意书')">复制</el-button>
+                    </div>
+                    <div v-if="intakePublicLink" style="display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap;">
+                      <span style="min-width: 88px; font-size: 12px; color: #555;">首诊问询</span>
+                      <el-text style="flex:1; word-break: break-all;">{{ intakePublicLink }}</el-text>
+                      <el-button size="small" text type="primary" @click="copyPublicLink(intakePublicLink, '首诊问询')">复制</el-button>
+                    </div>
+                    <div v-if="managePublicLink" style="display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap;">
+                      <span style="min-width: 88px; font-size: 12px; color: #555;">预约管理</span>
+                      <el-text style="flex:1; word-break: break-all;">{{ managePublicLink }}</el-text>
+                      <el-button size="small" text type="primary" @click="copyPublicLink(managePublicLink, '预约管理')">复制</el-button>
+                    </div>
+                    <div v-if="!consentPublicLink && !intakePublicLink && !managePublicLink" style="font-size: 12px; color: #bbb;">
+                      暂无可显示链接。发送邮件后会显示对应公开链接。
+                    </div>
                   </div>
                 </el-card>
               </el-col>

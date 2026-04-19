@@ -34,6 +34,7 @@ import {
 import { localizeMixedText } from '../../utils/localizeMixedText'
 import {
   getActivePrescriptions,
+  getBillablePrescriptions,
   getBillablePrescriptionTotal,
   getLatestPaymentTime,
   getOutstandingAmount,
@@ -1506,25 +1507,22 @@ function removeService(i) { form.value.services.splice(i, 1) }
 
 // Aggregate items from the selected price list, or all active price lists when none is selected.
 const priceListServiceOptions = computed(() => {
-  const lists = resolveSelectedPriceLists()
-  const multipleLists = lists.length > 1
   const options = []
-  for (const pl of lists) {
-    for (const [index, item] of (pl.items || []).entries()) {
-      const name = String(item?.name || '').trim()
-      if (!name) continue
-      if (!isAuthorizedPriceListItem(name)) continue
-      const optionKey = `${pl.id || pl.name || 'price-list'}::${index}::${name}`
-      options.push({
-        key: optionKey,
-        value: optionKey,
-        name,
-        price: Number(item?.price || 0),
-        taxable: item?.taxable !== false,
-        priceListName: pl.name || '',
-        showSource: multipleLists,
-      })
-    }
+  const serviceTypes = settingsStore.serviceTypes || {}
+  for (const [key, config] of Object.entries(serviceTypes)) {
+    if (!config || config.pricingVisible === false) continue
+    const name = String(config.label || key || '').trim()
+    if (!name) continue
+    if (!isAuthorizedPriceListItem(name)) continue
+    options.push({
+      key,
+      value: key,
+      name,
+      price: Number(config.defaultPrice || 0),
+      taxable: config.taxable !== false,
+      priceListName: '',
+      showSource: false,
+    })
   }
   return options
 })
@@ -1582,6 +1580,17 @@ const discountFactor = computed(() => {
 const consultationFeeTax = computed(() => form.value.consultationFeeTaxable !== false ? (form.value.consultationFee || 0) * effectiveTaxRate.value : 0)
 const taxAmount = computed(() => (totalServiceTax.value + consultationFeeTax.value) * discountFactor.value)
 const totalAmount = computed(() => totalWithoutTax.value + taxAmount.value)
+
+const invoicePractitioner = computed(() =>
+  authStore.getUserById(form.value.practitionerId) || authStore.currentUser,
+)
+const patientFullAddress = computed(() => {
+  const p = patient.value
+  if (!p) return ''
+  const parts = [p.addressStreet || p.address, p.addressCity, p.addressState, p.addressPostal].filter(Boolean)
+  return parts.join(', ')
+})
+const billableRxForInvoice = computed(() => getBillablePrescriptions(form.value))
 
 // ============ Save / Finalize ============
 async function saveDraft() {
@@ -2937,7 +2946,10 @@ function handleSendReport() {
               <div>
                 <strong>{{ settingsStore.clinicName }}</strong><br>
                 {{ settingsStore.clinicAddress }}<br>
-                {{ settingsStore.clinicPhone }}
+                {{ settingsStore.clinicPhone }}<br>
+                <template v-if="invoicePractitioner?.regulatoryBody || invoicePractitioner?.registrationNumber">
+                  {{ invoicePractitioner.regulatoryBody }}<span v-if="invoicePractitioner.regulatoryBody && invoicePractitioner.registrationNumber"> # </span>{{ invoicePractitioner.registrationNumber }}
+                </template>
               </div>
               <div class="pdf-meta-right">
                 <div>INVOICE # {{ form.consultationId }}</div>
@@ -2948,6 +2960,9 @@ function handleSendReport() {
               <strong>BILL TO:</strong> {{ patient.name }}
               &nbsp;|&nbsp; {{ patient.emails?.[0] }}
               &nbsp;|&nbsp; {{ patient.mobilePhone || patient.phone }}
+              <template v-if="patientFullAddress">
+                <br>{{ patientFullAddress }}
+              </template>
             </div>
             <table class="pdf-items">
               <thead>
@@ -2968,6 +2983,15 @@ function handleSendReport() {
                   <td>{{ cs }}{{ form.consultationFee.toFixed(2) }}</td>
                   <td>{{ form.consultationFeeTaxable !== false ? cs + consultationFeeTax.toFixed(2) : '-' }}</td>
                 </tr>
+                <template v-if="form.includeRxAmount">
+                  <tr v-for="(rx, ri) in billableRxForInvoice" :key="'rx-'+ri">
+                    <td>{{ rx.quantity || 1 }}</td>
+                    <td>{{ (rx.formulaName || rx.prescriptionType || 'PRESCRIPTION').toUpperCase() }}</td>
+                    <td>{{ cs }}{{ (rx.perDoseSubtotal || 0).toFixed(2) }}</td>
+                    <td>{{ cs }}{{ (rx.subtotal || 0).toFixed(2) }}</td>
+                    <td>-</td>
+                  </tr>
+                </template>
               </tbody>
             </table>
             <div class="pdf-totals">

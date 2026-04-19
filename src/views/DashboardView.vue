@@ -127,6 +127,7 @@ const STATUS_MAP = {
   confirmed: { type: 'success' },
   completed: { type: '' },
   cancelled: { type: 'danger' },
+  blocked: { type: 'info' },
 }
 
 function getConsultStatusType(consultation) {
@@ -206,15 +207,16 @@ function getConsultStatusType(consultation) {
             v-for="appt in todayApptWithPatient"
             :key="appt.id"
             class="appt-item"
-            @click="goToPatient(appt.patientId)"
+            @click="appt.patientId ? goToPatient(appt.patientId) : null"
+            :style="{ cursor: appt.patientId ? 'pointer' : 'default' }"
           >
             <div class="appt-time">
               <span>{{ formatTime(appt.startTime) }}</span>
               <span class="appt-end">- {{ formatTime(appt.endTime) }}</span>
             </div>
             <div class="appt-info">
-              <div class="appt-name">{{ appt.patient?.name }}</div>
-              <div class="appt-service">{{ appt.serviceLabel }} · {{ appt.practitioner?.name }}</div>
+              <div class="appt-name">{{ appt.serviceType === 'time_block' ? ('🚫 ' + (appt.notes || '时间占用')) : appt.patient?.name }}</div>
+              <div class="appt-service">{{ appt.serviceType === 'time_block' ? appt.practitioner?.name : (appt.serviceLabel + ' · ' + appt.practitioner?.name) }}</div>
             </div>
             <el-tag :type="STATUS_MAP[appt.status]?.type" size="small">
               {{ t('appointmentStatus.' + appt.status) }}
@@ -290,14 +292,15 @@ function getConsultStatusType(consultation) {
             v-for="appt in myTodayAppts"
             :key="appt.id"
             class="appt-item"
-            @click="goToPatientConsultation(appt.patientId)"
+            @click="appt.patientId ? goToPatientConsultation(appt.patientId) : null"
+            :style="{ cursor: appt.patientId ? 'pointer' : 'default' }"
           >
             <div class="appt-time">
               <span>{{ formatTime(appt.startTime) }}</span>
             </div>
             <div class="appt-info">
-              <div class="appt-name">{{ appt.patient?.name }}</div>
-              <div class="appt-service">{{ appt.serviceLabel }}</div>
+              <div class="appt-name">{{ appt.serviceType === 'time_block' ? ('🚫 ' + (appt.notes || '时间占用')) : appt.patient?.name }}</div>
+              <div class="appt-service">{{ appt.serviceType === 'time_block' ? '时间占用' : appt.serviceLabel }}</div>
             </div>
             <el-tag :type="STATUS_MAP[appt.status]?.type" size="small">
               {{ t('appointmentStatus.' + appt.status) }}

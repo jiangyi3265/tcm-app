@@ -104,10 +104,8 @@ function validateFormulaHerbs(items = []) {
 
 // ========== User management ==========
 const showAddUserDialog = ref(false)
-const newUser = ref({ name: '', email: '', password: '', roles: ['practitioner'], phone: '', color: PRACTITIONER_COLORS[0], regulatoryBody: '', registrationNumber: '', overlap1: 20, overlap2: 10 })
+const newUser = ref({ name: '', email: '', password: '', roles: ['practitioner'], phone: '', color: PRACTITIONER_COLORS[0], regulatoryBody: '', registrationNumber: '', overlap1: 20, overlap2: 10, dripEnabled: true })
 
-const APPOINTMENT_INTERVAL_PRESETS = [10, 20, 30, 40, 50, 60]
-const PRACTITIONER_TIME_PRESETS = [10, 20, 30, 40, 50, 60]
 
 function resolveInterval(raw, user) {
   if (raw === 'overlap1') return Number(user?.overlap1 ?? 20) || 20
@@ -142,7 +140,7 @@ async function handleAddUser() {
     newUser.value = {
       name: '', email: '', password: '', roles: ['practitioner'], phone: '',
       color: PRACTITIONER_COLORS[Math.floor(Math.random() * PRACTITIONER_COLORS.length)],
-      regulatoryBody: '', registrationNumber: '', overlap1: 20, overlap2: 10,
+      regulatoryBody: '', registrationNumber: '', overlap1: 20, overlap2: 10, dripEnabled: true,
     }
   } catch (e) {
     ElMessage.error(e.message || t('admin.userCreateFailed'))
@@ -178,6 +176,7 @@ function startEditUser(user) {
     registrationNumber: user.registrationNumber || '',
     overlap1: Number(user.overlap1 ?? 20) || 20,
     overlap2: Number(user.overlap2 ?? 10) || 10,
+    dripEnabled: user.dripEnabled !== false,
   }
 }
 
@@ -214,7 +213,8 @@ const profileForm = ref({
   serviceKeys: [],
   internshipDates: [],
   homeAddress: { street: '', city: '', province: '', postalCode: '', country: '' },
-  workingHours: {}
+  workingHours: {},
+  dripEnabled: true
 })
 const WEEKDAY_LABELS = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' }
 
@@ -292,7 +292,8 @@ function openProfileDrawer(user) {
       postalCode: user.homeAddress?.postalCode || '',
       country: user.homeAddress?.country || ''
     },
-    workingHours: normalizeWorkingHoursForForm(user.workingHours || {})
+    workingHours: normalizeWorkingHoursForForm(user.workingHours || {}),
+    dripEnabled: user.dripEnabled !== false
   }
   showProfileDrawer.value = true
 }
@@ -446,20 +447,78 @@ async function updateRoomTags(room, tags) {
 // ========== Service type settings ==========
 const serviceEditForm = ref({})
 const editingServiceKey = ref(null)
+const showAddServiceDialog = ref(false)
+const newServiceForm = ref({
+  key: '',
+  label: '',
+  duration: 40,
+  practitionerTime: 'overlap1',
+  defaultPrice: 100,
+  requiredTag: '',
+  roomRequired: true,
+  publicVisible: true,
+  taxable: true,
+  pricingVisible: true,
+})
+
+function resetNewServiceForm() {
+  newServiceForm.value = {
+    key: '',
+    label: '',
+    duration: 40,
+    practitionerTime: 'overlap1',
+    defaultPrice: 100,
+    requiredTag: '',
+    roomRequired: true,
+    publicVisible: true,
+    taxable: true,
+    pricingVisible: true,
+  }
+}
+
+async function handleAddService() {
+  const form = newServiceForm.value
+  if (!form.label) return ElMessage.warning('请填写服务名称')
+  // Auto-generate key from label if not provided
+  const key = form.key || form.label.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_').toLowerCase() || `service_${Date.now()}`
+  if (settingsStore.serviceTypes[key]) {
+    return ElMessage.warning('该服务标识已存在，请修改名称或标识')
+  }
+  await settingsStore.addServiceType(key, {
+    label: form.label,
+    duration: Number(form.duration),
+    practitionerTime: form.practitionerTime,
+    defaultPrice: Number(form.defaultPrice),
+    requiredTag: form.requiredTag || '',
+    roomRequired: Boolean(form.roomRequired),
+    publicVisible: Boolean(form.publicVisible),
+    taxable: Boolean(form.taxable),
+    pricingVisible: Boolean(form.pricingVisible),
+  })
+  ElMessage.success(t('admin.saved'))
+  showAddServiceDialog.value = false
+  resetNewServiceForm()
+}
 
 function startEditService(key) {
   editingServiceKey.value = key
-  serviceEditForm.value = {
+  const base = {
     roomRequired: true,
     requiredTag: '',
     publicVisible: true,
+    taxable: true,
+    pricingVisible: true,
     ...settingsStore.serviceTypes[key],
   }
+  if (!['overlap1', 'overlap2', 'full'].includes(base.practitionerTime)) {
+    base.practitionerTime = 'overlap1'
+  }
+  serviceEditForm.value = base
 }
 
 async function saveServiceEdit() {
   const ptVal = serviceEditForm.value.practitionerTime
-  const practitionerTime = (ptVal === 'overlap1' || ptVal === 'overlap2') ? ptVal : Number(ptVal)
+  const practitionerTime = ['overlap1', 'overlap2', 'full'].includes(ptVal) ? ptVal : 'overlap1'
   await settingsStore.updateServiceType(editingServiceKey.value, {
     defaultPrice: Number(serviceEditForm.value.defaultPrice),
     duration: Number(serviceEditForm.value.duration),
@@ -467,6 +526,8 @@ async function saveServiceEdit() {
     roomRequired: Boolean(serviceEditForm.value.roomRequired),
     requiredTag: serviceEditForm.value.requiredTag || '',
     publicVisible: Boolean(serviceEditForm.value.publicVisible),
+    taxable: Boolean(serviceEditForm.value.taxable),
+    pricingVisible: Boolean(serviceEditForm.value.pricingVisible),
   })
   editingServiceKey.value = null
   ElMessage.success(t('admin.saved'))
@@ -970,7 +1031,6 @@ async function deleteTemplate(tmpl) {
             <template #default="{ row }">
               <div v-if="editingUserId === row.id && (row.role === 'practitioner' || (row.roles || []).includes('practitioner'))">
                 <el-select v-model="editUserForm.appointmentInterval" size="small" style="width:160px">
-                  <el-option v-for="n in APPOINTMENT_INTERVAL_PRESETS" :key="n" :label="formatIntervalOption(n, editUserForm)" :value="n" />
                   <el-option label="overlap1(首诊)" value="overlap1" />
                   <el-option label="overlap2(复诊)" value="overlap2" />
                 </el-select>
@@ -1097,6 +1157,15 @@ async function deleteTemplate(tmpl) {
                 <el-input-number v-model="profileForm.practitionerSortOrder" :min="0" :step="1" style="width:100%" />
               </el-form-item>
             </el-col>
+            <el-col :span="12">
+              <el-form-item :label="t('admin.profileDripEnabled')">
+                <el-switch v-model="profileForm.dripEnabled" :active-text="t('common.yes') || 'Yes'" :inactive-text="t('common.no') || 'No'" />
+                <div style="font-size:12px; color:#999; margin-top:4px">{{ t('admin.profileDripEnabledHint') }}</div>
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <el-row v-if="profileSupportsScheduling" :gutter="16">
             <el-col :span="12">
               <el-form-item :label="t('admin.profileServiceScope')">
                 <el-select
@@ -1323,6 +1392,11 @@ async function deleteTemplate(tmpl) {
 
       <!-- Service type management -->
       <el-tab-pane :label="t('admin.servicesTab')" name="services">
+        <div class="tab-toolbar">
+          <el-button type="primary" @click="showAddServiceDialog = true">
+            <el-icon><Plus /></el-icon> 添加服务类型
+          </el-button>
+        </div>
         <el-table :data="Object.entries(settingsStore.serviceTypes).map(([key, val]) => ({key, ...val}))" stripe>
           <el-table-column prop="label" :label="t('admin.serviceName')" min-width="140" />
           <el-table-column :label="t('admin.totalDuration')" width="140">
@@ -1337,12 +1411,12 @@ async function deleteTemplate(tmpl) {
             <template #default="{ row }">
               <div v-if="editingServiceKey === row.key">
                 <el-select v-model="serviceEditForm.practitionerTime" size="small" style="width: 150px">
-                  <el-option v-for="n in PRACTITIONER_TIME_PRESETS" :key="n" :label="n + ' min'" :value="n" />
                   <el-option label="overlap1(首诊)" value="overlap1" />
                   <el-option label="overlap2(复诊)" value="overlap2" />
+                  <el-option label="全程(=总时长)" value="full" />
                 </el-select>
               </div>
-              <span v-else>{{ row.practitionerTime === 'overlap1' ? 'overlap1(首诊)' : row.practitionerTime === 'overlap2' ? 'overlap2(复诊)' : row.practitionerTime + ' min' }}</span>
+              <span v-else>{{ row.practitionerTime === 'overlap2' ? 'overlap2(复诊)' : row.practitionerTime === 'full' ? '全程(=总时长)' : 'overlap1(首诊)' }}</span>
             </template>
           </el-table-column>
           <el-table-column :label="t('admin.defaultPrice')" width="140">
@@ -1382,6 +1456,22 @@ async function deleteTemplate(tmpl) {
                 <el-switch v-model="serviceEditForm.publicVisible" />
               </div>
               <el-tag v-else :type="row.publicVisible !== false ? 'success' : 'danger'" size="small">{{ row.publicVisible !== false ? t('common.yes') : t('common.no') }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="计税(Taxable)" width="110">
+            <template #default="{ row }">
+              <div v-if="editingServiceKey === row.key">
+                <el-switch v-model="serviceEditForm.taxable" />
+              </div>
+              <el-tag v-else :type="row.taxable !== false ? 'success' : 'info'" size="small">{{ row.taxable !== false ? t('common.yes') : t('common.no') }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="显示在Pricing" width="130">
+            <template #default="{ row }">
+              <div v-if="editingServiceKey === row.key">
+                <el-switch v-model="serviceEditForm.pricingVisible" />
+              </div>
+              <el-tag v-else :type="row.pricingVisible !== false ? 'success' : 'danger'" size="small">{{ row.pricingVisible !== false ? t('common.yes') : t('common.no') }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column :label="t('admin.operation')" width="130">
@@ -2135,6 +2225,54 @@ async function deleteTemplate(tmpl) {
       <template #footer>
         <el-button @click="showAddRoomDialog = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" @click="handleAddRoom">{{ t('common.add') }}</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Add service type dialog -->
+    <el-dialog v-model="showAddServiceDialog" title="添加服务类型" width="500px">
+      <el-form :model="newServiceForm" label-width="120px">
+        <el-form-item label="服务名称" required>
+          <el-input v-model="newServiceForm.label" placeholder="如：针灸1小时" />
+        </el-form-item>
+        <el-form-item label="总时长（分钟）">
+          <el-input-number v-model="newServiceForm.duration" :min="5" :step="5" style="width: 160px" />
+        </el-form-item>
+        <el-form-item label="医师占用">
+          <el-select v-model="newServiceForm.practitionerTime" style="width: 200px">
+            <el-option label="overlap1(首诊)" value="overlap1" />
+            <el-option label="overlap2(复诊)" value="overlap2" />
+            <el-option label="全程(=总时长)" value="full" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="默认价格（¥）">
+          <el-input-number v-model="newServiceForm.defaultPrice" :min="0" :step="10" style="width: 160px" />
+        </el-form-item>
+        <el-form-item label="服务标签">
+          <el-select v-model="newServiceForm.requiredTag" clearable style="width: 200px">
+            <el-option
+              v-for="option in SERVICE_TAG_OPTIONS"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="需要诊室">
+          <el-switch v-model="newServiceForm.roomRequired" />
+        </el-form-item>
+        <el-form-item label="公共页面显示">
+          <el-switch v-model="newServiceForm.publicVisible" />
+        </el-form-item>
+        <el-form-item label="计税(Taxable)">
+          <el-switch v-model="newServiceForm.taxable" />
+        </el-form-item>
+        <el-form-item label="显示在Pricing">
+          <el-switch v-model="newServiceForm.pricingVisible" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showAddServiceDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="handleAddService">{{ t('common.add') }}</el-button>
       </template>
     </el-dialog>
 

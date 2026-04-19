@@ -151,6 +151,7 @@ export default {
     confirmed: '已确认',
     completed: '已完成',
     cancelled: '已取消',
+    blocked: '时间占用',
   },
 
   // ── 诊疗状态 ──
@@ -578,6 +579,8 @@ export default {
     successTime: '预约时间：{time}',
     successPractitioner: '接诊医师：{name}',
     bookAnother: '继续预约',
+    copyLink: '复制链接',
+    linkCopied: '预约链接已复制到剪贴板',
   },
 
   publicIntake: {
@@ -608,6 +611,11 @@ export default {
     historyTitle: '既往情况补充',
     submitting: '提交中...',
     submit: '提交问诊表',
+    cancelAppointment: '取消这次预约',
+    cancelling: '取消中...',
+    cancelFailed: '取消预约失败',
+    cancelledTitle: '预约已取消',
+    cancelledDesc: '本次预约已经取消，后续提醒和回访邮件将不再发送。',
     summaryFields: {
       allergiesLabel: '过敏史',
       allergiesPlaceholder: '药物、食物过敏等（无则填“无”）',
@@ -649,6 +657,25 @@ export default {
       pathologicalChangesLabel: 'Pathological Changes',
       pathologicalChangesPlaceholder: '请补充触诊、压痛、异常位置等信息',
     },
+  },
+
+  publicManage: {
+    pageTitle: '预约管理',
+    pageSubtitle: '您可以在这里确认当前预约信息并取消预约。',
+    loading: '正在加载...',
+    loadFailed: '无法加载预约信息',
+    invalidTitle: '无法处理请求',
+    patientLabel: '病人',
+    timeLabel: '预约时间',
+    serviceLabel: '服务',
+    practitionerLabel: '医生',
+    roomLabel: '诊室',
+    addressLabel: '诊所地址',
+    cancelButton: '取消预约',
+    cancelling: '取消中...',
+    cancelFailed: '取消预约失败',
+    cancelledTitle: '预约已取消',
+    cancelledDesc: '本次预约已取消，相关后续邮件也会一并停止。',
   },
 
   publicConsent: {
@@ -1242,6 +1269,8 @@ export default {
     profileRegulatoryBodyPh: '如：CTCMPAO',
     profileRegistrationNo: '组织/注册号码',
     profileRegistrationNoPh: '如：6995',
+    profileDripEnabled: '缓释排班',
+    profileDripEnabledHint: '开启后，近7日仅释放已有预约前后1小时的时间段',
     profilePractitionerSortOrder: '自动分配优先级',
     profileServiceScope: '可提供服务',
     profileServiceScopePh: '未选择则默认全部服务',

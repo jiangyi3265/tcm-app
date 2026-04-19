@@ -29,6 +29,12 @@ const router = createRouter({
       meta: { public: true },
     },
     {
+      path: '/manage/:token',
+      name: 'public-appointment-manage',
+      component: () => import('../views/public/PublicAppointmentManageView.vue'),
+      meta: { public: true },
+    },
+    {
       path: '/',
       component: () => import('../components/layout/AppLayout.vue'),
       meta: { requiresAuth: true },

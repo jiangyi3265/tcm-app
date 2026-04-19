@@ -141,13 +141,15 @@ function getServiceTypeLabel(serviceType, fallback = '') {
 
 const serviceOptions = computed(() => {
   const source = Object.keys(settingsStore.serviceTypes || {}).length > 0 ? settingsStore.serviceTypes : SERVICE_TYPES
-  return Object.entries(source).map(([key, config]) => ({
-    key,
-    label: getServiceTypeLabel(key, config?.label),
-    duration: Number(config?.duration || 0),
-    roomRequired: Boolean(config?.roomRequired),
-    requiredTag: config?.requiredTag || '',
-  }))
+  return Object.entries(source)
+    .filter(([key]) => key !== 'time_block')
+    .map(([key, config]) => ({
+      key,
+      label: getServiceTypeLabel(key, config?.label),
+      duration: Number(config?.duration || 0),
+      roomRequired: Boolean(config?.roomRequired),
+      requiredTag: config?.requiredTag || '',
+    }))
 })
 
 function getAppointmentWithInfo(appointment) {
@@ -612,12 +614,76 @@ async function confirmAppt(id) {
   }
 }
 
-const STATUS_COLORS = { booked: '#409eff', confirmed: '#2d6a4f', completed: '#889096', cancelled: '#c0c4cc' }
+// ── Time block (时间占用) ──
+const showTimeBlockDialog = ref(false)
+const TIME_BLOCK_TYPES = [
+  { value: 'sick_leave', label: '请假' },
+  { value: 'meeting', label: '会议' },
+  { value: 'training', label: '培训' },
+  { value: 'personal', label: '私事' },
+  { value: 'other', label: '其他' },
+]
+const timeBlockForm = ref({
+  practitionerId: '',
+  date: dayjs().format('YYYY-MM-DD'),
+  startTime: '09:00',
+  endTime: '18:00',
+  blockType: 'sick_leave',
+  reason: '',
+})
+
+function openTimeBlockDialog() {
+  timeBlockForm.value = {
+    practitionerId: filterPractitioner.value || '',
+    date: dayjs(currentDate.value).format('YYYY-MM-DD'),
+    startTime: '09:00',
+    endTime: '18:00',
+    blockType: 'sick_leave',
+    reason: '',
+  }
+  showTimeBlockDialog.value = true
+}
+
+function getBlockTypeLabel(blockType) {
+  return TIME_BLOCK_TYPES.find((item) => item.value === blockType)?.label || blockType || '时间占用'
+}
+
+async function submitTimeBlock() {
+  const form = timeBlockForm.value
+  if (!form.practitionerId) return ElMessage.warning('请选择医师')
+  if (!form.date) return ElMessage.warning('请选择日期')
+  if (!form.startTime || !form.endTime) return ElMessage.warning('请选择时间范围')
+  if (form.startTime >= form.endTime) return ElMessage.warning('结束时间必须晚于开始时间')
+
+  const startTime = dayjs(form.date).format('YYYY-MM-DD') + ' ' + form.startTime + ':00'
+  const endTime = dayjs(form.date).format('YYYY-MM-DD') + ' ' + form.endTime + ':00'
+
+  try {
+    await appointmentsStore.createTimeBlock({
+      practitionerId: form.practitionerId,
+      startTime,
+      endTime,
+      reason: (form.blockType ? getBlockTypeLabel(form.blockType) + (form.reason ? ': ' : '') : '') + (form.reason || ''),
+      branchId: branchesStore.currentBranchId || null,
+    })
+    ElMessage.success('时间占用已创建')
+    showTimeBlockDialog.value = false
+  } catch (error) {
+    ElMessage.error(error.message || '创建失败')
+  }
+}
+
+function isTimeBlock(appointment) {
+  return appointment?.serviceType === 'time_block' || appointment?.status === 'blocked'
+}
+
+const STATUS_COLORS = { booked: '#409eff', confirmed: '#2d6a4f', completed: '#889096', cancelled: '#c0c4cc', blocked: '#6b7280' }
 const BLOCK_PALETTES = {
   booked: { bg: '#f4a261', accent: '#d97706', footer: '#d97706', text: '#fff' },
   confirmed: { bg: '#6abf7b', accent: '#2d6a4f', footer: '#2d6a4f', text: '#fff' },
   completed: { bg: '#a8b1bd', accent: '#64748b', footer: '#64748b', text: '#fff' },
   cancelled: { bg: '#d1d5db', accent: '#9ca3af', footer: '#9ca3af', text: '#374151' },
+  blocked: { bg: '#9ca3af', accent: '#6b7280', footer: '#4b5563', text: '#fff' },
 }
 
 function getStatusTagType(status) {
@@ -640,19 +706,23 @@ function textColorOn(bg) {
 }
 
 function getAppointmentBlockStyle(block) {
+  const isBlock = isTimeBlock(block)
   const practitionerColor = resolvePractitionerColor(block.practitioner)
   const roomColor = block.room ? resolveRoomColor(block.room) : (BLOCK_PALETTES[block?.status] || BLOCK_PALETTES.booked).bg
   const statusFooter = (BLOCK_PALETTES[block?.status] || BLOCK_PALETTES.booked).footer
+  const bg = isBlock ? '#d1d5db' : roomColor
   return {
     top: `${block.top}px`,
     height: `${block.height}px`,
     left: `calc(${block.leftPct}% + 3px)`,
     width: `calc(${block.widthPct}% - 6px)`,
-    background: roomColor,
-    color: textColorOn(roomColor),
-    borderLeft: `5px solid ${practitionerColor}`,
-    '--block-accent': practitionerColor,
-    '--block-footer': statusFooter,
+    background: isBlock
+      ? `repeating-linear-gradient(135deg, #d1d5db, #d1d5db 6px, #c0c4cc 6px, #c0c4cc 12px)`
+      : roomColor,
+    color: isBlock ? '#374151' : textColorOn(roomColor),
+    borderLeft: `5px solid ${isBlock ? '#6b7280' : practitionerColor}`,
+    '--block-accent': isBlock ? '#6b7280' : practitionerColor,
+    '--block-footer': isBlock ? '#4b5563' : statusFooter,
   }
 }
 </script>
@@ -677,6 +747,9 @@ function getAppointmentBlockStyle(block) {
         <el-button v-if="canEditOwnSchedule" size="small" plain @click="openMyScheduleDrawer">{{ t('appointments.mySchedule') }}</el-button>
         <el-button v-if="canCreate" type="primary" size="small" @click="openCreateDialog()">
           <el-icon><Plus /></el-icon> {{ t('appointments.newAppointment') }}
+        </el-button>
+        <el-button v-if="canCreate" type="warning" size="small" plain @click="openTimeBlockDialog()">
+          <el-icon><Clock /></el-icon> 添加时间占用
         </el-button>
       </div>
     </div>
@@ -705,10 +778,12 @@ function getAppointmentBlockStyle(block) {
       <div v-if="viewMode === 'calendar'" class="schedule-scroll">
         <div class="schedule-grid" :style="{ '--cal-height': getTotalCalendarHeight() + 'px' }">
           <!-- Header row -->
-          <div class="sg-header sg-time-col">{{ t('appointments.timeAxis') }}</div>
-          <div v-for="day in visibleDays" :key="'h'+day" class="sg-header" :class="{ today: isToday(day) }">
-            <div>{{ dayjs(day).format('ddd') }}</div>
-            <div>{{ dayjs(day).format('MM-DD') }}</div>
+          <div class="sg-head-row">
+            <div class="sg-header sg-time-col">{{ t('appointments.timeAxis') }}</div>
+            <div v-for="day in visibleDays" :key="'h'+day" class="sg-header" :class="{ today: isToday(day) }">
+              <div>{{ dayjs(day).format('ddd') }}</div>
+              <div>{{ dayjs(day).format('MM-DD') }}</div>
+            </div>
           </div>
 
           <!-- Time axis + day columns body -->
@@ -769,8 +844,12 @@ function getAppointmentBlockStyle(block) {
                 />
                 <div class="appt-block-content">
                   <div class="appt-block-time">{{ formatTime(block.startTime) }} - {{ formatTime(block.endTime) }}</div>
-                  <strong>{{ block.patient?.name || t('appointments.unknown') }}</strong>
-                  <div class="appt-block-svc">{{ block.serviceLabel }}<template v-if="!filterPractitioner"> · {{ block.practitioner?.name || '-' }}</template></div>
+                  <strong v-if="isTimeBlock(block)">🚫 {{ block.notes || '时间占用' }}</strong>
+                  <strong v-else>{{ block.patient?.name || t('appointments.unknown') }}</strong>
+                  <div class="appt-block-svc">
+                    <template v-if="isTimeBlock(block)">{{ block.practitioner?.name || '-' }}</template>
+                    <template v-else>{{ block.serviceLabel }}<template v-if="!filterPractitioner"> · {{ block.practitioner?.name || '-' }}</template></template>
+                  </div>
                 </div>
               </button>
             </div>
@@ -791,10 +870,16 @@ function getAppointmentBlockStyle(block) {
               <template #default="{ row }">{{ formatTime(row.startTime) }} - {{ formatTime(row.endTime) }}</template>
             </el-table-column>
             <el-table-column :label="t('appointments.patient')" min-width="110">
-              <template #default="{ row }">{{ row.patient?.name || t('appointments.unknown') }}</template>
+              <template #default="{ row }">
+                <template v-if="isTimeBlock(row)"><el-tag type="info" size="small">🚫 {{ row.notes || '时间占用' }}</el-tag></template>
+                <template v-else>{{ row.patient?.name || t('appointments.unknown') }}</template>
+              </template>
             </el-table-column>
             <el-table-column :label="t('appointments.service')" min-width="140">
-              <template #default="{ row }">{{ row.serviceLabel }}</template>
+              <template #default="{ row }">
+                <template v-if="isTimeBlock(row)">时间占用</template>
+                <template v-else>{{ row.serviceLabel }}</template>
+              </template>
             </el-table-column>
             <el-table-column :label="t('appointments.practitioner')" min-width="100">
               <template #default="{ row }">{{ row.practitioner?.name || '-' }}</template>
@@ -811,7 +896,7 @@ function getAppointmentBlockStyle(block) {
               <template #default="{ row }">
                 <el-button size="small" text type="primary" @click="viewAppt(row)">{{ t('common.view') }}</el-button>
                 <el-button
-                  v-if="canEditAppointments && row.status !== 'cancelled'"
+                  v-if="canEditAppointments && row.status !== 'cancelled' && !isTimeBlock(row)"
                   size="small"
                   text
                   type="warning"
@@ -947,34 +1032,81 @@ function getAppointmentBlockStyle(block) {
       </template>
     </el-drawer>
 
-    <el-drawer v-model="showDetailDialog" :title="t('appointments.appointmentDetail')" size="420px" direction="rtl">
+    <el-drawer v-model="showDetailDialog" :title="isTimeBlock(selectedAppt) ? '时间占用详情' : t('appointments.appointmentDetail')" size="420px" direction="rtl">
       <div v-if="selectedAppt" class="detail-panel">
-        <div class="detail-row"><span class="detail-label">{{ t('appointments.patient') }}</span><span class="detail-value">{{ selectedAppt.patient?.name }}</span></div>
-        <div class="detail-row"><span class="detail-label">{{ t('appointments.practitioner') }}</span><span class="detail-value">{{ selectedAppt.practitioner?.name || '-' }}</span></div>
-        <div class="detail-row"><span class="detail-label">{{ t('appointments.service') }}</span><span class="detail-value">{{ selectedAppt.serviceLabel }}</span></div>
-        <div class="detail-row"><span class="detail-label">{{ t('appointments.timeLabel') }}</span><span class="detail-value">{{ formatDateTime(selectedAppt.startTime) }} - {{ formatTime(selectedAppt.endTime) }}</span></div>
-        <div v-if="selectedAppt.room" class="detail-row"><span class="detail-label">{{ t('appointments.room') }}</span><span class="detail-value">{{ selectedAppt.room?.name }}</span></div>
-        <div class="detail-row">
-          <span class="detail-label">{{ t('appointments.statusLabel') }}</span>
-          <el-tag :style="{ color: STATUS_COLORS[selectedAppt.status] }" size="small">{{ t('appointmentStatus.' + selectedAppt.status) }}</el-tag>
-        </div>
-        <div v-if="selectedAppt.notes" class="detail-row"><span class="detail-label">{{ t('appointments.notesLabel') }}</span><span class="detail-value">{{ selectedAppt.notes }}</span></div>
+        <template v-if="isTimeBlock(selectedAppt)">
+          <div class="detail-row"><span class="detail-label">医师</span><span class="detail-value">{{ selectedAppt.practitioner?.name || '-' }}</span></div>
+          <div class="detail-row"><span class="detail-label">时间</span><span class="detail-value">{{ formatDateTime(selectedAppt.startTime) }} - {{ formatTime(selectedAppt.endTime) }}</span></div>
+          <div class="detail-row">
+            <span class="detail-label">状态</span>
+            <el-tag type="info" size="small">时间占用</el-tag>
+          </div>
+          <div v-if="selectedAppt.notes" class="detail-row"><span class="detail-label">原因</span><span class="detail-value">{{ selectedAppt.notes }}</span></div>
+        </template>
+        <template v-else>
+          <div class="detail-row"><span class="detail-label">{{ t('appointments.patient') }}</span><span class="detail-value">{{ selectedAppt.patient?.name }}</span></div>
+          <div class="detail-row"><span class="detail-label">{{ t('appointments.practitioner') }}</span><span class="detail-value">{{ selectedAppt.practitioner?.name || '-' }}</span></div>
+          <div class="detail-row"><span class="detail-label">{{ t('appointments.service') }}</span><span class="detail-value">{{ selectedAppt.serviceLabel }}</span></div>
+          <div class="detail-row"><span class="detail-label">{{ t('appointments.timeLabel') }}</span><span class="detail-value">{{ formatDateTime(selectedAppt.startTime) }} - {{ formatTime(selectedAppt.endTime) }}</span></div>
+          <div v-if="selectedAppt.room" class="detail-row"><span class="detail-label">{{ t('appointments.room') }}</span><span class="detail-value">{{ selectedAppt.room?.name }}</span></div>
+          <div class="detail-row">
+            <span class="detail-label">{{ t('appointments.statusLabel') }}</span>
+            <el-tag :style="{ color: STATUS_COLORS[selectedAppt.status] }" size="small">{{ t('appointmentStatus.' + selectedAppt.status) }}</el-tag>
+          </div>
+          <div v-if="selectedAppt.notes" class="detail-row"><span class="detail-label">{{ t('appointments.notesLabel') }}</span><span class="detail-value">{{ selectedAppt.notes }}</span></div>
+        </template>
       </div>
       <template #footer>
         <el-button @click="showDetailDialog = false">{{ t('common.close') }}</el-button>
-        <el-button
-          v-if="canEditAppointments && selectedAppt?.status !== 'cancelled'"
-          type="warning"
-          size="small"
-          @click="openEditDialog(selectedAppt)"
-        >
-          {{ t('common.edit') }}
-        </el-button>
-        <el-button v-if="canCreate && selectedAppt?.status === 'booked'" type="success" size="small" @click="confirmAppt(selectedAppt.id)">{{ t('appointments.confirmAppt') }}</el-button>
-        <el-button v-if="canCancel && ['booked', 'confirmed'].includes(selectedAppt?.status)" type="danger" size="small" @click="cancelAppt(selectedAppt.id)">{{ t('appointments.cancelAppt') }}</el-button>
-        <el-button v-if="selectedAppt?.patient" type="primary" size="small" @click="$router.push(`/patients/${selectedAppt.patientId}`); showDetailDialog = false">{{ t('appointments.viewPatient') }}</el-button>
+        <template v-if="isTimeBlock(selectedAppt)">
+          <el-button v-if="canCancel" type="danger" size="small" @click="cancelAppt(selectedAppt.id)">取消占用</el-button>
+        </template>
+        <template v-else>
+          <el-button
+            v-if="canEditAppointments && selectedAppt?.status !== 'cancelled'"
+            type="warning"
+            size="small"
+            @click="openEditDialog(selectedAppt)"
+          >
+            {{ t('common.edit') }}
+          </el-button>
+          <el-button v-if="canCreate && selectedAppt?.status === 'booked'" type="success" size="small" @click="confirmAppt(selectedAppt.id)">{{ t('appointments.confirmAppt') }}</el-button>
+          <el-button v-if="canCancel && ['booked', 'confirmed'].includes(selectedAppt?.status)" type="danger" size="small" @click="cancelAppt(selectedAppt.id)">{{ t('appointments.cancelAppt') }}</el-button>
+          <el-button v-if="selectedAppt?.patient" type="primary" size="small" @click="$router.push(`/patients/${selectedAppt.patientId}`); showDetailDialog = false">{{ t('appointments.viewPatient') }}</el-button>
+        </template>
       </template>
     </el-drawer>
+
+    <el-dialog v-model="showTimeBlockDialog" title="添加时间占用" width="480px" :close-on-click-modal="false">
+      <el-form :model="timeBlockForm" label-width="90px">
+        <el-form-item label="医师" required>
+          <el-select v-model="timeBlockForm.practitionerId" :placeholder="t('appointments.allPractitioners')" style="width:100%">
+            <el-option v-for="practitioner in practitioners" :key="practitioner.id" :label="practitioner.name" :value="practitioner.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="日期" required>
+          <el-date-picker v-model="timeBlockForm.date" type="date" value-format="YYYY-MM-DD" style="width:100%" />
+        </el-form-item>
+        <el-form-item label="开始时间" required>
+          <el-time-select v-model="timeBlockForm.startTime" start="00:00" end="23:30" step="00:30" placeholder="开始时间" style="width:100%" />
+        </el-form-item>
+        <el-form-item label="结束时间" required>
+          <el-time-select v-model="timeBlockForm.endTime" start="00:00" end="23:30" step="00:30" placeholder="结束时间" style="width:100%" />
+        </el-form-item>
+        <el-form-item label="类型">
+          <el-select v-model="timeBlockForm.blockType" style="width:100%">
+            <el-option v-for="opt in TIME_BLOCK_TYPES" :key="opt.value" :label="opt.label" :value="opt.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="timeBlockForm.reason" placeholder="可选，如：全天请假" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showTimeBlockDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="submitTimeBlock">确认占用</el-button>
+      </template>
+    </el-dialog>
 
     <el-drawer v-model="showEmailDialog" :title="t('email.preview')" size="520px" direction="rtl">
       <el-form label-width="60px" size="small">
@@ -1013,8 +1145,8 @@ function getAppointmentBlockStyle(block) {
 .schedule-grid .sg-header { flex:1; text-align:center; padding:10px 8px; background:#f8fafc; border:1px solid #edf2f7; color:#1b4332; font-weight:600; font-size:13px; }
 .schedule-grid .sg-header.today { background:#eefbf0; }
 .schedule-grid .sg-header.sg-time-col { flex:0 0 72px; font-size:12px; color:#64748b; }
-.schedule-grid > .sg-header, .sg-body-row > .sg-time-axis, .sg-body-row > .sg-day-col { border-right:1px solid #edf2f7; }
-.schedule-grid > :first-child { display:flex; }
+.schedule-grid .sg-head-row > .sg-header, .sg-body-row > .sg-time-axis, .sg-body-row > .sg-day-col { border-right:1px solid #edf2f7; }
+.schedule-grid .sg-head-row { display:flex; }
 .sg-body-row { display:flex; flex:1; }
 .sg-time-axis { position:relative; flex:0 0 72px; background:#fbfdff; }
 .sg-time-label { position:absolute; left:0; width:100%; padding:0 8px; font-size:11px; font-weight:600; color:#64748b; transform:translateY(-7px); pointer-events:none; }

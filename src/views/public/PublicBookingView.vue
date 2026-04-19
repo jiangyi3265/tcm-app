@@ -478,6 +478,15 @@ watch(
   },
 )
 
+function copyBookingUrl() {
+  const url = window.location.href
+  navigator.clipboard.writeText(url).then(() => {
+    ElMessage.success(t('publicBooking.linkCopied'))
+  }).catch(() => {
+    ElMessage.info(url)
+  })
+}
+
 onMounted(() => {
   void loadOptions()
 })
@@ -499,6 +508,9 @@ onMounted(() => {
           <h1>{{ t('publicBooking.pageTitle') }}</h1>
           <p>{{ t('publicBooking.pageSubtitle') }}</p>
         </div>
+        <el-button size="small" @click="copyBookingUrl">
+          {{ t('publicBooking.copyLink') }}
+        </el-button>
       </div>
 
       <el-skeleton v-if="loading" :rows="6" animated />

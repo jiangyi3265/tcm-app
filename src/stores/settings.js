@@ -48,6 +48,8 @@ function normalizeServiceType(key, config = {}) {
     requiredTag: config.requiredTag ?? fallback.requiredTag ?? '',
     roomRequired: Boolean(config.roomRequired ?? fallback.roomRequired),
     publicVisible: config.publicVisible !== undefined ? Boolean(config.publicVisible) : true,
+    taxable: config.taxable !== undefined ? Boolean(config.taxable) : (fallback.taxable !== undefined ? Boolean(fallback.taxable) : true),
+    pricingVisible: config.pricingVisible !== undefined ? Boolean(config.pricingVisible) : (fallback.pricingVisible !== undefined ? Boolean(fallback.pricingVisible) : true),
   }
 }
 
@@ -188,6 +190,14 @@ export const useSettingsStore = defineStore('settings', () => {
     saveState()
   }
 
+  async function addServiceType(key, config) {
+    const payload = normalizeServiceType(key, { ...config, key })
+    const created = await settingsApi.addServiceType(payload)
+    serviceTypes.value[key] = normalizeServiceType(key, { ...created, key })
+    saveState()
+    return serviceTypes.value[key]
+  }
+
   async function updateServiceType(key, updates) {
     const payload = normalizeServiceType(key, { ...serviceTypes.value[key], ...updates, key })
     const updated = await settingsApi.updateServiceType(key, payload)
@@ -267,6 +277,7 @@ export const useSettingsStore = defineStore('settings', () => {
     addRoom,
     updateRoom,
     deleteRoom,
+    addServiceType,
     updateServiceType,
     updateSettings,
     addPriceList,
