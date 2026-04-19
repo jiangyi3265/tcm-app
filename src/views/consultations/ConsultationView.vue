@@ -1292,12 +1292,20 @@ function applyFormulaToDialog(formula) {
   const qty = rxForm.value.quantity || 7
 
   if (prescType === 'none') {
-    // Service-only prescriptions do not perform powder/raw-herb conversion
-    rxForm.value.items = (formula.items || []).map(h => ({
-      name: h.herbName, herbDictId: h.herbDictId || null, dosage: h.dosage, unit: h.unit || 'g',
-      convertedQty: null, convertedUnit: '', supplierName: '', supplierId: null,
-      category: '', guijing: '', nature: '', taste: '', pricePerUnit: 0, subtotal: 0,
-    }))
+    rxForm.value.items = (formula.items || []).map(h => {
+      let herbDictId = h.herbDictId || null
+      if (!herbDictId && h.herbName) {
+        const match = herbDictStore.activeHerbs.find(
+          (d) => d.name === h.herbName || d.name.split('(')[0] === h.herbName,
+        )
+        if (match) herbDictId = match.id
+      }
+      return {
+        name: h.herbName, herbDictId, dosage: h.dosage, unit: h.unit || 'g',
+        convertedQty: null, convertedUnit: '', supplierName: '', supplierId: null,
+        category: '', guijing: '', nature: '', taste: '', pricePerUnit: 0, subtotal: 0,
+      }
+    })
   } else {
     const result = calculatePrescription(
       formula.items || [],
@@ -1452,6 +1460,14 @@ function handleHerbInputChange(row) {
     return
   }
   clearRxItemInventoryBinding(row, { clearHerbDict: true })
+  if (row.name && row.name.trim()) {
+    const exactMatch = herbDictStore.activeHerbs.find(
+      (h) => h.name === row.name.trim() || h.name.split('(')[0] === row.name.trim(),
+    )
+    if (exactMatch) {
+      row.herbDictId = exactMatch.id
+    }
+  }
   recalcRxItems()
 }
 

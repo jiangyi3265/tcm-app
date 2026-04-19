@@ -1,6 +1,7 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { useInventoryStore } from '../../stores/inventory'
 import { useAuthStore } from '../../stores/auth'
 import { useBranchesStore } from '../../stores/branches'
@@ -12,6 +13,8 @@ import { bindHerbSelection, getInventoryHerbMeta } from '../../utils/herbBinding
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t, te, locale } = useI18n()
+const route = useRoute()
+const router = useRouter()
 
 const inventoryStore = useInventoryStore()
 const authStore = useAuthStore()
@@ -24,6 +27,7 @@ const roles = computed(() => authStore.roles)
 const canEdit = computed(() => hasPermission(roles.value, 'inventory.edit'))
 
 const activeTab = ref('powder')
+const lowStockFilter = ref(false)
 const searchQuery = ref('')
 const showAddDialog = ref(false)
 const showAdjustDialog = ref(false)
@@ -161,9 +165,34 @@ function getCategoryItems(category) {
   if (branchId) {
     items = items.filter(i => i.branchId === branchId || !i.branchId)
   }
+  if (lowStockFilter.value) {
+    items = items.filter(i => i.quantity <= i.minStockLevel)
+  }
   if (!searchQuery.value) return items
   const q = searchQuery.value.toLowerCase()
   return items.filter((i) => i.name.toLowerCase().includes(q) || i.supplier?.toLowerCase().includes(q))
+}
+
+const allLowStockItems = computed(() => {
+  const branchId = branchesStore.currentBranchId
+  let items = inventoryStore.lowStockItems
+  if (branchId) {
+    items = items.filter(i => i.branchId === branchId || !i.branchId)
+  }
+  if (!searchQuery.value) return items
+  const q = searchQuery.value.toLowerCase()
+  return items.filter((i) => i.name.toLowerCase().includes(q) || i.supplier?.toLowerCase().includes(q))
+})
+
+onMounted(() => {
+  if (route.query.filter === 'low_stock') {
+    lowStockFilter.value = true
+  }
+})
+
+function toggleLowStockFilter() {
+  lowStockFilter.value = !lowStockFilter.value
+  router.replace({ query: lowStockFilter.value ? { filter: 'low_stock' } : {} })
 }
 
 function getStockStatus(item) {
@@ -334,7 +363,7 @@ async function openAdjustmentHistory(item) {
         <div class="inv-stat-label">{{ t('inventory.pillsTypes') }}</div>
         <div class="inv-stat-num">{{ inventoryStore.itemsByCategory.pills.length }}</div>
       </div>
-      <div class="inv-stat-card warning">
+      <div class="inv-stat-card warning" style="cursor:pointer" @click="toggleLowStockFilter">
         <div class="inv-stat-label">{{ t('inventory.lowStockAlert') }}</div>
         <div class="inv-stat-num">{{ inventoryStore.lowStockItems.length }}</div>
       </div>
@@ -342,7 +371,12 @@ async function openAdjustmentHistory(item) {
 
     <!-- 工具栏 -->
     <div class="page-toolbar">
-      <el-input v-model="searchQuery" :placeholder="t('inventory.searchPlaceholder')" clearable style="width: 280px" :prefix-icon="'Search'" />
+      <div style="display:flex;gap:8px;align-items:center">
+        <el-input v-model="searchQuery" :placeholder="t('inventory.searchPlaceholder')" clearable style="width: 280px" :prefix-icon="'Search'" />
+        <el-button :type="lowStockFilter ? 'danger' : ''" plain @click="toggleLowStockFilter">
+          <el-icon><Warning /></el-icon> {{ t('inventory.lowStockAlert') }}{{ lowStockFilter ? ' ✓' : '' }}
+        </el-button>
+      </div>
       <div style="display:flex;gap:8px">
         <el-button v-if="canEdit" @click="showBatchImportDialog = true">
           <el-icon><Upload /></el-icon> {{ t('inventory.batchImport') }}

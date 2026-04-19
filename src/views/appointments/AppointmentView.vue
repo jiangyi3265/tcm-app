@@ -16,7 +16,6 @@ import {
   buildWorkingHoursPayload,
   validateWorkingHours,
 } from '../../utils/workingHours'
-import { SERVICE_TYPES } from '../../utils/sampleData'
 import { resolvePractitionerColor, resolveRoomColor } from '../../utils/colorPalette'
 import { useEmailSimulator } from '../../utils/emailSimulator'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -130,7 +129,7 @@ function getWorkingHoursValidationMessage(result) {
 }
 
 function getServiceTypeConfig(serviceType) {
-  return settingsStore.serviceTypes?.[serviceType] || SERVICE_TYPES[serviceType] || {}
+  return settingsStore.serviceTypes?.[serviceType] || {}
 }
 
 function getServiceTypeLabel(serviceType, fallback = '') {
@@ -140,7 +139,7 @@ function getServiceTypeLabel(serviceType, fallback = '') {
 }
 
 const serviceOptions = computed(() => {
-  const source = Object.keys(settingsStore.serviceTypes || {}).length > 0 ? settingsStore.serviceTypes : SERVICE_TYPES
+  const source = settingsStore.serviceTypes || {}
   return Object.entries(source)
     .filter(([key]) => key !== 'time_block')
     .map(([key, config]) => ({
@@ -313,6 +312,9 @@ const selectedSlotValue = ref('')
 const preferredSlotStartTime = ref('')
 const availabilityLoading = ref(false)
 const availabilityState = ref({ slots: [], duration: 0, slotStepMinutes: 10 })
+const quickCreateMode = ref(false)
+const quickPatientForm = ref({ name: '', email: '' })
+const quickCreating = ref(false)
 let availabilityRequestId = 0
 
 const newAppt = ref({
@@ -413,6 +415,32 @@ function closeCreateDialog() {
   editingAppointmentId.value = ''
   preferredSlotStartTime.value = ''
   selectedSlotValue.value = ''
+  quickCreateMode.value = false
+  quickPatientForm.value = { name: '', email: '' }
+}
+
+async function quickCreatePatient() {
+  const name = quickPatientForm.value.name?.trim()
+  const email = quickPatientForm.value.email?.trim()
+  if (!name) return ElMessage.warning('请输入病人姓名')
+  if (!email) return ElMessage.warning('请输入病人邮箱')
+  quickCreating.value = true
+  try {
+    const patient = await patientsStore.addPatient({
+      name,
+      firstName: name,
+      lastName: '',
+      emails: [email],
+    })
+    newAppt.value.patientId = patient.id
+    quickCreateMode.value = false
+    quickPatientForm.value = { name: '', email: '' }
+    ElMessage.success(`病人「${patient.name}」已创建`)
+  } catch (error) {
+    ElMessage.error(error.message || '创建病人失败')
+  } finally {
+    quickCreating.value = false
+  }
 }
 
 function handleScheduleCellClick(date, totalMinutes) {
@@ -921,14 +949,31 @@ function getAppointmentBlockStyle(block) {
     >
       <el-form :model="newAppt" label-width="96px">
         <el-form-item :label="t('appointments.patient')" required>
-          <el-select v-model="newAppt.patientId" filterable :placeholder="t('appointments.searchPatient')" style="width:100%">
-            <el-option
-              v-for="patient in patientsStore.activePatients"
-              :key="patient.id"
-              :label="patient.name + ' (' + (patient.emails?.[0] || patient.mobilePhone || '') + ')'"
-              :value="patient.id"
-            />
-          </el-select>
+          <template v-if="!quickCreateMode">
+            <div style="display:flex;gap:8px;width:100%">
+              <el-select v-model="newAppt.patientId" filterable :placeholder="t('appointments.searchPatient')" style="flex:1">
+                <el-option
+                  v-for="patient in patientsStore.activePatients"
+                  :key="patient.id"
+                  :label="patient.name + ' (' + (patient.emails?.[0] || patient.mobilePhone || '') + ')'"
+                  :value="patient.id"
+                />
+              </el-select>
+              <el-button v-if="!isEditingAppointment" size="small" @click="quickCreateMode = true">新建</el-button>
+            </div>
+          </template>
+          <template v-else>
+            <div style="width:100%">
+              <div style="display:flex;gap:8px;margin-bottom:8px">
+                <el-input v-model="quickPatientForm.name" placeholder="病人姓名" style="flex:1" />
+                <el-input v-model="quickPatientForm.email" placeholder="邮箱" style="flex:1" />
+              </div>
+              <div style="display:flex;gap:8px">
+                <el-button type="primary" size="small" :loading="quickCreating" @click="quickCreatePatient">创建并选择</el-button>
+                <el-button size="small" @click="quickCreateMode = false">取消</el-button>
+              </div>
+            </div>
+          </template>
         </el-form-item>
 
         <el-form-item :label="t('appointments.practitioner')" required>

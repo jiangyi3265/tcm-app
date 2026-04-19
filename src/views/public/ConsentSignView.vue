@@ -18,12 +18,15 @@ const signatureName = ref('')
 const signing = ref(false)
 const signed = ref(false)
 const signedAt = ref('')
+const clinicName = ref('')
+const clinicAddress = ref('')
+const clinicPhone = ref('')
 
 const isZh = computed(() => locale.value === 'zh-CN')
 
 const text = computed(() => (isZh.value
   ? {
-      appTitle: 'OTCM 知情同意书',
+      appTitle: (clinicName.value || 'OTCM') + ' 知情同意书',
       appSubtitle: '请逐段阅读并确认后再签署',
       loading: '正在加载同意书...',
       invalidTitle: '无法处理请求',
@@ -45,7 +48,7 @@ const text = computed(() => (isZh.value
       sectionMissing: '请逐段阅读并同意所有内容后再签署',
     }
   : {
-      appTitle: 'OTCM Informed Consent',
+      appTitle: (clinicName.value || 'OTCM') + ' Informed Consent',
       appSubtitle: 'Please review each section and confirm before signing',
       loading: 'Loading consent form...',
       invalidTitle: 'Unable to process this request',
@@ -84,6 +87,9 @@ onMounted(async () => {
     documentVersion.value = info.consentVersion || ''
     sections.value = Array.isArray(info.sections) ? info.sections : []
     agreements.value = Object.fromEntries(sections.value.map((section) => [section.key, false]))
+    clinicName.value = info.clinicName || ''
+    clinicAddress.value = info.clinicAddress || ''
+    clinicPhone.value = info.clinicPhone || ''
     if (info.consentSigned) {
       signed.value = true
       signedAt.value = info.consentSignedAt || ''
@@ -123,9 +129,14 @@ async function handleSign() {
   <div class="consent-page">
     <div class="consent-card">
       <div class="consent-header">
-        <div class="header-badge">OTCM</div>
+        <div class="header-badge">{{ clinicName || 'OTCM' }}</div>
         <h1>{{ text.appTitle }}</h1>
         <p>{{ text.appSubtitle }}</p>
+        <p v-if="clinicAddress || clinicPhone" class="clinic-contact">
+          <span v-if="clinicAddress">{{ clinicAddress }}</span>
+          <span v-if="clinicAddress && clinicPhone"> · </span>
+          <span v-if="clinicPhone">{{ clinicPhone }}</span>
+        </p>
       </div>
 
       <div v-if="loading" class="state-box">
@@ -249,6 +260,12 @@ async function handleSign() {
 .consent-header p {
   margin: 0;
   opacity: 0.9;
+}
+
+.clinic-contact {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-top: 4px !important;
 }
 
 .state-box {

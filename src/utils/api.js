@@ -261,6 +261,9 @@ export const settingsApi = {
   addServiceType(data) {
     return request('/api/settings/service-types', { method: 'POST', body: data })
   },
+  deleteServiceType(key) {
+    return request(`/api/settings/service-types/${key}`, { method: 'DELETE' })
+  },
   addPriceList(data) { return request('/api/settings/price-lists', { method: 'POST', body: data }) },
   updatePriceList(id, data) {
     return request(`/api/settings/price-lists/${id}`, { method: 'PUT', body: data })

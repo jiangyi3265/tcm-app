@@ -66,9 +66,11 @@ function normalizeServiceTypes(serviceTypes = {}) {
     if (!key) return
     normalized[key] = normalizeServiceType(key, config)
   })
-  Object.entries(SERVICE_TYPES).forEach(([key, fallback]) => {
-    if (!normalized[key]) normalized[key] = { ...fallback, key }
-  })
+  if (Object.keys(normalized).length === 0) {
+    Object.entries(SERVICE_TYPES).forEach(([key, fallback]) => {
+      normalized[key] = { ...fallback, key }
+    })
+  }
   return normalized
 }
 
@@ -205,6 +207,12 @@ export const useSettingsStore = defineStore('settings', () => {
     saveState()
   }
 
+  async function deleteServiceType(key) {
+    await settingsApi.deleteServiceType(key)
+    delete serviceTypes.value[key]
+    saveState()
+  }
+
   async function updateSettings(updates) {
     if (updates.taxRate !== undefined) taxRate.value = updates.taxRate
     if (updates.practitionerInterval !== undefined) practitionerInterval.value = updates.practitionerInterval
@@ -279,6 +287,7 @@ export const useSettingsStore = defineStore('settings', () => {
     deleteRoom,
     addServiceType,
     updateServiceType,
+    deleteServiceType,
     updateSettings,
     addPriceList,
     updatePriceList,

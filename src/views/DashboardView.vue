@@ -167,21 +167,21 @@ function getConsultStatusType(consultation) {
           <div class="stat-label">{{ t('dashboard.todayAppointments') }}</div>
         </div>
       </div>
-      <div class="stat-card orange" v-if="roles.some(r => ['admin', 'cashier', 'practitioner'].includes(r))">
+      <div class="stat-card orange" v-if="roles.some(r => ['admin', 'cashier', 'practitioner'].includes(r))" @click="$router.push('/cashier')">
         <div class="stat-icon"><el-icon><Money /></el-icon></div>
         <div class="stat-info">
           <div class="stat-number">{{ pendingPayments }}</div>
           <div class="stat-label">{{ t('dashboard.pendingPayments') }}</div>
         </div>
       </div>
-      <div class="stat-card red" v-if="roles.some(r => ['admin', 'pharmacist', 'practitioner'].includes(r))">
+      <div class="stat-card red" v-if="roles.some(r => ['admin', 'pharmacist', 'practitioner'].includes(r))" @click="$router.push('/inventory?filter=low_stock')">
         <div class="stat-icon"><el-icon><Warning /></el-icon></div>
         <div class="stat-info">
           <div class="stat-number">{{ lowStockItems.length }}</div>
           <div class="stat-label">{{ t('dashboard.lowStockAlert') }}</div>
         </div>
       </div>
-      <div class="stat-card purple" v-if="roles.some(r => ['admin', 'practitioner'].includes(r))">
+      <div class="stat-card purple" v-if="roles.some(r => ['admin', 'practitioner'].includes(r))" @click="$router.push('/consultations')">
         <div class="stat-icon" style="background: #ede9fe; color: #7c3aed"><el-icon><TrendCharts /></el-icon></div>
         <div class="stat-info">
           <div class="stat-number">{{ weekStats.consultCount }}</div>

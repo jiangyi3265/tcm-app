@@ -520,6 +520,7 @@ async function saveServiceEdit() {
   const ptVal = serviceEditForm.value.practitionerTime
   const practitionerTime = ['overlap1', 'overlap2', 'full'].includes(ptVal) ? ptVal : 'overlap1'
   await settingsStore.updateServiceType(editingServiceKey.value, {
+    label: serviceEditForm.value.label,
     defaultPrice: Number(serviceEditForm.value.defaultPrice),
     duration: Number(serviceEditForm.value.duration),
     practitionerTime,
@@ -531,6 +532,20 @@ async function saveServiceEdit() {
   })
   editingServiceKey.value = null
   ElMessage.success(t('admin.saved'))
+}
+
+async function handleDeleteService(key, label) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除服务类型「${label || key}」吗？`,
+      '确认删除',
+      { confirmButtonText: t('common.confirm'), cancelButtonText: t('common.cancel'), type: 'warning' },
+    )
+    await settingsStore.deleteServiceType(key)
+    ElMessage.success('已删除')
+  } catch {
+    // cancelled
+  }
 }
 
 // ========== Price list management ==========
@@ -793,6 +808,9 @@ async function deleteSupplier(supplier) {
 
 // ========== Acupoint management ==========
 const showAddAcupointDialog = ref(false)
+const showImportAcupointsDialog = ref(false)
+const importAcupointsText = ref('')
+const importingAcupoints = ref(false)
 const newAcupoint = ref({ name: '', pinyin: '', englishName: '', meridian: '', location: '', indication: '', method: '', notes: '' })
 
 async function handleAddAcupoint() {
@@ -815,6 +833,44 @@ async function saveEditAcupoint() {
   await acupointsStore.updateAcupoint(editAcupointForm.value.id, editAcupointForm.value)
   showEditAcupointDialog.value = false
   ElMessage.success(t('admin.acupointUpdated'))
+}
+
+async function handleImportAcupoints() {
+  if (!importAcupointsText.value.trim()) return ElMessage.warning('请输入导入数据')
+  importingAcupoints.value = true
+  try {
+    const lines = importAcupointsText.value.trim().split('\n').filter(l => l.trim())
+    let created = 0
+    for (const line of lines) {
+      const parts = line.split(/[,\t，]/).map(s => s.trim())
+      if (!parts[0]) continue
+      const existing = acupointsStore.activeAcupoints.find(a => a.name === parts[0])
+      if (existing) continue
+      await acupointsStore.addAcupoint({
+        name: parts[0],
+        pinyin: parts[1] || '',
+        englishName: parts[2] || '',
+        meridian: parts[3] || '',
+        location: parts[4] || '',
+        indication: parts[5] || '',
+      })
+      created++
+    }
+    ElMessage.success(`导入完成，新增 ${created} 个穴位`)
+    showImportAcupointsDialog.value = false
+    importAcupointsText.value = ''
+  } catch (e) {
+    ElMessage.error(e.message || '导入失败')
+  } finally {
+    importingAcupoints.value = false
+  }
+}
+
+function handleAcupointFileUpload(file) {
+  const reader = new FileReader()
+  reader.onload = (e) => { importAcupointsText.value = e.target.result }
+  reader.readAsText(file.raw || file)
+  return false
 }
 
 async function deleteAcupoint(acu) {
@@ -843,6 +899,9 @@ async function deleteConversion(c) {
 
 // ========== Herb dictionary management ==========
 const showAddHerbDialog = ref(false)
+const showImportHerbsDialog = ref(false)
+const importHerbsText = ref('')
+const importingHerbs = ref(false)
 const newHerb = ref(createHerbDraft())
 const herbSearchQuery = ref('')
 const herbCategoryFilter = ref('')
@@ -875,6 +934,45 @@ async function saveEditHerb() {
 async function deleteHerb(herb) {
   await ElMessageBox.confirm(t('admin.confirmDeleteHerb', { name: herb.name }), t('admin.confirmDeleteTitle'), { type: 'warning' })
   await herbDictStore.deleteHerb(herb.id); ElMessage.success(t('admin.herbDeleted'))
+}
+
+async function handleImportHerbs() {
+  if (!importHerbsText.value.trim()) return ElMessage.warning('请输入导入数据')
+  importingHerbs.value = true
+  try {
+    const lines = importHerbsText.value.trim().split('\n').filter(l => l.trim())
+    let created = 0
+    for (const line of lines) {
+      const parts = line.split(/[,\t，]/).map(s => s.trim())
+      if (!parts[0]) continue
+      const existing = herbDictStore.activeHerbs.find(h => h.name === parts[0])
+      if (existing) continue
+      await herbDictStore.addHerb({
+        name: parts[0],
+        category: parts[1] || '',
+        nature: parts[2] || '',
+        taste: parts[3] || '',
+        guijing: parts[4] || '',
+        toxicity: parts[5] || '无毒',
+        efficacy: parts[6] || '',
+      })
+      created++
+    }
+    ElMessage.success(`导入完成，新增 ${created} 味草药`)
+    showImportHerbsDialog.value = false
+    importHerbsText.value = ''
+  } catch (e) {
+    ElMessage.error(e.message || '导入失败')
+  } finally {
+    importingHerbs.value = false
+  }
+}
+
+function handleHerbFileUpload(file) {
+  const reader = new FileReader()
+  reader.onload = (e) => { importHerbsText.value = e.target.result }
+  reader.readAsText(file.raw || file)
+  return false
 }
 
 // ========== Meridian management ==========
@@ -1398,7 +1496,14 @@ async function deleteTemplate(tmpl) {
           </el-button>
         </div>
         <el-table :data="Object.entries(settingsStore.serviceTypes).map(([key, val]) => ({key, ...val}))" stripe>
-          <el-table-column prop="label" :label="t('admin.serviceName')" min-width="140" />
+          <el-table-column prop="label" :label="t('admin.serviceName')" min-width="140">
+            <template #default="{ row }">
+              <div v-if="editingServiceKey === row.key">
+                <el-input v-model="serviceEditForm.label" size="small" style="width: 120px" />
+              </div>
+              <span v-else>{{ row.label }}</span>
+            </template>
+          </el-table-column>
           <el-table-column :label="t('admin.totalDuration')" width="140">
             <template #default="{ row }">
               <div v-if="editingServiceKey === row.key">
@@ -1480,7 +1585,10 @@ async function deleteTemplate(tmpl) {
                 <el-button size="small" text type="primary" @click="saveServiceEdit">{{ t('common.save') }}</el-button>
                 <el-button size="small" text @click="editingServiceKey = null">{{ t('common.cancel') }}</el-button>
               </div>
-              <el-button v-else size="small" text type="primary" @click="startEditService(row.key)">{{ t('common.edit') }}</el-button>
+              <div v-else>
+                <el-button size="small" text type="primary" @click="startEditService(row.key)">{{ t('common.edit') }}</el-button>
+                <el-button size="small" text type="danger" @click="handleDeleteService(row.key, row.label)">{{ t('common.delete') }}</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -1860,6 +1968,9 @@ async function deleteTemplate(tmpl) {
           <el-button type="primary" @click="showAddAcupointDialog = true">
             <el-icon><Plus /></el-icon> {{ t('admin.addAcupointBtn') }}
           </el-button>
+          <el-button @click="showImportAcupointsDialog = true">
+            <el-icon><Upload /></el-icon> 批量导入
+          </el-button>
         </div>
         <el-table :data="acupointsStore.activeAcupoints" stripe>
           <el-table-column :label="t('admin.acupointName')" width="100">
@@ -1974,6 +2085,7 @@ async function deleteTemplate(tmpl) {
       <el-tab-pane :label="t('admin.herbDictTab')" name="herbDict">
         <div class="tab-toolbar" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
           <el-button type="primary" @click="showAddHerbDialog = true"><el-icon><Plus /></el-icon> {{ t('admin.addHerb') }}</el-button>
+          <el-button @click="showImportHerbsDialog = true"><el-icon><Upload /></el-icon> 批量导入</el-button>
           <el-input v-model="herbSearchQuery" :placeholder="t('admin.herbSearchPh')" size="small" clearable style="width:180px" />
           <el-select v-model="herbCategoryFilter" :placeholder="t('admin.herbFilterCategory')" size="small" clearable style="width:140px">
             <el-option v-for="c in herbDictStore.categories" :key="c" :label="c" :value="c" />
@@ -2504,6 +2616,32 @@ async function deleteTemplate(tmpl) {
         <el-button type="primary" @click="handleAddAcupoint">{{ t('common.create') }}</el-button>
       </template>
     </el-drawer>
+
+    <!-- Import acupoints dialog -->
+    <el-dialog v-model="showImportAcupointsDialog" title="批量导入穴位" width="600px" :close-on-click-modal="false">
+      <p style="color:#666;margin:0 0 12px">每行一个穴位，字段用逗号或Tab分隔：<br><strong>穴位名, 拼音, 英文名, 所属经络, 定位, 主治</strong></p>
+      <el-upload :auto-upload="false" :show-file-list="false" accept=".csv,.txt,.tsv" :on-change="handleAcupointFileUpload" style="margin-bottom:12px">
+        <el-button size="small"><el-icon><Upload /></el-icon> 选择CSV/TXT文件</el-button>
+      </el-upload>
+      <el-input v-model="importAcupointsText" type="textarea" :rows="10" placeholder="合谷, Hé Gǔ, LI4 Hegu, 手阳明大肠经, 手背第1-2掌骨间, 头痛;牙痛;咽喉痛" />
+      <template #footer>
+        <el-button @click="showImportAcupointsDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="importingAcupoints" @click="handleImportAcupoints">导入</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Import herbs dialog -->
+    <el-dialog v-model="showImportHerbsDialog" title="批量导入草药" width="600px" :close-on-click-modal="false">
+      <p style="color:#666;margin:0 0 12px">每行一味药，字段用逗号或Tab分隔：<br><strong>药名, 分类, 性, 味, 归经, 毒性, 功效</strong></p>
+      <el-upload :auto-upload="false" :show-file-list="false" accept=".csv,.txt,.tsv" :on-change="handleHerbFileUpload" style="margin-bottom:12px">
+        <el-button size="small"><el-icon><Upload /></el-icon> 选择CSV/TXT文件</el-button>
+      </el-upload>
+      <el-input v-model="importHerbsText" type="textarea" :rows="10" placeholder="黄芪, 补气药, 微温, 甘, 脾;肺, 无毒, 补气升阳;固表止汗" />
+      <template #footer>
+        <el-button @click="showImportHerbsDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="importingHerbs" @click="handleImportHerbs">导入</el-button>
+      </template>
+    </el-dialog>
 
     <!-- Add unit conversion dialog -->
     <el-drawer v-model="showAddConversionDialog" :title="t('admin.addConversionDialog')" size="460px" direction="rtl" :close-on-click-modal="false">

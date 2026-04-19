@@ -242,9 +242,14 @@ async function handleCancelAppointment() {
   <div class="intake-page">
     <div class="intake-card">
       <div class="intake-header">
-        <div class="header-badge">OTCM</div>
+        <div class="header-badge">{{ appointmentInfo?.clinicName || 'OTCM' }}</div>
         <h1>{{ copy.pageTitle }}</h1>
         <p>{{ copy.pageSubtitle }}</p>
+        <p v-if="appointmentInfo?.clinicAddress || appointmentInfo?.clinicPhone" class="clinic-contact">
+          <span v-if="appointmentInfo?.clinicAddress">{{ appointmentInfo.clinicAddress }}</span>
+          <span v-if="appointmentInfo?.clinicAddress && appointmentInfo?.clinicPhone"> · </span>
+          <span v-if="appointmentInfo?.clinicPhone">{{ appointmentInfo.clinicPhone }}</span>
+        </p>
       </div>
 
       <div v-if="loading" class="state-box">
@@ -509,6 +514,12 @@ async function handleCancelAppointment() {
 .intake-header p {
   margin: 0;
   opacity: 0.92;
+}
+
+.clinic-contact {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-top: 4px !important;
 }
 
 .state-box {
