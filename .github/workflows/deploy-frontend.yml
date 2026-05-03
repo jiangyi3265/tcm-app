@@ -59,4 +59,4 @@ jobs:
           tar -C dist -czf /tmp/otcm-frontend-dist.tar.gz .
           ssh -p "$PORT" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$WEB_ROOT'"
           scp -P "$PORT" /tmp/otcm-frontend-dist.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/tmp/otcm-frontend-dist.tar.gz"
-          ssh -p "$PORT" "$DEPLOY_USER@$DEPLOY_HOST" "tar -xzf /tmp/otcm-frontend-dist.tar.gz -C '$WEB_ROOT' && nginx -t && systemctl reload nginx"
+          ssh -p "$PORT" "$DEPLOY_USER@$DEPLOY_HOST" "tar -xzf /tmp/otcm-frontend-dist.tar.gz -C '$WEB_ROOT' && nginx -t && (systemctl reload nginx || service nginx reload || /etc/init.d/nginx reload || /www/server/nginx/sbin/nginx -s reload)"
