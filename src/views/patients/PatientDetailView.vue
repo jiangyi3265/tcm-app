@@ -39,9 +39,11 @@ const isApprenticeReadonly = computed(() => roles.value.includes('apprentice'))
 const patientId = route.params.id
 const patient = computed(() => patientsStore.getPatient(patientId))
 const PUBLIC_LINK_STORAGE_PREFIX = 'patient_public_links_'
+const CONFIGURED_PUBLIC_BASE_URL = (import.meta.env.VITE_PUBLIC_APP_BASE_URL || '').trim()
 
 function getPublicBaseUrl() {
-  return `${window.location.origin.replace(/\/$/, '')}/`
+  const baseUrl = CONFIGURED_PUBLIC_BASE_URL || window.location.origin
+  return `${baseUrl.replace(/\/+$/, '')}/`
 }
 
 function loadStoredPublicLinks() {
@@ -373,7 +375,7 @@ async function sendConsentByEmail() {
   try {
     const res = await patientsApi.sendConsentEmail(patientId, {
       clinicName: settingsStore.clinicName || '',
-      appBaseUrl: window.location.origin,
+      appBaseUrl: getPublicBaseUrl(),
     })
     if (res?.publicLink) {
       publicLinks.value.consent = res.publicLink
@@ -402,7 +404,7 @@ async function sendIntakeByEmail() {
   try {
     const res = await patientsApi.sendIntakeEmail(patientId, {
       clinicName: settingsStore.clinicName || '',
-      appBaseUrl: window.location.origin,
+      appBaseUrl: getPublicBaseUrl(),
     })
     if (res?.publicLink) {
       publicLinks.value.intake = res.publicLink

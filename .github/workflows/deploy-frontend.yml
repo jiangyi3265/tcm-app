@@ -21,6 +21,7 @@ jobs:
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
       DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
       WEB_ROOT: /www/wwwroot/www.otcm.app
+      VITE_PUBLIC_APP_BASE_URL: https://www.otcm.app
 
     steps:
       - name: Checkout
