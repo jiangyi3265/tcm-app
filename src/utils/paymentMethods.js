@@ -33,6 +33,10 @@ export function requiresPosSimulation(value = '') {
   return normalizePaymentMethodValue(value) === 'bankcard'
 }
 
+export function requiresStripeCheckout(value = '') {
+  return normalizePaymentMethodValue(value) === 'bankcard'
+}
+
 export function canStartInvoicePayment({ consultationId, outstandingAmount, consultationStatus } = {}) {
   const status = String(consultationStatus ?? '').trim().toLowerCase()
   return !!String(consultationId ?? '').trim()

@@ -6,6 +6,8 @@ import { usePatientsStore } from '../../stores/patients'
 import { useAuthStore } from '../../stores/auth'
 import { useInventoryStore } from '../../stores/inventory'
 import { useBranchesStore } from '../../stores/branches'
+import { useSettingsStore } from '../../stores/settings'
+import { stripeApi } from '../../utils/api'
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
 import {
   getActivePrescriptions,
@@ -15,7 +17,7 @@ import {
   getPaymentStatus,
   getPrescriptionStatus,
 } from '../../utils/prescriptionWorkflow'
-import { getPaymentMethodLabel, getPaymentMethodOptions, normalizePaymentMethodValue } from '../../utils/paymentMethods'
+import { getPaymentMethodLabel, getPaymentMethodOptions, normalizePaymentMethodValue, requiresStripeCheckout } from '../../utils/paymentMethods'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t, locale } = useI18n()
@@ -24,6 +26,7 @@ const patientsStore = usePatientsStore()
 const authStore = useAuthStore()
 const inventoryStore = useInventoryStore()
 const branchesStore = useBranchesStore()
+const settingsStore = useSettingsStore()
 const isMobile = inject('isMobile', ref(false))
 
 const activeTab = ref('pending')
@@ -103,6 +106,16 @@ const paymentMethods = computed(() => getPaymentMethodOptions(t))
 function formatAmount(value) {
   const amount = Number(value)
   return Number.isFinite(amount) ? amount.toFixed(2) : '0.00'
+}
+
+function money(value, currency = null) {
+  const code = currency || settingsStore.currency || 'CAD'
+  const prefix = ['CAD', 'USD'].includes(code) ? '$' : `${code} `
+  return `${prefix}${formatAmount(value)}`
+}
+
+function rowMoney(row, value) {
+  return money(value, row?.consultation?.currency)
 }
 
 function getConsultPrescriptionItems(row) {
@@ -228,8 +241,17 @@ async function processPayment(row) {
   }
 
   try {
+    const method = normalizePaymentMethodValue(selectedPaymentMethod.value)
+    if (requiresStripeCheckout(method)) {
+      const session = await stripeApi.createCheckoutSession(row.consultationId)
+      if (session?.url) {
+        window.location.href = session.url
+        return
+      }
+      throw new Error('Stripe checkout session was not returned.')
+    }
     const updated = await consultationsStore.markAsPaid(row.consultationId, {
-      paymentMethod: normalizePaymentMethodValue(selectedPaymentMethod.value),
+      paymentMethod: method,
       amount: row.outstandingAmount,
     })
     refreshSelectedRow(updated?.id || row.consultationId, row.prescriptionId)
@@ -312,8 +334,8 @@ async function reopenPrescription(row) {
               {{ buildHerbSummary(row) }}
             </div>
             <div class="rx-meta">
-              <span>{{ t('cashier.currentCharge') }} ${{ formatAmount(row.outstandingAmount) }}</span>
-              <span>{{ t('cashier.paidAmount') }} ${{ formatAmount(row.paidAmount) }}</span>
+              <span>{{ t('cashier.currentCharge') }} {{ rowMoney(row, row.outstandingAmount) }}</span>
+              <span>{{ t('cashier.paidAmount') }} {{ rowMoney(row, row.paidAmount) }}</span>
             </div>
           </el-card>
         </div>
@@ -355,7 +377,7 @@ async function reopenPrescription(row) {
             </div>
 
             <div class="rx-actions" @click.stop>
-              <span class="rx-amount">{{ t('cashier.currentCharge') }} ${{ formatAmount(row.outstandingAmount) }}</span>
+              <span class="rx-amount">{{ t('cashier.currentCharge') }} {{ rowMoney(row, row.outstandingAmount) }}</span>
               <el-button v-if="row.outstandingAmount > 0" size="small" @click="processPayment(row)">
                 {{ t('pharmacy.collectPayment') }}
               </el-button>
@@ -435,9 +457,9 @@ async function reopenPrescription(row) {
         </div>
 
         <div class="rx-payment-card">
-          <div>{{ t('cashier.totalCharge') }}: ${{ formatAmount(selectedRow.consultation?.totalAmount) }}</div>
-          <div>{{ t('cashier.paidAmount') }}: ${{ formatAmount(selectedRow.paidAmount) }}</div>
-          <div>{{ t('cashier.currentCharge') }}: ${{ formatAmount(selectedRow.outstandingAmount) }}</div>
+          <div>{{ t('cashier.totalCharge') }}: {{ rowMoney(selectedRow, selectedRow.consultation?.totalAmount) }}</div>
+          <div>{{ t('cashier.paidAmount') }}: {{ rowMoney(selectedRow, selectedRow.paidAmount) }}</div>
+          <div>{{ t('cashier.currentCharge') }}: {{ rowMoney(selectedRow, selectedRow.outstandingAmount) }}</div>
           <div v-if="getPaymentRecords(selectedRow.consultation).length">
             {{ t('cashier.paymentMethod') }}：{{ getPaymentMethodLabel(getPaymentRecords(selectedRow.consultation)[0]?.method, t) }}
           </div>

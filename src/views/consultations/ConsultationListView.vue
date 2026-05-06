@@ -29,7 +29,6 @@ const STATUS_TYPES = {
 const CURRENCY_SYMBOLS = {
   CAD: '$',
   USD: '$',
-  CNY: 'CNY ',
 }
 
 const patientConsultationsMap = computed(() => {
@@ -56,7 +55,7 @@ function getPractitionerName(practitionerId) {
 function formatAmount(row) {
   const amount = Number(row.totalAmount || 0)
   if (amount <= 0) return '-'
-  const symbol = CURRENCY_SYMBOLS[row.currency] || 'CNY '
+  const symbol = CURRENCY_SYMBOLS[row.currency] || `${row.currency || 'CAD'} `
   return `${symbol}${amount.toFixed(2)}`
 }
 

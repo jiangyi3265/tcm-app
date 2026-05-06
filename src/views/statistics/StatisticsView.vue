@@ -17,14 +17,14 @@ const patientsStore = usePatientsStore()
 const appointmentsStore = useAppointmentsStore()
 const inventoryStore = useInventoryStore()
 
-const CURRENCY_SYMBOLS = { CAD: '$', USD: '$', CNY: '¥' }
+const CURRENCY_SYMBOLS = { CAD: '$', USD: '$' }
 const cs = computed(() => {
   const currencies = allPaymentRecords.value.map((record) => record.consultation?.currency).filter(Boolean)
-  if (currencies.length === 0) return '¥'
+  if (currencies.length === 0) return '$'
   const counts = {}
   currencies.forEach(c => { counts[c] = (counts[c] || 0) + 1 })
   const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0]
-  return CURRENCY_SYMBOLS[top] || '¥'
+  return CURRENCY_SYMBOLS[top] || `${top} `
 })
 
 const loading = ref(false)

@@ -205,6 +205,15 @@ export const consultationsApi = {
   },
 }
 
+export const stripeApi = {
+  createCheckoutSession(consultationId) {
+    return request('/api/stripe/checkout-sessions', {
+      method: 'POST',
+      body: { consultationId },
+    })
+  },
+}
+
 export const inventoryApi = {
   list(options = {}) {
     const params = buildQuery({ includeDeleted: options.includeDeleted ? true : undefined })
@@ -253,6 +262,20 @@ export const branchesApi = {
 export const settingsApi = {
   getBundle() { return request('/api/settings') },
   updateBase(data) { return request('/api/settings/base', { method: 'PUT', body: data }) },
+  async uploadSignaturePng(file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    const token = getToken()
+    if (!token) throw new Error('Please log in again.')
+    const res = await fetch('/api/settings/signature/upload', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    })
+    const payload = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(payload.msg || payload.message || 'Upload failed')
+    return payload
+  },
   addRoom(data) { return request('/api/settings/rooms', { method: 'POST', body: data }) },
   updateRoom(id, data) { return request(`/api/settings/rooms/${id}`, { method: 'PUT', body: data }) },
   updateServiceType(key, data) {

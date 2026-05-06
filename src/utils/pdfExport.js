@@ -7,7 +7,7 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;')
 }
 
-function formatMoney(value, currency = 'CNY') {
+function formatMoney(value, currency = 'CAD') {
   return `${escapeHtml(currency)} ${Number(value || 0).toFixed(2)}`
 }
 
@@ -94,7 +94,7 @@ function buildDiffSummary(diff = {}) {
   }).join('')}</ul>`
 }
 
-function buildPrescriptionTables(prescriptions = [], currency = 'CNY') {
+function buildPrescriptionTables(prescriptions = [], currency = 'CAD') {
   if (!Array.isArray(prescriptions) || prescriptions.length === 0) {
     return '<p class="muted">No prescriptions recorded.</p>'
   }
@@ -156,7 +156,7 @@ export function printConsultationReport(consultation, patient, practitioner, cli
     'No differentiation conclusions recorded.',
     2,
   )
-  const currency = consultation?.currency || 'CNY'
+  const currency = consultation?.currency || 'CAD'
 
   const bodyHtml = `
     <div class="header">
@@ -223,7 +223,7 @@ export function printConsultationReport(consultation, patient, practitioner, cli
 
 export function printInvoice(consultation, patient, practitioner, clinicName, taxRate) {
   const clinic = clinicName || 'TCM Clinic Management System'
-  const currency = consultation?.currency || 'CNY'
+  const currency = consultation?.currency || 'CAD'
   const services = Array.isArray(consultation?.services) ? consultation.services : []
   const totalServiceAmount = getConsultationServiceTotal(consultation)
   const prescriptionAmount = getConsultationPrescriptionTotal(consultation)

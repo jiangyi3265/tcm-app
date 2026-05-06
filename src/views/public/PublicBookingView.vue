@@ -107,7 +107,8 @@ function resolveWindowEnd(start, settings) {
 const currentWeek = ref(alignWeekStart(dayjs()))
 
 const form = ref({
-  patientName: '',
+  firstName: '',
+  lastName: '',
   phone: '',
   email: '',
   practitionerId: '',
@@ -419,7 +420,7 @@ function getSelectedSlotMeta(slot) {
 }
 
 async function submitBooking() {
-  if (!form.value.patientName.trim()) return ElMessage.warning(t('publicBooking.nameRequired'))
+  if (!form.value.lastName.trim() || !form.value.firstName.trim()) return ElMessage.warning(t('publicBooking.nameRequired'))
   if (!form.value.phone.trim()) return ElMessage.warning(t('publicBooking.phoneRequired'))
   if (!form.value.serviceType) return ElMessage.warning(t('appointments.selectServiceType'))
   if (!selectedDateValue.value) return ElMessage.warning(t('publicBooking.selectDateHint'))
@@ -427,7 +428,9 @@ async function submitBooking() {
 
   try {
     const response = await publicBookingApi.create({
-      patientName: form.value.patientName.trim(),
+      firstName: form.value.firstName.trim(),
+      lastName: form.value.lastName.trim(),
+      patientName: `${form.value.lastName.trim()} ${form.value.firstName.trim()}`.trim(),
       phone: form.value.phone.trim(),
       email: form.value.email.trim(),
       practitionerId: form.value.practitionerId || selectedSlot.value.assignedPractitionerId || null,
@@ -517,18 +520,24 @@ onMounted(() => {
 
       <el-form v-else :model="form" label-position="top" class="public-form">
         <div class="grid two-col">
-          <el-form-item :label="t('publicBooking.patientName')" required>
-            <el-input v-model="form.patientName" :placeholder="t('publicBooking.patientNamePlaceholder')" />
+          <el-form-item label="Last name / 姓" required>
+            <el-input v-model="form.lastName" placeholder="Last name" />
           </el-form-item>
-          <el-form-item :label="t('publicBooking.phone')" required>
-            <el-input v-model="form.phone" :placeholder="t('publicBooking.phonePlaceholder')" />
+          <el-form-item label="First name / 名" required>
+            <el-input v-model="form.firstName" placeholder="First name" />
           </el-form-item>
         </div>
 
         <div class="grid two-col">
+          <el-form-item :label="t('publicBooking.phone')" required>
+            <el-input v-model="form.phone" :placeholder="t('publicBooking.phonePlaceholder')" />
+          </el-form-item>
           <el-form-item :label="t('publicBooking.email')">
             <el-input v-model="form.email" :placeholder="t('publicBooking.emailPlaceholder')" />
           </el-form-item>
+        </div>
+
+        <div class="grid two-col">
           <el-form-item :label="t('appointments.serviceType')" required>
             <el-select v-model="form.serviceType" style="width:100%">
               <el-option v-for="service in serviceTypes" :key="service.key" :label="service.label" :value="service.key" />

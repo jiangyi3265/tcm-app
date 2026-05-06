@@ -513,10 +513,44 @@ const fileTree = computed(() => {
     { label: t('patientDetail.folderConsent'), icon: 'FolderOpened', children: [] },
     { label: t('patientDetail.folderConsultations'), icon: 'FolderOpened', children: [] },
   ]
-  for (const f of patientFiles.value) {
+  const files = [...patientFiles.value]
+  for (const consult of consultationsStore.getPatientConsultations(patientId)) {
+    const consultDate = consult.date || consult.createdAt || consult.id
+    const tongueResource = consult.diff?.tongueImageResource || consult.diff?.tongueImage
+    if (tongueResource) {
+      files.push({
+        fileName: `${formatDate(consultDate)} - Tongue Image`,
+        fileType: 'tongue_image',
+        type: 'image',
+        resource: tongueResource,
+        consultationId: consult.id,
+        consultDate,
+        uploadedAt: consult.updatedAt || consult.createdAt || consult.date,
+      })
+    }
+    for (const doc of consult.documents || []) {
+      files.push({
+        fileName: doc.name,
+        fileType: doc.type || 'document',
+        fileSize: doc.size,
+        resource: doc.resource || doc.url || doc.data,
+        url: doc.url,
+        consultationId: consult.id,
+        consultDate,
+        uploadedAt: doc.uploadedAt || consult.updatedAt || consult.createdAt,
+      })
+    }
+  }
+  const seenFiles = new Set()
+  for (const f of files) {
+    const fileUrl = f.url || f.resource || f.filePath
+    const fileLabel = f.fileName || f.name || 'file'
+    const fileKey = `${f.consultationId || 'patient'}-${fileUrl || fileLabel}`
+    if (seenFiles.has(fileKey)) continue
+    seenFiles.add(fileKey)
     const node = {
-      label: f.fileName || f.name || 'file',
-      url: f.url || f.resource || f.filePath,
+      label: fileLabel,
+      url: fileUrl,
       size: f.fileSize,
       date: f.uploadTime || f.createTime || f.uploadedAt,
       isFile: true,
@@ -1108,9 +1142,6 @@ const fileTree = computed(() => {
             <el-table-column :label="t('patientDetail.chiefComplaintDescription')" min-width="150" show-overflow-tooltip>
               <template #default="{ row }">{{ row.chiefComplaintDescription || '-' }}</template>
             </el-table-column>
-            <el-table-column :label="t('patientDetail.coldHeat')" width="80">
-              <template #default="{ row }">{{ getColdHeat(row) }}</template>
-            </el-table-column>
             <el-table-column :label="t('common.amount')" width="100" align="right">
               <template #default="{ row }">
                 <span v-if="row.totalAmount > 0" style="font-weight:600">
@@ -1657,4 +1688,53 @@ const fileTree = computed(() => {
 }
 .file-name { color: #555; flex: 1; }
 .file-date { color: #aaa; font-size: 12px; }
+
+@media (max-width: 767px) {
+  .patient-header,
+  .patient-avatar-info,
+  .card-header,
+  .consult-toolbar,
+  .files-toolbar,
+  .compare-nav {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .patient-actions,
+  .consult-toolbar-left,
+  .files-toolbar {
+    width: 100%;
+  }
+
+  .patient-actions :deep(.el-button),
+  .consult-toolbar-left :deep(.el-button),
+  .files-toolbar :deep(.el-button) {
+    width: 100%;
+    justify-content: center;
+    margin-left: 0;
+  }
+
+  :deep(.el-row) {
+    row-gap: 12px;
+  }
+
+  :deep(.el-col) {
+    max-width: 100%;
+    flex: 0 0 100%;
+  }
+
+  .compare-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .folder-children,
+  .subfolder-children {
+    padding-left: 12px;
+  }
+
+  .file-item {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}
 </style>

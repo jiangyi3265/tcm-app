@@ -313,7 +313,7 @@ const preferredSlotStartTime = ref('')
 const availabilityLoading = ref(false)
 const availabilityState = ref({ slots: [], duration: 0, slotStepMinutes: 10 })
 const quickCreateMode = ref(false)
-const quickPatientForm = ref({ name: '', email: '' })
+const quickPatientForm = ref({ firstName: '', lastName: '', email: '' })
 const quickCreating = ref(false)
 let availabilityRequestId = 0
 
@@ -416,25 +416,27 @@ function closeCreateDialog() {
   preferredSlotStartTime.value = ''
   selectedSlotValue.value = ''
   quickCreateMode.value = false
-  quickPatientForm.value = { name: '', email: '' }
+  quickPatientForm.value = { firstName: '', lastName: '', email: '' }
 }
 
 async function quickCreatePatient() {
-  const name = quickPatientForm.value.name?.trim()
+  const firstName = quickPatientForm.value.firstName?.trim()
+  const lastName = quickPatientForm.value.lastName?.trim()
   const email = quickPatientForm.value.email?.trim()
-  if (!name) return ElMessage.warning('请输入病人姓名')
+  if (!lastName || !firstName) return ElMessage.warning('请输入病人姓和名')
   if (!email) return ElMessage.warning('请输入病人邮箱')
+  const name = `${lastName} ${firstName}`.trim()
   quickCreating.value = true
   try {
     const patient = await patientsStore.addPatient({
       name,
-      firstName: name,
-      lastName: '',
+      firstName,
+      lastName,
       emails: [email],
     })
     newAppt.value.patientId = patient.id
     quickCreateMode.value = false
-    quickPatientForm.value = { name: '', email: '' }
+    quickPatientForm.value = { firstName: '', lastName: '', email: '' }
     ElMessage.success(`病人「${patient.name}」已创建`)
   } catch (error) {
     ElMessage.error(error.message || '创建病人失败')
@@ -965,7 +967,8 @@ function getAppointmentBlockStyle(block) {
           <template v-else>
             <div style="width:100%">
               <div style="display:flex;gap:8px;margin-bottom:8px">
-                <el-input v-model="quickPatientForm.name" placeholder="病人姓名" style="flex:1" />
+                <el-input v-model="quickPatientForm.lastName" placeholder="姓 Last name" style="flex:1" />
+                <el-input v-model="quickPatientForm.firstName" placeholder="名 First name" style="flex:1" />
                 <el-input v-model="quickPatientForm.email" placeholder="邮箱" style="flex:1" />
               </div>
               <div style="display:flex;gap:8px">

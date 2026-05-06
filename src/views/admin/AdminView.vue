@@ -25,6 +25,7 @@ import {
   validateWorkingHours,
 } from '../../utils/workingHours'
 import { bindHerbSelection } from '../../utils/herbBinding'
+import { parseCsvText, rowsToObjects, toNumber } from '../../utils/csvImport'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { authApi, bootstrapApi, usersApi } from '../../utils/api'
 
@@ -46,6 +47,11 @@ const templatesStore = useTemplatesStore()
 const activeTab = ref('users')
 
 const herbOptions = computed(() => herbDictStore.activeHerbs)
+const CURRENCY_OPTIONS = [
+  { value: 'CAD', label: 'Canadian Dollar CAD' },
+  { value: 'USD', label: 'US Dollar USD' },
+]
+const currentCurrency = computed(() => settingsStore.currency || 'CAD')
 const TOXICITY_OPTIONS = ['无毒', '小毒', '有毒', '大毒']
 const SERVICE_TAG_OPTIONS = computed(() => ([
   { value: 'acupuncture', label: t('admin.tagAcupuncture') },
@@ -92,6 +98,16 @@ function syncDraftHerb(draftRef, herbId) {
 
 function syncRowHerb(row, herbId) {
   Object.assign(row, applyHerbSelection(row, herbId))
+}
+
+function formatMoney(value) {
+  return `${currentCurrency.value} ${Number(value || 0).toFixed(2)}`
+}
+
+function normalizeAdminList(list = []) {
+  return [...new Set((Array.isArray(list) ? list : [])
+    .map((item) => String(item || '').trim())
+    .filter(Boolean))]
 }
 
 function validateFormulaHerbs(items = []) {
@@ -372,7 +388,50 @@ const settingsForm = reactive({
   clinicName: settingsStore.clinicName,
   clinicAddress: settingsStore.clinicAddress,
   clinicPhone: settingsStore.clinicPhone,
+  currency: settingsStore.currency || 'CAD',
 })
+const practitionerProfileForm = reactive({ ...settingsStore.practitionerProfile })
+
+const EMAIL_TEMPLATE_LABELS = {
+  appointmentConfirmation: '预约确认',
+  appointmentCancellation: '预约取消',
+  consultationRecord: '问诊记录',
+  invoice: '发票',
+  reminder: '提醒',
+  consent: '知情同意书',
+  intake: '就诊资料表',
+}
+const emailTemplateDrafts = reactive(
+  Object.fromEntries(Object.entries(settingsStore.emailTemplates).map(([key, value]) => [key, { ...value }])),
+)
+const signaturePreviewUrl = ref(settingsStore.thirdPartySignature.url || '')
+const uploadingSignature = ref(false)
+const importCsvText = ref('')
+const importingCsv = ref(false)
+const csvImportForm = reactive({ target: 'herbs' })
+const CSV_IMPORT_TARGETS = [
+  { value: 'herbs', label: '草药' },
+  { value: 'inventory', label: '库存' },
+  { value: 'differentiation', label: '辨证' },
+  { value: 'acupoints', label: '针灸穴位' },
+  { value: 'patients', label: '病人' },
+]
+const CSV_IMPORT_HINTS = {
+  herbs: 'name,category,nature,taste,meridianTropism,toxicity,efficacy,dosageRange',
+  inventory: 'name,category,quantity,unit,pricePerUnit,supplier,minStockLevel,branchId',
+  differentiation: 'name',
+  acupoints: 'name,pinyin,englishName,meridian,location,indication,method',
+  patients: 'firstName,lastName,email,phone,dateOfBirth,gender,address,notes',
+}
+
+const adminListDrafts = reactive({
+  patentMedicines: normalizeAdminList(settingsStore.patentMedicines).join('\n'),
+  formulaCategories: normalizeAdminList(settingsStore.formulaCategories).join('\n'),
+  differentiationNames: normalizeAdminList(settingsStore.differentiationNames).join('\n'),
+})
+const patentMedicineRows = computed(() =>
+  normalizeAdminList(settingsStore.patentMedicines).map((name) => ({ name })),
+)
 
 async function saveSettings() {
   await settingsStore.updateSettings({
@@ -385,7 +444,166 @@ async function saveSettings() {
     clinicName: settingsForm.clinicName,
     clinicAddress: settingsForm.clinicAddress,
     clinicPhone: settingsForm.clinicPhone,
+    currency: settingsForm.currency || 'CAD',
+    practitionerProfile: { ...practitionerProfileForm },
   })
+  ElMessage.success(t('admin.settingsSaved'))
+}
+
+async function saveEmailTemplates() {
+  await settingsStore.updateSettings({ emailTemplates: { ...emailTemplateDrafts } })
+  ElMessage.success(t('admin.settingsSaved'))
+}
+
+async function handleSignatureUpload(file) {
+  const rawFile = file.raw || file
+  if (rawFile.type && rawFile.type !== 'image/png') {
+    ElMessage.warning('请上传 PNG 签名图片')
+    return false
+  }
+  uploadingSignature.value = true
+  try {
+    const uploaded = await settingsStore.uploadSignaturePng(rawFile)
+    signaturePreviewUrl.value = uploaded.url || ''
+    ElMessage.success('签名已上传')
+  } catch (e) {
+    ElMessage.error(e.message || '签名上传失败')
+  } finally {
+    uploadingSignature.value = false
+  }
+  return false
+}
+
+function handleCsvFileUpload(file) {
+  const reader = new FileReader()
+  reader.onload = (e) => { importCsvText.value = e.target.result }
+  reader.readAsText(file.raw || file)
+  return false
+}
+
+async function handleCsvImport() {
+  if (!importCsvText.value.trim()) return ElMessage.warning('请输入或上传 CSV 数据')
+  importingCsv.value = true
+  try {
+    const rows = parseCsvText(importCsvText.value)
+    const count = await importCsvRows(csvImportForm.target, rows)
+    ElMessage.success(`导入完成，处理 ${count} 条记录`)
+    importCsvText.value = ''
+  } catch (e) {
+    ElMessage.error(e.message || 'CSV 导入失败')
+  } finally {
+    importingCsv.value = false
+  }
+}
+
+async function importCsvRows(target, rows) {
+  if (target === 'herbs') {
+    const items = rowsToObjects(rows, {
+      name: ['name', '名称', '草药', '草药名'],
+      category: ['category', '分类', '类别'],
+      nature: ['nature', '性味', '药性', '性'],
+      taste: ['taste', '味'],
+      meridianTropism: ['meridiantropism', '归经', '经络'],
+      toxicity: ['toxicity', '毒性'],
+      efficacy: ['efficacy', '功效'],
+      dosageRange: ['dosagerange', '剂量'],
+    }, ['name', 'category', 'nature', 'taste', 'meridianTropism', 'toxicity', 'efficacy', 'dosageRange'])
+    let created = 0
+    for (const item of items) {
+      if (!item.name || herbDictStore.activeHerbs.some((h) => h.name === item.name)) continue
+      await herbDictStore.addHerb({ ...createHerbDraft(), ...item, toxicity: item.toxicity || '无毒' })
+      created += 1
+    }
+    return created
+  }
+  if (target === 'inventory') {
+    const items = rowsToObjects(rows, {
+      name: ['name', '名称', '库存名'],
+      category: ['category', '分类'],
+      quantity: ['quantity', '数量', '库存'],
+      unit: ['unit', '单位'],
+      pricePerUnit: ['priceperunit', '单价', '成本'],
+      supplier: ['supplier', '供应商'],
+      supplierId: ['supplierid', '供应商id'],
+      minStockLevel: ['minstocklevel', '最低库存'],
+      branchId: ['branchid', '分店id'],
+    }, ['name', 'category', 'quantity', 'unit', 'pricePerUnit', 'supplier', 'minStockLevel', 'branchId'])
+      .filter((item) => item.name)
+      .map((item) => ({
+        ...item,
+        category: item.category || 'raw_herbs',
+        quantity: toNumber(item.quantity),
+        pricePerUnit: toNumber(item.pricePerUnit),
+        minStockLevel: toNumber(item.minStockLevel, 10),
+      }))
+    const result = await inventoryStore.batchImport(items)
+    return Number(result?.created || 0) + Number(result?.updated || 0)
+  }
+  if (target === 'differentiation') {
+    const names = rows.map((row) => row[0]).map((name) => String(name || '').trim()).filter(Boolean)
+    await settingsStore.updateSettings({
+      differentiationNames: normalizeAdminList([...settingsStore.differentiationNames, ...names]),
+    })
+    adminListDrafts.differentiationNames = normalizeAdminList(settingsStore.differentiationNames).join('\n')
+    return names.length
+  }
+  if (target === 'acupoints') {
+    const items = rowsToObjects(rows, {
+      name: ['name', '名称', '穴位'],
+      pinyin: ['pinyin', '拼音'],
+      englishName: ['englishname', '英文', '英文名'],
+      meridian: ['meridian', '经络'],
+      location: ['location', '定位'],
+      indication: ['indication', '主治'],
+      method: ['method', '手法'],
+    }, ['name', 'pinyin', 'englishName', 'meridian', 'location', 'indication', 'method'])
+    let created = 0
+    for (const item of items) {
+      if (!item.name || acupointsStore.activeAcupoints.some((a) => a.name === item.name)) continue
+      await acupointsStore.addAcupoint(item)
+      created += 1
+    }
+    return created
+  }
+  if (target === 'patients') {
+    const items = rowsToObjects(rows, {
+      firstName: ['firstname', '名', '名字'],
+      lastName: ['lastname', '姓'],
+      name: ['name', '姓名'],
+      email: ['email', '邮箱'],
+      phone: ['phone', '电话'],
+      mobilePhone: ['mobilephone', '手机'],
+      dateOfBirth: ['dateofbirth', 'dob', '生日'],
+      gender: ['gender', '性别'],
+      address: ['address', '地址'],
+      notes: ['notes', '备注'],
+    }, ['firstName', 'lastName', 'email', 'phone', 'dateOfBirth', 'gender', 'address', 'notes'])
+    let created = 0
+    for (const item of items) {
+      const name = item.name || `${item.lastName || ''} ${item.firstName || ''}`.trim()
+      if (!name) continue
+      await patientsStore.addPatient({
+        ...item,
+        name,
+        emails: item.email ? [item.email] : [],
+        mobilePhone: item.mobilePhone || item.phone || '',
+      })
+      created += 1
+    }
+    return created
+  }
+  return 0
+}
+
+async function saveEditableLists() {
+  await settingsStore.updateSettings({
+    patentMedicines: normalizeAdminList(adminListDrafts.patentMedicines.split('\n')),
+    formulaCategories: normalizeAdminList(adminListDrafts.formulaCategories.split('\n')),
+    differentiationNames: normalizeAdminList(adminListDrafts.differentiationNames.split('\n')),
+  })
+  adminListDrafts.patentMedicines = normalizeAdminList(settingsStore.patentMedicines).join('\n')
+  adminListDrafts.formulaCategories = normalizeAdminList(settingsStore.formulaCategories).join('\n')
+  adminListDrafts.differentiationNames = normalizeAdminList(settingsStore.differentiationNames).join('\n')
   ElMessage.success(t('admin.settingsSaved'))
 }
 
@@ -457,8 +675,6 @@ const newServiceForm = ref({
   requiredTag: '',
   roomRequired: true,
   publicVisible: true,
-  taxable: true,
-  pricingVisible: true,
 })
 
 function resetNewServiceForm() {
@@ -471,8 +687,6 @@ function resetNewServiceForm() {
     requiredTag: '',
     roomRequired: true,
     publicVisible: true,
-    taxable: true,
-    pricingVisible: true,
   }
 }
 
@@ -492,8 +706,6 @@ async function handleAddService() {
     requiredTag: form.requiredTag || '',
     roomRequired: Boolean(form.roomRequired),
     publicVisible: Boolean(form.publicVisible),
-    taxable: Boolean(form.taxable),
-    pricingVisible: Boolean(form.pricingVisible),
   })
   ElMessage.success(t('admin.saved'))
   showAddServiceDialog.value = false
@@ -506,8 +718,6 @@ function startEditService(key) {
     roomRequired: true,
     requiredTag: '',
     publicVisible: true,
-    taxable: true,
-    pricingVisible: true,
     ...settingsStore.serviceTypes[key],
   }
   if (!['overlap1', 'overlap2', 'full'].includes(base.practitionerTime)) {
@@ -527,8 +737,6 @@ async function saveServiceEdit() {
     roomRequired: Boolean(serviceEditForm.value.roomRequired),
     requiredTag: serviceEditForm.value.requiredTag || '',
     publicVisible: Boolean(serviceEditForm.value.publicVisible),
-    taxable: Boolean(serviceEditForm.value.taxable),
-    pricingVisible: Boolean(serviceEditForm.value.pricingVisible),
   })
   editingServiceKey.value = null
   ElMessage.success(t('admin.saved'))
@@ -715,6 +923,7 @@ function getManagerName(managerId) {
 const showAddFormulaDialog = ref(false)
 const newFormula = ref({ name: '', category: '', description: '', source: '', items: [] })
 const newFormulaHerb = ref(createFormulaHerbDraft())
+const formulaCategoryOptions = computed(() => settingsStore.formulaCategories || [])
 
 function addFormulaHerb() {
   if (!newFormulaHerb.value.herbDictId) return ElMessage.warning(t('inventory.selectHerbRequired'))
@@ -1002,12 +1211,28 @@ async function deleteMeridian(m) {
 // ========== Consultation template management ==========
 const showAddTemplateDialog = ref(false)
 const newTemplate = ref({ name: '', disease: '', category: '', description: '', acupoints: [], formulaIds: [], advice: '', notes: '' })
-const newTemplateAcupoint = ref('')
+const newTemplateAcupoint = ref({ acupointId: '', name: '', method: '' })
+
+function formatTemplateAcupoint(acu) {
+  if (typeof acu === 'string') return acu
+  if (!acu || typeof acu !== 'object') return ''
+  return `${acu.name || ''}${acu.method ? '(' + acu.method + ')' : ''}`.trim()
+}
+
+function handleTemplateAcupointSelection(target, acupointId) {
+  const acupoint = acupointsStore.activeAcupoints.find((item) => String(item.id) === String(acupointId))
+  if (!acupoint) return
+  target.name = acupoint.name || ''
+  if (!target.method) target.method = acupoint.method || ''
+}
 
 function addTemplateAcupoint() {
-  if (!newTemplateAcupoint.value) return
-  newTemplate.value.acupoints.push(newTemplateAcupoint.value)
-  newTemplateAcupoint.value = ''
+  if (!newTemplateAcupoint.value.name) return
+  newTemplate.value.acupoints.push({
+    name: newTemplateAcupoint.value.name,
+    method: newTemplateAcupoint.value.method || '',
+  })
+  newTemplateAcupoint.value = { acupointId: '', name: '', method: '' }
 }
 function removeTemplateAcupoint(idx) { newTemplate.value.acupoints.splice(idx, 1) }
 
@@ -1017,20 +1242,24 @@ async function handleAddTemplate() {
   ElMessage.success(t('admin.templateCreated'))
   showAddTemplateDialog.value = false
   newTemplate.value = { name: '', disease: '', category: '', description: '', acupoints: [], formulaIds: [], advice: '', notes: '' }
+  newTemplateAcupoint.value = { acupointId: '', name: '', method: '' }
 }
 
 const editingTemplateId = ref(null)
 const editTemplateForm = ref({})
-const editTemplateAcupoint = ref('')
+const editTemplateAcupoint = ref({ acupointId: '', name: '', method: '' })
 
 function startEditTemplate(t) {
   editingTemplateId.value = t.id
   editTemplateForm.value = { ...t, acupoints: [...(t.acupoints || [])], formulaIds: [...(t.formulaIds || [])] }
 }
 function addEditTemplateAcupoint() {
-  if (!editTemplateAcupoint.value) return
-  editTemplateForm.value.acupoints.push(editTemplateAcupoint.value)
-  editTemplateAcupoint.value = ''
+  if (!editTemplateAcupoint.value.name) return
+  editTemplateForm.value.acupoints.push({
+    name: editTemplateAcupoint.value.name,
+    method: editTemplateAcupoint.value.method || '',
+  })
+  editTemplateAcupoint.value = { acupointId: '', name: '', method: '' }
 }
 function removeEditTemplateAcupoint(idx) { editTemplateForm.value.acupoints.splice(idx, 1) }
 
@@ -1364,6 +1593,20 @@ async function deleteTemplate(tmpl) {
             <el-form-item :label="t('admin.clinicPhone')">
               <el-input v-model="settingsForm.clinicPhone" style="max-width: 200px" />
             </el-form-item>
+            <el-form-item label="针灸师姓名">
+              <el-input v-model="practitionerProfileForm.practitionerName" style="max-width: 300px" />
+            </el-form-item>
+            <el-form-item label="针灸师组织">
+              <el-input v-model="practitionerProfileForm.organization" style="max-width: 300px" />
+            </el-form-item>
+            <el-form-item label="组织号">
+              <el-input v-model="practitionerProfileForm.organizationNumber" style="max-width: 240px" />
+            </el-form-item>
+            <el-form-item label="系统货币">
+              <el-select v-model="settingsForm.currency" style="max-width: 240px">
+                <el-option v-for="option in CURRENCY_OPTIONS" :key="option.value" :label="option.label" :value="option.value" />
+              </el-select>
+            </el-form-item>
             <el-divider />
             <el-form-item :label="t('admin.defaultTaxRate')">
               <el-input-number
@@ -1435,6 +1678,78 @@ async function deleteTemplate(tmpl) {
             </el-form-item>
             <el-form-item>
               <el-button type="primary" @click="saveSettings">{{ t('admin.saveSettings') }}</el-button>
+            </el-form-item>
+          </el-form>
+          <el-divider />
+          <h4>后台可编辑下拉菜单</h4>
+          <el-form label-width="160px">
+            <el-form-item label="方剂种类">
+              <el-input v-model="adminListDrafts.formulaCategories" type="textarea" :rows="4" placeholder="每行一个方剂种类" style="max-width: 420px" />
+            </el-form-item>
+            <el-form-item label="辨证名称">
+              <el-input v-model="adminListDrafts.differentiationNames" type="textarea" :rows="5" placeholder="每行一个辨证名称" style="max-width: 420px" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="saveEditableLists">{{ t('common.save') }}</el-button>
+            </el-form-item>
+          </el-form>
+          <el-divider />
+          <h4>后台 CSV 导入</h4>
+          <el-form label-width="160px">
+            <el-form-item label="导入类型">
+              <el-select v-model="csvImportForm.target" style="max-width: 240px">
+                <el-option v-for="option in CSV_IMPORT_TARGETS" :key="option.value" :label="option.label" :value="option.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="CSV 文件">
+              <el-upload :auto-upload="false" :show-file-list="false" accept=".csv,.txt,.tsv" :on-change="handleCsvFileUpload">
+                <el-button><el-icon><Upload /></el-icon> 选择 CSV</el-button>
+              </el-upload>
+            </el-form-item>
+            <el-form-item label="CSV 内容">
+              <el-input
+                v-model="importCsvText"
+                type="textarea"
+                :rows="6"
+                :placeholder="CSV_IMPORT_HINTS[csvImportForm.target]"
+                style="max-width: 680px"
+              />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="importingCsv" @click="handleCsvImport">
+                <el-icon><Upload /></el-icon> 导入 CSV
+              </el-button>
+            </el-form-item>
+          </el-form>
+          <el-divider />
+          <h4>邮件模板</h4>
+          <el-form label-width="160px">
+            <div v-for="(draft, key) in emailTemplateDrafts" :key="key" class="email-template-editor">
+              <div class="email-template-title">{{ EMAIL_TEMPLATE_LABELS[key] || key }}</div>
+              <el-form-item label="标题">
+                <el-input v-model="draft.subject" style="max-width: 520px" />
+              </el-form-item>
+              <el-form-item label="正文">
+                <el-input v-model="draft.body" type="textarea" :rows="4" style="max-width: 680px" />
+              </el-form-item>
+            </div>
+            <el-form-item>
+              <el-button type="primary" @click="saveEmailTemplates">{{ t('common.save') }}</el-button>
+            </el-form-item>
+          </el-form>
+          <el-divider />
+          <h4>第三方签名 PNG</h4>
+          <el-form label-width="160px">
+            <el-form-item label="上传签名">
+              <el-upload :auto-upload="false" :show-file-list="false" accept="image/png,.png" :on-change="handleSignatureUpload">
+                <el-button :loading="uploadingSignature"><el-icon><Upload /></el-icon> 上传 PNG</el-button>
+              </el-upload>
+            </el-form-item>
+            <el-form-item v-if="signaturePreviewUrl || settingsStore.thirdPartySignature.path" label="预览">
+              <div class="signature-preview">
+                <img v-if="signaturePreviewUrl" :src="signaturePreviewUrl" alt="third party signature" />
+                <span v-else>{{ settingsStore.thirdPartySignature.path }}</span>
+              </div>
             </el-form-item>
           </el-form>
           <el-divider />
@@ -1529,7 +1844,7 @@ async function deleteTemplate(tmpl) {
               <div v-if="editingServiceKey === row.key">
                 <el-input-number v-model="serviceEditForm.defaultPrice" :min="0" size="small" style="width: 100px" />
               </div>
-              <span v-else>CNY {{ row.defaultPrice }}</span>
+              <span v-else>{{ formatMoney(row.defaultPrice) }}</span>
             </template>
           </el-table-column>
           <el-table-column :label="t('admin.requiredTag')" width="130">
@@ -1561,22 +1876,6 @@ async function deleteTemplate(tmpl) {
                 <el-switch v-model="serviceEditForm.publicVisible" />
               </div>
               <el-tag v-else :type="row.publicVisible !== false ? 'success' : 'danger'" size="small">{{ row.publicVisible !== false ? t('common.yes') : t('common.no') }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="计税(Taxable)" width="110">
-            <template #default="{ row }">
-              <div v-if="editingServiceKey === row.key">
-                <el-switch v-model="serviceEditForm.taxable" />
-              </div>
-              <el-tag v-else :type="row.taxable !== false ? 'success' : 'info'" size="small">{{ row.taxable !== false ? t('common.yes') : t('common.no') }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="显示在Pricing" width="130">
-            <template #default="{ row }">
-              <div v-if="editingServiceKey === row.key">
-                <el-switch v-model="serviceEditForm.pricingVisible" />
-              </div>
-              <el-tag v-else :type="row.pricingVisible !== false ? 'success' : 'danger'" size="small">{{ row.pricingVisible !== false ? t('common.yes') : t('common.no') }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column :label="t('admin.operation')" width="130">
@@ -1651,7 +1950,7 @@ async function deleteTemplate(tmpl) {
                 <el-table :data="row.items || []" size="small" max-height="300" :empty-text="t('admin.noItems')">
                   <el-table-column prop="name" :label="t('admin.item')" min-width="180" />
                   <el-table-column :label="t('admin.price')" width="130">
-                    <template #default="{ row: item }">CNY {{ item.price }}</template>
+                    <template #default="{ row: item }">{{ formatMoney(item.price) }}</template>
                   </el-table-column>
                   <el-table-column :label="t('admin.taxable')" width="80" align="center">
                     <template #default="{ row: item }">
@@ -1833,7 +2132,9 @@ async function deleteTemplate(tmpl) {
             <el-row :gutter="12">
               <el-col :span="12">
                 <el-form-item :label="t('admin.formulaCategory')">
-                  <el-input v-model="editFormulaForm.category" :placeholder="t('admin.formulaCategoryPh')" />
+                  <el-select v-model="editFormulaForm.category" filterable clearable style="width:100%" :placeholder="t('admin.formulaCategoryPh')">
+                    <el-option v-for="category in formulaCategoryOptions" :key="category" :label="category" :value="category" />
+                  </el-select>
                 </el-form-item>
               </el-col>
               <el-col :span="12">
@@ -2083,6 +2384,20 @@ async function deleteTemplate(tmpl) {
 
       <!-- Herb dictionary -->
       <el-tab-pane :label="t('admin.herbDictTab')" name="herbDict">
+        <el-card class="settings-card" style="max-width: 760px; margin-bottom: 16px">
+          <template #header><span style="font-weight:600">成药列表</span></template>
+          <el-form label-width="100px">
+            <el-form-item label="成药名称">
+              <el-input v-model="adminListDrafts.patentMedicines" type="textarea" :rows="4" placeholder="每行一个成药名称" style="max-width: 520px" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="saveEditableLists">{{ t('common.save') }}</el-button>
+            </el-form-item>
+          </el-form>
+          <el-table :data="patentMedicineRows" size="small" stripe :empty-text="t('common.noData')" style="max-width: 520px">
+            <el-table-column prop="name" label="成药名称" />
+          </el-table>
+        </el-card>
         <div class="tab-toolbar" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
           <el-button type="primary" @click="showAddHerbDialog = true"><el-icon><Plus /></el-icon> {{ t('admin.addHerb') }}</el-button>
           <el-button @click="showImportHerbsDialog = true"><el-icon><Upload /></el-icon> 批量导入</el-button>
@@ -2175,7 +2490,7 @@ async function deleteTemplate(tmpl) {
           <el-table-column :label="t('admin.templateCategory')" width="80" prop="category" />
           <el-table-column :label="t('admin.templateAcupoints')" min-width="200">
             <template #default="{ row }">
-              <el-tag v-for="(acu, idx) in (row.acupoints || [])" :key="idx" size="small" style="margin:2px 4px 2px 0">{{ acu }}</el-tag>
+              <el-tag v-for="(acu, idx) in (row.acupoints || [])" :key="idx" size="small" style="margin:2px 4px 2px 0">{{ formatTemplateAcupoint(acu) }}</el-tag>
               <span v-if="!row.acupoints || row.acupoints.length === 0" style="color:#bbb">{{ t('admin.templateNone') }}</span>
             </template>
           </el-table-column>
@@ -2195,11 +2510,16 @@ async function deleteTemplate(tmpl) {
             <el-form-item :label="t('admin.templateDescription')"><el-input v-model="editTemplateForm.description" type="textarea" :rows="2" /></el-form-item>
             <el-divider>{{ t('admin.templateAcupoints') }}</el-divider>
             <el-row :gutter="8" style="margin-bottom:8px">
-              <el-col :span="16"><el-input v-model="editTemplateAcupoint" :placeholder="t('admin.templateAcupointPh')" size="small" @keyup.enter="addEditTemplateAcupoint" /></el-col>
-              <el-col :span="8"><el-button size="small" type="primary" @click="addEditTemplateAcupoint">{{ t('admin.addAcupoint') }}</el-button></el-col>
+              <el-col :span="10">
+                <el-select v-model="editTemplateAcupoint.acupointId" filterable clearable :placeholder="t('admin.templateAcupointPh')" size="small" style="width:100%" @change="handleTemplateAcupointSelection(editTemplateAcupoint, $event)">
+                  <el-option v-for="acu in acupointsStore.activeAcupoints" :key="acu.id" :label="acu.name" :value="acu.id" />
+                </el-select>
+              </el-col>
+              <el-col :span="8"><el-input v-model="editTemplateAcupoint.method" :placeholder="t('admin.templateMethod')" size="small" @keyup.enter="addEditTemplateAcupoint" /></el-col>
+              <el-col :span="6"><el-button size="small" type="primary" @click="addEditTemplateAcupoint">{{ t('admin.addAcupoint') }}</el-button></el-col>
             </el-row>
             <div style="margin-bottom:8px">
-              <el-tag v-for="(acu, idx) in (editTemplateForm.acupoints || [])" :key="idx" closable @close="removeEditTemplateAcupoint(idx)" style="margin:2px 4px">{{ acu }}</el-tag>
+              <el-tag v-for="(acu, idx) in (editTemplateForm.acupoints || [])" :key="idx" closable @close="removeEditTemplateAcupoint(idx)" style="margin:2px 4px">{{ formatTemplateAcupoint(acu) }}</el-tag>
             </div>
             <el-form-item :label="t('admin.templateAdvice')"><el-input v-model="editTemplateForm.advice" type="textarea" :rows="2" /></el-form-item>
           </el-form>
@@ -2356,7 +2676,7 @@ async function deleteTemplate(tmpl) {
             <el-option label="全程(=总时长)" value="full" />
           </el-select>
         </el-form-item>
-        <el-form-item label="默认价格（¥）">
+        <el-form-item :label="`默认价格（${currentCurrency}）`">
           <el-input-number v-model="newServiceForm.defaultPrice" :min="0" :step="10" style="width: 160px" />
         </el-form-item>
         <el-form-item label="服务标签">
@@ -2374,12 +2694,6 @@ async function deleteTemplate(tmpl) {
         </el-form-item>
         <el-form-item label="公共页面显示">
           <el-switch v-model="newServiceForm.publicVisible" />
-        </el-form-item>
-        <el-form-item label="计税(Taxable)">
-          <el-switch v-model="newServiceForm.taxable" />
-        </el-form-item>
-        <el-form-item label="显示在Pricing">
-          <el-switch v-model="newServiceForm.pricingVisible" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -2452,7 +2766,7 @@ async function deleteTemplate(tmpl) {
         </el-row>
         <el-table :data="newPriceList.items" size="small" max-height="200" :empty-text="t('admin.noItems')">
           <el-table-column prop="name" :label="t('admin.item')" />
-          <el-table-column :label="t('admin.price')" width="90"><template #default="{ row }">CNY {{ row.price }}</template></el-table-column>
+          <el-table-column :label="t('admin.price')" width="110"><template #default="{ row }">{{ formatMoney(row.price) }}</template></el-table-column>
           <el-table-column :label="t('admin.taxable')" width="60"><template #default="{ row }">{{ row.taxable ? t('common.yes') : t('common.no') }}</template></el-table-column>
           <el-table-column width="60"><template #default="{ $index }"><el-button size="small" text type="danger" @click="removePriceItem($index)">{{ t('common.delete') }}</el-button></template></el-table-column>
         </el-table>
@@ -2472,7 +2786,9 @@ async function deleteTemplate(tmpl) {
         <el-row :gutter="12">
           <el-col :span="12">
             <el-form-item :label="t('admin.formulaCategory')">
-              <el-input v-model="newFormula.category" :placeholder="t('admin.formulaCategoryPh')" />
+              <el-select v-model="newFormula.category" filterable clearable style="width:100%" :placeholder="t('admin.formulaCategoryPh')">
+                <el-option v-for="category in formulaCategoryOptions" :key="category" :label="category" :value="category" />
+              </el-select>
             </el-form-item>
           </el-col>
           <el-col :span="12">
@@ -2723,13 +3039,17 @@ async function deleteTemplate(tmpl) {
         </el-row>
         <el-divider>{{ t('admin.templateAcupoints') }}</el-divider>
         <el-row :gutter="8" style="margin-bottom:8px">
-          <el-col :span="8"><el-input v-model="newTemplateAcupoint.name" :placeholder="t('admin.acupointName')" size="small" /></el-col>
+          <el-col :span="10">
+            <el-select v-model="newTemplateAcupoint.acupointId" filterable clearable :placeholder="t('admin.acupointName')" size="small" style="width:100%" @change="handleTemplateAcupointSelection(newTemplateAcupoint, $event)">
+              <el-option v-for="acu in acupointsStore.activeAcupoints" :key="acu.id" :label="acu.name" :value="acu.id" />
+            </el-select>
+          </el-col>
           <el-col :span="8"><el-input v-model="newTemplateAcupoint.method" :placeholder="t('admin.templateMethod')" size="small" /></el-col>
-          <el-col :span="8"><el-button size="small" type="primary" @click="addTemplateAcupoint">{{ t('admin.addAcupointToTemplate') }}</el-button></el-col>
+          <el-col :span="6"><el-button size="small" type="primary" @click="addTemplateAcupoint">{{ t('admin.addAcupointToTemplate') }}</el-button></el-col>
         </el-row>
         <div style="margin-bottom:8px">
           <el-tag v-for="(acu, idx) in newTemplate.acupoints" :key="idx" closable @close="removeTemplateAcupoint(idx)" style="margin:2px 4px 2px 0">
-            {{ acu.name }}{{ acu.method ? '(' + acu.method + ')' : '' }}
+            {{ formatTemplateAcupoint(acu) }}
           </el-tag>
         </div>
       </el-form>
@@ -2747,6 +3067,10 @@ async function deleteTemplate(tmpl) {
 .admin-view { max-width: 100%; }
 .tab-toolbar { margin-bottom: 16px; }
 .settings-card { max-width: 600px; border-radius: 10px; }
+.email-template-editor { margin-bottom: 16px; padding-bottom: 4px; border-bottom: 1px solid #eee; }
+.email-template-title { margin: 0 0 10px 160px; font-weight: 600; color: #333; }
+.signature-preview { min-height: 80px; padding: 12px; border: 1px solid #dcdfe6; background: #fafafa; }
+.signature-preview img { display: block; max-width: 320px; max-height: 120px; object-fit: contain; }
 .profile-helper-text { font-size: 12px; color: #888; line-height: 1.5; margin-top: 6px; }
 .schedule-day-card { border: 1px solid #eee; border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fafafa; }
 .schedule-day-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }

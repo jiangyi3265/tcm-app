@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { emailLogsApi } from './api'
 import { readStoredJson, writeStoredJson } from './storage'
+import { useSettingsStore } from '../stores/settings'
 
 const EMAIL_LOG_KEY = 'tcm_email_log'
 const DEFAULT_CLINIC_NAME = 'TCM Clinic'
@@ -33,7 +34,61 @@ function formatMoney(value) {
   return Number(value || 0).toFixed(2)
 }
 
+function renderTemplate(text = '', variables = {}) {
+  return String(text || '').replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_, key) => {
+    const value = variables[String(key).trim()]
+    return value === undefined || value === null ? '' : String(value)
+  })
+}
+
+function getTemplate(templates, key) {
+  return templates?.[key] || null
+}
+
+function applyTemplate(fallback, templates, key, variables = {}) {
+  const template = getTemplate(templates, key)
+  if (!template) return fallback
+  return {
+    ...fallback,
+    subject: template.subject ? renderTemplate(template.subject, variables) : fallback.subject,
+    body: template.body ? renderTemplate(template.body, variables) : fallback.body,
+    templateKey: key,
+    variables,
+  }
+}
+
+function getCommonVariables({ patient, clinicName, appointment, consultation, practitioner, serviceLabel, links = {} } = {}) {
+  const start = appointment?.startTime || ''
+  const [appointmentDate, appointmentTime = ''] = String(start).split(/[T ]/)
+  const amount = consultation
+    ? formatMoney(consultation?.totalAmount ?? consultation?.outstandingAmount ?? 0)
+    : ''
+  return {
+    clinicName: resolveClinicName(clinicName || practitioner?.clinicName),
+    clinicAddress: '',
+    patientName: resolvePatientName(patient),
+    patientEmail: resolvePatientEmail(patient),
+    practitionerName: practitioner?.name || practitioner?.nickName || '',
+    serviceLabel: serviceLabel || appointment?.serviceLabel || appointment?.serviceType || '',
+    appointmentDate: appointmentDate || formatDate(start),
+    appointmentTime,
+    appointmentStartTime: start,
+    appointmentEndTime: appointment?.endTime || '',
+    consultationId: consultation?.consultationId || consultation?.id || '',
+    consultationDate: consultation?.date || '',
+    chiefComplaint: consultation?.chiefComplaint || '',
+    amount,
+    totalAmount: amount,
+    taxAmount: consultation ? formatMoney(consultation?.taxAmount) : '',
+    consentLink: links.consentLink || '',
+    intakeLink: links.intakeLink || '',
+    cancelLink: links.cancelLink || links.manageLink || '',
+    manageLink: links.manageLink || '',
+  }
+}
+
 export function useEmailSimulator() {
+  const settingsStore = useSettingsStore()
   const showEmailDialog = ref(false)
   const emailData = ref({
     to: '',
@@ -59,7 +114,11 @@ export function useEmailSimulator() {
       emailLog.value = emailLog.value.slice(0, 100)
     }
     saveEmailLog(emailLog.value)
-    void emailLogsApi.create(entry).catch(() => {})
+    void emailLogsApi.create({
+      ...entry,
+      templateBody: entry.templateKey ? entry.body : undefined,
+      variables: entry.variables,
+    }).catch(() => {})
     showEmailDialog.value = false
     return entry
   }
@@ -78,7 +137,7 @@ export function useEmailSimulator() {
   function buildAppointmentConfirmEmail(patient, appointment, practitioner, serviceLabel) {
     const clinic = resolveClinicName(practitioner?.clinicName)
     const roomLine = appointment?.roomId ? `Room: ${appointment.roomId}\n` : ''
-    return {
+    const fallback = {
       to: resolvePatientEmail(patient),
       subject: `Appointment Confirmation - ${serviceLabel || 'Consultation'} (${formatDate(appointment?.startTime)})`,
       body:
@@ -91,11 +150,17 @@ export function useEmailSimulator() {
         + `\nIf you need to make changes, please contact ${clinic}.`,
       type: 'appointment_confirm',
     }
+    return applyTemplate(
+      fallback,
+      settingsStore.emailTemplates,
+      'appointmentConfirmation',
+      getCommonVariables({ patient, appointment, practitioner, serviceLabel, clinicName: clinic }),
+    )
   }
 
   function buildInvoiceEmail(patient, consultation, clinicName) {
     const clinic = resolveClinicName(clinicName)
-    return {
+    const fallback = {
       to: resolvePatientEmail(patient),
       subject: `Invoice - ${consultation?.consultationId || ''} (${formatMoney(consultation?.totalAmount)})`,
       body:
@@ -108,11 +173,17 @@ export function useEmailSimulator() {
         + `\nThank you for visiting ${clinic}.`,
       type: 'invoice',
     }
+    return applyTemplate(
+      fallback,
+      settingsStore.emailTemplates,
+      'invoice',
+      getCommonVariables({ patient, consultation, clinicName: clinic }),
+    )
   }
 
   function buildConsultationReportEmail(patient, consultation, clinicName) {
     const clinic = resolveClinicName(clinicName)
-    return {
+    const fallback = {
       to: resolvePatientEmail(patient),
       subject: `Consultation Report - ${consultation?.consultationId || ''} (${consultation?.date || ''})`,
       body:
@@ -125,12 +196,18 @@ export function useEmailSimulator() {
         + `${clinic}`,
       type: 'consultation_report',
     }
+    return applyTemplate(
+      fallback,
+      settingsStore.emailTemplates,
+      'consultationRecord',
+      getCommonVariables({ patient, consultation, clinicName: clinic }),
+    )
   }
 
   function buildIntakeFormEmail(patient, appointment, token, clinicName) {
     const clinic = resolveClinicName(clinicName)
     const link = `${window.location.origin}/intake/${token}`
-    return {
+    const fallback = {
       to: resolvePatientEmail(patient),
       subject: `Intake Form - ${formatDate(appointment?.startTime)} - ${clinic}`,
       body:
@@ -141,12 +218,18 @@ export function useEmailSimulator() {
         + `\nThank you,\n${clinic}`,
       type: 'intake_form',
     }
+    return applyTemplate(
+      fallback,
+      settingsStore.emailTemplates,
+      'intake',
+      getCommonVariables({ patient, appointment, clinicName: clinic, links: { intakeLink: link } }),
+    )
   }
 
   function buildConsentEmail(patient, token, clinicName) {
     const clinic = resolveClinicName(clinicName)
     const link = `${window.location.origin}/consent/${token}`
-    return {
+    const fallback = {
       to: resolvePatientEmail(patient),
       subject: `Consent Form Signature - ${clinic}`,
       body:
@@ -157,6 +240,12 @@ export function useEmailSimulator() {
         + `${clinic}`,
       type: 'consent',
     }
+    return applyTemplate(
+      fallback,
+      settingsStore.emailTemplates,
+      'consent',
+      getCommonVariables({ patient, clinicName: clinic, links: { consentLink: link } }),
+    )
   }
 
   return {

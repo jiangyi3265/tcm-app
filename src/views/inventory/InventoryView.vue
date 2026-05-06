@@ -58,6 +58,11 @@ const herbOptions = computed(() =>
     label: herb.pinyin ? `${herb.name} (${herb.pinyin})` : herb.name,
   })),
 )
+const patentMedicineOptions = computed(() =>
+  (settingsStore.patentMedicines || []).map((name) => ({ value: name, label: name })),
+)
+const itemNameOptions = computed(() => activeTab.value === 'pills' ? patentMedicineOptions.value : herbOptions.value)
+const currencyLabel = computed(() => settingsStore.currency || 'CAD')
 
 function localizeInventoryValue(group, value) {
   if (!value) return value
@@ -67,6 +72,10 @@ function localizeInventoryValue(group, value) {
 
 function getUnitLabel(unit) {
   return localizeInventoryValue('unitLabels', unit)
+}
+
+function priceLabel(key) {
+  return String(t(key)).replace(/\([^)]*\)|（[^）]*）/g, `(${currencyLabel.value})`)
 }
 
 function getToxicityTagType(value) {
@@ -102,6 +111,34 @@ function syncHerbBinding(target, herbId) {
   return bindHerbSelection(target, herb)
 }
 
+function handlePatentMedicineSelection(target, name) {
+  target.herbDictId = null
+  target.name = name || ''
+  target.aliases = ''
+  target.taste = []
+  target.guijing = []
+  return target
+}
+
+function syncInventoryNameBinding(target, value) {
+  if (activeTab.value === 'pills') {
+    return handlePatentMedicineSelection(target, value)
+  }
+  return syncHerbBinding(target, value)
+}
+
+function buildInventoryPayload(source, category = activeTab.value) {
+  const {
+    toxicity,
+    last30DaysUsage,
+    ...payload
+  } = source
+  if (category === 'pills') {
+    payload.herbDictId = null
+  }
+  return payload
+}
+
 const newItem = ref({
   name: '',
   herbDictId: null,
@@ -126,7 +163,7 @@ function syncNewItemDefaults() {
 watch(activeTab, () => {
   syncNewItemDefaults()
   if (newItem.value.herbDictId) {
-    newItem.value = syncHerbBinding(newItem.value, newItem.value.herbDictId)
+    newItem.value = syncInventoryNameBinding(newItem.value, newItem.value.herbDictId)
   }
 }, { immediate: true })
 
@@ -202,12 +239,13 @@ function getStockStatus(item) {
 }
 
 async function handleAddItem() {
-  newItem.value = syncHerbBinding(newItem.value, newItem.value.herbDictId)
-  if (!newItem.value.herbDictId) {
+  newItem.value = syncInventoryNameBinding(newItem.value, newItem.value.herbDictId)
+  if (activeTab.value === 'pills' ? !newItem.value.name : !newItem.value.herbDictId) {
     return ElMessage.warning(t('inventory.selectHerbRequired'))
   }
   try {
-    await inventoryStore.addItem({ ...newItem.value, category: activeTab.value, branchId: branchesStore.currentBranchId || null })
+    const payload = buildInventoryPayload(newItem.value, activeTab.value)
+    await inventoryStore.addItem({ ...payload, category: activeTab.value, branchId: branchesStore.currentBranchId || null })
     ElMessage.success(t('inventory.added'))
     showAddDialog.value = false
     resetNewItem()
@@ -263,9 +301,9 @@ const editForm = ref({})
 function startEdit(item) {
   editingId.value = item.id
 
-  editForm.value = {
-    ...item,
-    herbDictId: item.herbDictId || null,
+    editForm.value = {
+      ...item,
+    herbDictId: item.category === 'pills' ? (item.name || '') : (item.herbDictId || null),
     taste: normalizeArray(item.taste),
     guijing: normalizeArray(item.guijing),
   }
@@ -273,15 +311,11 @@ function startEdit(item) {
 
 async function saveEdit(id) {
   try {
-    editForm.value = syncHerbBinding(editForm.value, editForm.value.herbDictId)
-    if (!editForm.value.herbDictId) {
+    editForm.value = syncInventoryNameBinding(editForm.value, editForm.value.herbDictId)
+    if (editForm.value.category === 'pills' ? !editForm.value.name : !editForm.value.herbDictId) {
       return ElMessage.warning(t('inventory.selectHerbRequired'))
     }
-    const {
-      toxicity,
-      last30DaysUsage,
-      ...payload
-    } = editForm.value
+    const payload = buildInventoryPayload(editForm.value, editForm.value.category)
     await inventoryStore.updateItem(id, payload)
     editingId.value = null
     ElMessage.success(t('inventory.saved'))
@@ -292,11 +326,11 @@ async function saveEdit(id) {
 
 function handleNewHerbChange(herbId) {
   syncNewItemDefaults()
-  newItem.value = syncHerbBinding(newItem.value, herbId)
+  newItem.value = syncInventoryNameBinding(newItem.value, herbId)
 }
 
 function handleEditHerbChange(herbId) {
-  editForm.value = syncHerbBinding(editForm.value, herbId)
+  editForm.value = syncInventoryNameBinding(editForm.value, herbId)
 }
 
 async function handleBatchImport() {
@@ -407,7 +441,7 @@ async function openAdjustmentHistory(item) {
                     :placeholder="editForm.name || t('inventory.selectHerbRequired')"
                     @change="handleEditHerbChange"
                   >
-                    <el-option v-for="herb in herbOptions" :key="herb.value" :label="herb.label" :value="herb.value" />
+                    <el-option v-for="item in itemNameOptions" :key="item.value" :label="item.label" :value="item.value" />
                   </el-select>
                 </div>
                 <div v-else>
@@ -468,7 +502,7 @@ async function openAdjustmentHistory(item) {
                 <div v-if="editingId === row.id">
                   <el-input-number v-model="editForm.pricePerUnit" :min="0" :step="0.1" size="small" controls-position="right" style="width: 100%" />
                 </div>
-                <span v-else>¥{{ row.pricePerUnit }}/{{ getUnitLabel(row.unit) }}</span>
+                <span v-else>{{ currencyLabel }} {{ row.pricePerUnit }}/{{ getUnitLabel(row.unit) }}</span>
               </template>
             </el-table-column>
             <el-table-column :label="t('inventory.supplier')" min-width="160">
@@ -534,7 +568,7 @@ async function openAdjustmentHistory(item) {
                 :placeholder="t('inventory.selectHerbRequired')"
                 @change="handleNewHerbChange"
               >
-                <el-option v-for="herb in herbOptions" :key="herb.value" :label="herb.label" :value="herb.value" />
+                <el-option v-for="item in itemNameOptions" :key="item.value" :label="item.label" :value="item.value" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -559,13 +593,13 @@ async function openAdjustmentHistory(item) {
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item :label="t('inventory.purchasePriceLabel')">
+            <el-form-item :label="priceLabel('inventory.purchasePriceLabel')">
               <el-input-number v-model="newItem.purchasePrice" :min="0" :step="0.01" :precision="4" style="width:100%"
                 @change="autoCalcSellingPrice(newItem)" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item :label="t('inventory.sellingPriceLabel')">
+            <el-form-item :label="priceLabel('inventory.sellingPriceLabel')">
               <el-input-number v-model="newItem.pricePerUnit" :min="0" :step="0.01" :precision="4" style="width:100%" />
               <div style="font-size:11px; color:#888; margin-top:2px" v-if="newItem.purchasePrice > 0">
                 {{ t('inventory.sellingPriceHint', { ratio: settingsStore.profitRatio, multiplier: (1 + settingsStore.profitRatio).toFixed(2) }) }}
@@ -614,7 +648,7 @@ async function openAdjustmentHistory(item) {
           </span>
           &nbsp;（{{ t('inventory.alertShort') }}：{{ detailItem.minStockLevel }} {{ getUnitLabel(detailItem.unit) }}）
         </el-descriptions-item>
-        <el-descriptions-item :label="t('inventory.unitPrice')" :span="2">¥{{ detailItem.pricePerUnit }}/{{ getUnitLabel(detailItem.unit) }}</el-descriptions-item>
+        <el-descriptions-item :label="t('inventory.unitPrice')" :span="2">{{ currencyLabel }} {{ detailItem.pricePerUnit }}/{{ getUnitLabel(detailItem.unit) }}</el-descriptions-item>
         <el-descriptions-item :label="t('inventory.supplier')" :span="2">{{ getSupplierName(detailItem) }}</el-descriptions-item>
         <el-descriptions-item v-if="detailItem.category === 'powder'" :label="t('inventory.gramsPerBag')" :span="2">
           {{ detailItem.gramsPerPacket ? detailItem.gramsPerPacket + 'g' : '-' }}

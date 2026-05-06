@@ -5,6 +5,7 @@ import { useFormulasStore } from '../../stores/formulas'
 import { useInventoryStore } from '../../stores/inventory'
 import { useHerbDictStore } from '../../stores/herbDict'
 import { useSuppliersStore } from '../../stores/suppliers'
+import { useSettingsStore } from '../../stores/settings'
 import { calculatePrescription } from '../../utils/prescriptionCalc'
 import { bindHerbSelection } from '../../utils/herbBinding'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -14,6 +15,7 @@ const formulasStore = useFormulasStore()
 const inventoryStore = useInventoryStore()
 const herbDictStore = useHerbDictStore()
 const suppliersStore = useSuppliersStore()
+const settingsStore = useSettingsStore()
 
 const searchQuery = ref('')
 const filterCategory = ref('')
@@ -42,9 +44,9 @@ function getFormulaCategoryLabel(value) {
 
 const formulaCategoryOptions = computed(() => [
   { value: '', label: t('formulaView.allCategories') },
-  ...FORMULA_CATEGORIES.map((item) => ({
-    value: item.value,
-    label: t(`formulaView.categories.${item.key}`),
+  ...(settingsStore.formulaCategories || []).map((category) => ({
+    value: category,
+    label: getFormulaCategoryLabel(category),
   })),
 ])
 
@@ -323,7 +325,7 @@ const categoryCountEntries = computed(() => {
             </el-col>
             <el-col :span="8">
               <el-form-item :label="t('admin.formulaCategory')">
-                <el-select v-model="newFormula.category" :placeholder="t('formulaView.categoryPlaceholder')" filterable allow-create style="width:100%">
+                <el-select v-model="newFormula.category" :placeholder="t('formulaView.categoryPlaceholder')" filterable style="width:100%">
                   <el-option v-for="c in formulaCategoryOptions.slice(1)" :key="c.value" :label="c.label" :value="c.value" />
                 </el-select>
               </el-form-item>
@@ -488,7 +490,7 @@ const categoryCountEntries = computed(() => {
                     </el-col>
                     <el-col :span="8">
                       <el-form-item :label="t('admin.formulaCategory')">
-                        <el-select v-model="editForm.category" filterable allow-create style="width:100%">
+                        <el-select v-model="editForm.category" filterable style="width:100%">
                           <el-option v-for="c in formulaCategoryOptions.slice(1)" :key="c.value" :label="c.label" :value="c.value" />
                         </el-select>
                       </el-form-item>

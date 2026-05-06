@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConsultationsStore } from '../../stores/consultations'
 import { useAuthStore } from '../../stores/auth'
+import { useSettingsStore } from '../../stores/settings'
 import { formatDate } from '../../utils/dateUtils'
 import { emptyDiff } from '../../utils/sampleData'
 import { localizeMixedJoinedValue, localizeMixedText } from '../../utils/localizeMixedText'
@@ -26,6 +27,7 @@ const emit = defineEmits(['update:visible', 'copy-section', 'update-field'])
 
 const consultStore = useConsultationsStore()
 const authStore = useAuthStore()
+const settingsStore = useSettingsStore()
 
 const historyList = computed(() =>
   consultStore
@@ -106,6 +108,17 @@ function copyAll() {
 function getPractitionerName(id) {
   const u = authStore.users.find((u) => u.id === id || u.id === String(id))
   return u ? u.name : id
+}
+
+function formatAmount(value) {
+  const amount = Number(value || 0)
+  return amount.toFixed(2)
+}
+
+function money(value, currency = null) {
+  const code = currency || settingsStore.currency || 'CAD'
+  const prefix = ['CAD', 'USD'].includes(code) ? '$' : `${code} `
+  return `${prefix}${formatAmount(value)}`
 }
 
 // 辨证对比辅助
@@ -334,14 +347,14 @@ function isDiffChanged(key) {
         <el-descriptions :column="2" border size="small">
           <el-descriptions-item :label="t('compare.totalAmount')">
             <div class="compare-cell-pair">
-              <div class="compare-old">${{ selected.totalAmount || 0 }}</div>
-              <div class="compare-new">${{ currentForm.totalAmount || 0 }}</div>
+              <div class="compare-old">{{ money(selected.totalAmount, selected.currency) }}</div>
+              <div class="compare-new">{{ money(currentForm.totalAmount, currentForm.currency) }}</div>
             </div>
           </el-descriptions-item>
           <el-descriptions-item :label="t('compare.taxAmount')">
             <div class="compare-cell-pair">
-              <div class="compare-old">${{ selected.taxAmount || 0 }}</div>
-              <div class="compare-new">${{ currentForm.taxAmount || 0 }}</div>
+              <div class="compare-old">{{ money(selected.taxAmount, selected.currency) }}</div>
+              <div class="compare-new">{{ money(currentForm.taxAmount, currentForm.currency) }}</div>
             </div>
           </el-descriptions-item>
         </el-descriptions>
@@ -349,13 +362,13 @@ function isDiffChanged(key) {
         <div class="compare-cell-pair">
           <div class="compare-old">
             <div v-for="(s, i) in selected.services || []" :key="i" class="service-item">
-              {{ s.name }} × {{ s.quantity }} = ${{ s.price * s.quantity }}
+              {{ s.name }} × {{ s.quantity }} = {{ money(s.price * s.quantity, selected.currency) }}
             </div>
             <span v-if="!selected.services?.length">-</span>
           </div>
           <div class="compare-new">
             <div v-for="(s, i) in currentForm.services || []" :key="i" class="service-item">
-              {{ s.name }} × {{ s.quantity }} = ${{ s.price * s.quantity }}
+              {{ s.name }} × {{ s.quantity }} = {{ money(s.price * s.quantity, currentForm.currency) }}
             </div>
             <span v-if="!currentForm.services?.length">-</span>
           </div>

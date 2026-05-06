@@ -9,6 +9,7 @@ import { useBranchesStore } from '../../stores/branches'
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
 import { printInvoice } from '../../utils/pdfExport'
 import { useEmailSimulator } from '../../utils/emailSimulator'
+import { stripeApi } from '../../utils/api'
 import {
   getLatestPaymentTime,
   getOutstandingAmount,
@@ -16,7 +17,7 @@ import {
   getPaymentRecords,
   getPaymentStatus,
 } from '../../utils/prescriptionWorkflow'
-import { getPaymentMethodLabel, getPaymentMethodOptions, normalizePaymentMethodValue } from '../../utils/paymentMethods'
+import { getPaymentMethodLabel, getPaymentMethodOptions, normalizePaymentMethodValue, requiresStripeCheckout } from '../../utils/paymentMethods'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
@@ -45,6 +46,16 @@ function toAmount(value) {
 
 function formatAmount(value) {
   return toAmount(value).toFixed(2)
+}
+
+function money(value, currency = null) {
+  const code = currency || settingsStore.currency || 'CAD'
+  const prefix = ['CAD', 'USD'].includes(code) ? '$' : `${code} `
+  return `${prefix}${formatAmount(value)}`
+}
+
+function consultationMoney(consultation, value) {
+  return money(value, consultation?.currency)
 }
 
 function getPaymentStatusTagType(status) {
@@ -139,8 +150,17 @@ async function processPayment(consultation) {
   }
 
   try {
+    const method = normalizePaymentMethodValue(selectedPaymentMethod.value)
+    if (requiresStripeCheckout(method)) {
+      const session = await stripeApi.createCheckoutSession(consult.id)
+      if (session?.url) {
+        window.location.href = session.url
+        return
+      }
+      throw new Error('Stripe checkout session was not returned.')
+    }
     const updated = await consultationsStore.markAsPaid(consult.id, {
-      paymentMethod: normalizePaymentMethodValue(selectedPaymentMethod.value),
+      paymentMethod: method,
       amount: consult.outstandingAmount,
     })
     const refreshed = enrichConsultation(updated || consult)
@@ -160,6 +180,16 @@ function handlePrintInvoice(consultation) {
   if (!consultation) return
   printInvoice(consultation, consultation.patient, consultation.practitioner, settingsStore.clinicName, settingsStore.taxRate)
 }
+
+function handleSendInvoiceEmail(consultation) {
+  if (!consultation) return
+  const consult = enrichConsultation(consultation)
+  if (!consult.patient?.emails?.[0] && !consult.patient?.email) {
+    ElMessage.warning(t('patientDetail.noEmailForConsent'))
+    return
+  }
+  openEmailPreview(buildInvoiceEmail(consult.patient, consult, settingsStore.clinicName))
+}
 </script>
 
 <template>
@@ -171,7 +201,7 @@ function handlePrintInvoice(consultation) {
       </div>
       <div class="cashier-stat primary">
         <div class="cstat-label">{{ t('cashier.todayRevenue') }}</div>
-        <div class="cstat-num">${{ formatAmount(todayRevenue) }}</div>
+        <div class="cstat-num">{{ money(todayRevenue) }}</div>
       </div>
       <div class="cashier-stat warning">
         <div class="cstat-label">{{ t('cashier.pendingPayments') }}</div>
@@ -197,9 +227,9 @@ function handlePrintInvoice(consultation) {
                 </div>
               </div>
               <div class="payment-amount">
-                <div class="amount-total">${{ formatAmount(c.outstandingAmount) }}</div>
+                <div class="amount-total">{{ consultationMoney(c, c.outstandingAmount) }}</div>
                 <div class="amount-meta">
-                  {{ t('cashier.paidAmount') }} ${{ formatAmount(c.paidAmount) }} / {{ t('cashier.totalCharge') }} ${{ formatAmount(c.totalAmount) }}
+                  {{ t('cashier.paidAmount') }} {{ consultationMoney(c, c.paidAmount) }} / {{ t('cashier.totalCharge') }} {{ consultationMoney(c, c.totalAmount) }}
                 </div>
               </div>
             </div>
@@ -221,7 +251,7 @@ function handlePrintInvoice(consultation) {
                 type="info"
                 style="margin-right: 4px; margin-bottom: 4px"
               >
-                {{ s.name }} ${{ formatAmount((Number(s?.price || 0) * (s?.quantity || 1)) - (s?.manualDiscount || 0)) }}
+                {{ s.name }} {{ consultationMoney(c, (Number(s?.price || 0) * (s?.quantity || 1)) - (s?.manualDiscount || 0)) }}
               </el-tag>
             </div>
 
@@ -251,7 +281,7 @@ function handlePrintInvoice(consultation) {
           </el-table-column>
           <el-table-column :label="t('cashier.amount')" width="110" align="right">
             <template #default="{ row }">
-              <span style="font-weight: 600; color: #1b4332">${{ formatAmount(row.amount) }}</span>
+              <span style="font-weight: 600; color: #1b4332">{{ consultationMoney(row.consultation, row.amount) }}</span>
             </template>
           </el-table-column>
           <el-table-column :label="t('cashier.paymentMethod')" width="100">
@@ -291,14 +321,14 @@ function handlePrintInvoice(consultation) {
         <el-table :data="selectedConsult.services || []" size="small">
           <el-table-column prop="name" :label="t('cashier.serviceItem')" />
           <el-table-column :label="t('cashier.amountCol')" width="100" align="right">
-            <template #default="{ row }">${{ formatAmount((Number(row.price || 0) * (row.quantity || 1)) - (row.manualDiscount || 0)) }}</template>
+            <template #default="{ row }">{{ consultationMoney(selectedConsult, (Number(row.price || 0) * (row.quantity || 1)) - (row.manualDiscount || 0)) }}</template>
           </el-table-column>
           <el-table-column :label="t('cashier.taxIncluded')" width="60" align="center">
             <template #default="{ row }">{{ row.taxable ? '✓' : '-' }}</template>
           </el-table-column>
           <el-table-column :label="t('cashier.taxCol')" width="80" align="right">
             <template #default="{ row }">
-              <span v-if="row.taxable">${{ formatAmount(((Number(row.price || 0) * (row.quantity || 1)) - (row.manualDiscount || 0)) * toAmount(settingsStore.taxRate)) }}</span>
+              <span v-if="row.taxable">{{ consultationMoney(selectedConsult, ((Number(row.price || 0) * (row.quantity || 1)) - (row.manualDiscount || 0)) * toAmount(settingsStore.taxRate)) }}</span>
               <span v-else>-</span>
             </template>
           </el-table-column>
@@ -313,16 +343,16 @@ function handlePrintInvoice(consultation) {
               <template #default="{ row }">{{ row.quantity || 1 }}</template>
             </el-table-column>
             <el-table-column :label="'小计'" width="100" align="right">
-              <template #default="{ row }">${{ formatAmount(row.subtotal) }}</template>
+              <template #default="{ row }">{{ consultationMoney(selectedConsult, row.subtotal) }}</template>
             </el-table-column>
           </el-table>
         </div>
         <div class="inv-totals">
-          <div class="inv-row"><span>{{ t('cashier.subtotal') }}</span><span>${{ formatAmount(selectedConsult.totalAmount - selectedConsult.taxAmount) }}</span></div>
-          <div class="inv-row"><span>{{ t('cashier.salesTax', { rate: (toAmount(settingsStore.taxRate) * 100).toFixed(0) }) }}</span><span>${{ formatAmount(selectedConsult.taxAmount) }}</span></div>
-          <div class="inv-row"><span>{{ t('cashier.totalCharge') }}</span><span>${{ formatAmount(selectedConsult.totalAmount) }}</span></div>
-          <div class="inv-row"><span>{{ t('cashier.paidAmount') }}</span><span>${{ formatAmount(selectedConsult.paidAmount) }}</span></div>
-          <div class="inv-row total"><span>{{ t('cashier.currentCharge') }}</span><span>${{ formatAmount(selectedConsult.outstandingAmount) }}</span></div>
+          <div class="inv-row"><span>{{ t('cashier.subtotal') }}</span><span>{{ consultationMoney(selectedConsult, selectedConsult.totalAmount - selectedConsult.taxAmount) }}</span></div>
+          <div class="inv-row"><span>{{ t('cashier.salesTax', { rate: (toAmount(settingsStore.taxRate) * 100).toFixed(0) }) }}</span><span>{{ consultationMoney(selectedConsult, selectedConsult.taxAmount) }}</span></div>
+          <div class="inv-row"><span>{{ t('cashier.totalCharge') }}</span><span>{{ consultationMoney(selectedConsult, selectedConsult.totalAmount) }}</span></div>
+          <div class="inv-row"><span>{{ t('cashier.paidAmount') }}</span><span>{{ consultationMoney(selectedConsult, selectedConsult.paidAmount) }}</span></div>
+          <div class="inv-row total"><span>{{ t('cashier.currentCharge') }}</span><span>{{ consultationMoney(selectedConsult, selectedConsult.outstandingAmount) }}</span></div>
         </div>
         <div v-if="selectedConsult.outstandingAmount > 0" style="margin-top: 12px">
           <strong style="font-size: 13px; color: #555">{{ t('cashier.paymentMethod') }}：</strong>
@@ -343,6 +373,9 @@ function handlePrintInvoice(consultation) {
         </el-button>
         <el-button type="info" @click="handlePrintInvoice(selectedConsult)">
           {{ t('cashier.exportPdf') }}
+        </el-button>
+        <el-button type="success" @click="handleSendInvoiceEmail(selectedConsult)">
+          {{ t('cashier.sendInvoiceEmail') }}
         </el-button>
       </template>
     </el-drawer>
@@ -434,4 +467,29 @@ function handlePrintInvoice(consultation) {
 .inv-row.total { font-size: 16px; font-weight: 700; color: #1b4332; border-top: 1px solid #e0e0e0; padding-top: 8px; margin-top: 4px; }
 
 .inv-status { text-align: center; margin-top: 12px; }
+
+@media (max-width: 767px) {
+  .payment-header,
+  .payment-patient,
+  .payment-actions,
+  .inv-top,
+  .inv-patient-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .payment-amount {
+    text-align: left;
+  }
+
+  .payment-actions :deep(.el-button) {
+    width: 100%;
+    justify-content: center;
+    margin-left: 0;
+  }
+
+  :deep(.el-drawer) {
+    width: 100% !important;
+  }
+}
 </style>

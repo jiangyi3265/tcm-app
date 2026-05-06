@@ -18,7 +18,7 @@ import { formatDate, formatDateTime } from '../../utils/dateUtils'
 import { TCM_OPTIONS, CHIEF_COMPLAINTS, emptyDiff, normalizeDiff } from '../../utils/sampleData'
 import { printConsultationReport, printPrescription } from '../../utils/pdfExport'
 import { useEmailSimulator } from '../../utils/emailSimulator'
-import { filesApi, consultationsApi } from '../../utils/api'
+import { filesApi, consultationsApi, stripeApi } from '../../utils/api'
 import { calculatePrescription, recalcWithSupplier } from '../../utils/prescriptionCalc'
 import { rehydrateCopiedPrescriptions } from '../../utils/consultationCopy'
 import { persistCopiedConsultationData } from '../../utils/consultationCopyFlow'
@@ -48,7 +48,7 @@ import {
   getPaymentMethodLabel,
   getPaymentMethodOptions,
   normalizePaymentMethodValue,
-  requiresPosSimulation,
+  requiresStripeCheckout,
 } from '../../utils/paymentMethods'
 import { resolveInvoicePaymentAfterSave } from '../../utils/invoicePaymentFlow'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -57,7 +57,7 @@ import ConsultationComparePanel from './ConsultationComparePanel.vue'
 const { t, locale } = useI18n()
 
 const branchesStore = useBranchesStore()
-const { showEmailDialog, emailData, openEmailPreview, sendEmail, buildConsultationReportEmail } = useEmailSimulator()
+const { showEmailDialog, emailData, openEmailPreview, sendEmail, buildConsultationReportEmail, buildInvoiceEmail } = useEmailSimulator()
 
 const route = useRoute()
 const router = useRouter()
@@ -88,18 +88,15 @@ const canViewInvoiceTab = computed(() => ['admin', 'cashier'].some((role) => rol
 const lastConsultation = computed(() =>
   isNew ? consultStore.getLastConsultation(patientId) : null,
 )
+const currentTreatmentLocked = computed(() => isReadOnly.value)
+const currentFeedbackLocked = computed(() => isReadOnly.value || isNew || form.value.status === 'draft')
+const previousReviewLocked = computed(() => isReadOnly.value || !lastConsultation.value?.prognosis)
 
-const differentiationNameSuggestions = computed(() => {
-  const names = new Set()
-  for (const consult of consultStore.consultations) {
-    const conclusions = Array.isArray(consult?.diff?.conclusions) ? consult.diff.conclusions : []
-    for (const item of conclusions) {
-      const name = String(item?.name || '').trim()
-      if (name) names.add(name)
-    }
-  }
-  return [...names]
-})
+const differentiationNameSuggestions = computed(() =>
+  [...new Set((settingsStore.differentiationNames || [])
+    .map((name) => String(name || '').trim())
+    .filter(Boolean))],
+)
 
 const differentiationTreatmentSuggestions = computed(() => {
   const treatments = new Set()
@@ -147,7 +144,7 @@ const defaultForm = () => ({
   taxable: false,
   includeRxAmount: false,
   add3rdParty: false,
-  currency: 'CAD',
+  currency: settingsStore.currency || 'CAD',
   comments: '',
   totalAmount: 0, taxAmount: 0, totalWithoutTax: 0,
   documents: [],
@@ -197,6 +194,9 @@ function buildFormFromConsultation(record = {}) {
     modifications: [...(record.modifications || [])],
   }
   nextForm.servicePriceList = normalizeServicePriceListSelection(nextForm.servicePriceList)
+  if (!nextForm.currency || nextForm.currency === 'CNY') {
+    nextForm.currency = settingsStore.currency || 'CAD'
+  }
   if (nextForm.diff?.tongueImage && !nextForm.diff?.tongueImageResource) {
     nextForm.diff.tongueImageResource = nextForm.diff.tongueImage
   }
@@ -508,6 +508,22 @@ async function refreshTongueImagePreview() {
   }
 }
 
+async function refreshThirdPartyInvoicePng() {
+  thirdPartyInvoicePngUrl.value = ''
+  const signature = settingsStore.thirdPartySignature || {}
+  const resource = signature.path || signature.url || settingsStore.thirdPartyInvoicePng
+  if (!resource) return
+  if (/^(blob:|data:|https?:)/.test(resource)) {
+    thirdPartyInvoicePngUrl.value = resource
+    return
+  }
+  try {
+    thirdPartyInvoicePngUrl.value = await filesApi.resolveUrl(resource)
+  } catch (error) {
+    console.warn('Failed to refresh third party invoice png:', error)
+  }
+}
+
 async function saveHistoryMedStrict() {
   const nextText = editHistoryMedText.value || ''
   if (!firstConsultation.value) {
@@ -551,6 +567,9 @@ async function saveHistoryMedStrict() {
 }
 
 onMounted(() => {
+  if (isNew && (!form.value.currency || form.value.currency === 'CNY')) {
+    form.value.currency = settingsStore.currency || 'CAD'
+  }
   if (!isNew && consultId) {
     const existing = consultStore.getConsultation(consultId)
     if (existing) {
@@ -572,6 +591,9 @@ onMounted(() => {
         }
         if (copyData.services) form.value.services = [...copyData.services]
         form.value.servicePriceList = normalizeServicePriceListSelection(form.value.servicePriceList)
+        if (!form.value.currency || form.value.currency === 'CNY') {
+          form.value.currency = settingsStore.currency || 'CAD'
+        }
         ElMessage.info(t('consultation.autofilled'))
       } catch (error) {
         console.warn('Failed to parse copied consultation data:', error)
@@ -601,6 +623,7 @@ onMounted(() => {
   }
 
   refreshTongueImagePreview()
+  refreshThirdPartyInvoicePng()
   applyHistorySnapshotToForm()
   syncSavedSnapshot()
   window.addEventListener('beforeunload', handleBeforeUnload)
@@ -719,6 +742,17 @@ function formatSupplierDisplay(supplierName, gramsPerPacket) {
 
 function formatSupplierOption(candidate) {
   return formatSupplierDisplay(candidate?.supplier || 'Supplier', candidate?.gramsPerPacket)
+}
+
+function formatStockQuantity(row) {
+  const value = Number(row?.inventoryStock || 0)
+  if (!Number.isFinite(value)) return '0'
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, '')
+}
+
+function getStockUnit(row) {
+  if (rxForm.value.prescriptionType === 'powder') return '包'
+  return row?.convertedUnit || row?.unit || ''
 }
 
 const herbSelectionGuard = new WeakSet()
@@ -1524,22 +1558,26 @@ function removeService(i) { form.value.services.splice(i, 1) }
 // Aggregate items from the selected price list, or all active price lists when none is selected.
 const priceListServiceOptions = computed(() => {
   const options = []
-  const serviceTypes = settingsStore.serviceTypes || {}
-  for (const [key, config] of Object.entries(serviceTypes)) {
-    if (!config || config.pricingVisible === false) continue
-    const name = String(config.label || key || '').trim()
-    if (!name) continue
-    if (!isAuthorizedPriceListItem(name)) continue
-    options.push({
-      key,
-      value: key,
-      name,
-      price: Number(config.defaultPrice || 0),
-      taxable: config.taxable !== false,
-      priceListName: '',
-      showSource: false,
+  const selectedPriceLists = resolveSelectedPriceLists()
+  const showSource = selectedPriceLists.length !== 1 || !form.value.servicePriceList
+
+  selectedPriceLists.forEach((priceList) => {
+    const items = Array.isArray(priceList.items) ? priceList.items : []
+    items.forEach((item, index) => {
+      const name = String(item?.name || '').trim()
+      if (!name || !isAuthorizedPriceListItem(name)) return
+      const value = `${priceList.id || priceList.name || 'price-list'}-${name}-${index}`
+      options.push({
+        key: value,
+        value,
+        name,
+        price: Number(item.price || 0),
+        taxable: item.taxable !== false,
+        priceListName: priceList.name || '',
+        showSource,
+      })
     })
-  }
+  })
   return options
 })
 
@@ -1736,9 +1774,29 @@ async function finalizeInvoicePayment(method) {
 
 async function handleStartInvoicePayment() {
   const method = normalizePaymentMethodValue(invoicePaymentMethod.value) || 'bankcard'
-  if (requiresPosSimulation(method)) {
-    pendingPosPaymentMethod.value = method
-    showPosSimulationDialog.value = true
+  if (requiresStripeCheckout(method)) {
+    if (invoicePaymentSubmitting.value) return
+    invoicePaymentSubmitting.value = true
+    try {
+      const { savedConsultation, outstandingAmount: refreshedOutstanding } =
+        await resolveInvoicePaymentAfterSave(persistConsultationDraft)
+      if (refreshedOutstanding <= 0) {
+        showInvoicePaymentDialog.value = false
+        ElMessage.info(t('consultation.noPendingAmount'))
+        return
+      }
+      const paymentId = savedConsultation?.id || currentConsultationId.value
+      const session = await stripeApi.createCheckoutSession(paymentId)
+      if (session?.url) {
+        window.location.href = session.url
+      } else {
+        throw new Error('Stripe checkout session was not returned.')
+      }
+    } catch (e) {
+      ElMessage.error(e.message || t('consultation.paymentFailed'))
+    } finally {
+      invoicePaymentSubmitting.value = false
+    }
     return
   }
   await finalizeInvoicePayment(method)
@@ -1822,8 +1880,10 @@ onBeforeRouteLeave(async () => {
 async function handleExportPdf() {
   await handleGeneratePdf()
 }
-const CURRENCY_SYMBOLS = { CAD: '$', USD: '$', CNY: 'CNY' }
-const cs = computed(() => CURRENCY_SYMBOLS[form.value.currency] || 'CNY')
+const CURRENCY_SYMBOLS = { CAD: '$', USD: '$' }
+const cs = computed(() => CURRENCY_SYMBOLS[form.value.currency] || `${form.value.currency || settingsStore.currency || 'CAD'} `)
+const currencyLabel = computed(() => form.value.currency || settingsStore.currency || 'CAD')
+const thirdPartyInvoicePngUrl = ref('')
 
 const SIDE_OPTIONS = [
   { label: 'Bilateral', value: 'bilateral' },
@@ -1885,6 +1945,36 @@ function handleDocUpload(file) {
   return false
 }
 
+function handleThirdPartyInvoicePngUpload(file) {
+  if (file.size > 2 * 1024 * 1024) {
+    ElMessage.warning(t('consultation.imageMaxSize'))
+    return false
+  }
+  const rawFile = file.raw || file
+  if (!['image/png', 'image/x-png'].includes(rawFile.type)) {
+    ElMessage.warning('Please upload a PNG file.')
+    return false
+  }
+  settingsStore.uploadSignaturePng(rawFile).then(async () => {
+    await refreshThirdPartyInvoicePng()
+    ElMessage.success('Third party invoice PNG uploaded.')
+  }).catch((e) => {
+    ElMessage.error(e.message || t('consultation.uploadFailed'))
+  })
+  return false
+}
+
+async function openThirdPartyInvoicePng() {
+  const signature = settingsStore.thirdPartySignature || {}
+  const source = signature.path || signature.url || settingsStore.thirdPartyInvoicePng || thirdPartyInvoicePngUrl.value
+  if (!source) return
+  try {
+    await filesApi.open(source)
+  } catch (e) {
+    ElMessage.error(e.message || t('consultation.uploadFailed'))
+  }
+}
+
 function removeDocument(idx) {
   form.value.documents.splice(idx, 1)
 }
@@ -1938,6 +2028,14 @@ async function handleGeneratePdf() {
 function handleSendReport() {
   const emailContent = buildConsultationReportEmail(patient.value, form.value, settingsStore.clinicName)
   openEmailPreview(emailContent)
+}
+
+function handleSendInvoiceEmail() {
+  if (!patient.value?.emails?.[0] && !patient.value?.email) {
+    ElMessage.warning(t('patientDetail.noEmailForConsent'))
+    return
+  }
+  openEmailPreview(buildInvoiceEmail(patient.value, form.value, settingsStore.clinicName))
 }
 </script>
 
@@ -2127,7 +2225,7 @@ function handleSendReport() {
                 <el-form-item label="Prognosis for Last Treatment">
                   <el-input
                     :value="lastConsultation?.prognosis || consultation?.previousPrognosisReview || ''"
-                    type="textarea" :rows="4" readonly class="readonly-field"
+                    type="textarea" :rows="4" readonly disabled class="readonly-field"
                     :placeholder="t('consultation.lastPrognosisPlaceholder')"
                   />
                 </el-form-item>
@@ -2136,7 +2234,7 @@ function handleSendReport() {
                 </el-form-item>
                 <el-form-item label="Basic Condition">
                   <el-input v-model="form.previousPrognosisReview" type="textarea" :rows="3"
-                    :placeholder="t('consultation.reviewPlaceholder')" :readonly="isReadOnly" />
+                    :placeholder="t('consultation.reviewPlaceholder')" :readonly="previousReviewLocked" />
                 </el-form-item>
               </el-form>
             </el-card>
@@ -2468,8 +2566,6 @@ function handleSendReport() {
                     v-if="!isReadOnly"
                     v-model="row.name"
                     filterable
-                    allow-create
-                    default-first-option
                     clearable
                     :placeholder="t('consultation.diffName')"
                     size="small"
@@ -2682,13 +2778,14 @@ function handleSendReport() {
             <el-col :span="12">
               <div class="prog-label">Prognosis for Current Treatment</div>
               <el-input v-model="form.prognosis" type="textarea" :rows="10"
-                :placeholder="t('consultation.prognosisPlaceholder')" :readonly="isReadOnly" />
+                :placeholder="t('consultation.prognosisPlaceholder')" :readonly="currentTreatmentLocked" />
             </el-col>
             <el-col :span="12">
               <div class="prog-label">Feedback for Current Treatment</div>
               <el-input v-model="form.feedback" type="textarea" :rows="10"
                 :placeholder="t('consultation.feedbackPlaceholder')"
-                :readonly="isReadOnly" />
+                :readonly="currentFeedbackLocked" />
+              <div v-if="currentFeedbackLocked && !isReadOnly" class="field-hint">Feedback is filled after this treatment is completed.</div>
             </el-col>
           </el-row>
         </el-card>
@@ -2737,8 +2834,7 @@ function handleSendReport() {
                   v-if="!isReadOnly"
                   v-model="row.name"
                   filterable
-                  :allow-create="!serviceSelectionRestricted"
-                  default-first-option
+                  :allow-create="false"
                   size="small"
                   :placeholder="t('consultation.serviceNamePlaceholder')"
                   style="width:100%"
@@ -2756,7 +2852,7 @@ function handleSendReport() {
                         <span v-if="opt.showSource" style="color:#888; font-size:12px"> · {{ opt.priceListName }}</span>
                       </span>
                       <span style="color:#888; font-size:12px; white-space:nowrap">
-                        CNY {{ opt.price }}
+                        {{ currencyLabel }} {{ opt.price }}
                         <el-tag v-if="opt.taxable" size="small" type="warning" style="margin-left:4px">Tax</el-tag>
                       </span>
                     </div>
@@ -2824,7 +2920,6 @@ function handleSendReport() {
                   <el-select v-model="form.currency" style="width:160px" :disabled="isReadOnly">
                     <el-option label="Canadian Dollar CAD" value="CAD" />
                     <el-option label="US Dollar USD" value="USD" />
-                    <el-option label="Chinese Yuan CNY" value="CNY" />
                   </el-select>
                 </el-form-item>
                 <el-form-item label="Discount Type *">
@@ -2852,8 +2947,28 @@ function handleSendReport() {
                 <el-form-item label="Include Prescription Amount?">
                   <el-switch v-model="form.includeRxAmount" :disabled="isReadOnly" active-text="Yes" inactive-text="No" />
                 </el-form-item>
-                <el-form-item label="Add 3rd Party">
-                  <el-switch v-model="form.add3rdParty" :disabled="isReadOnly" active-text="Yes" inactive-text="No" />
+                <el-form-item label="3rd Party Invoice PNG">
+                  <div class="third-party-upload">
+                    <el-upload
+                      v-if="!isReadOnly"
+                      :auto-upload="false"
+                      :show-file-list="false"
+                      accept="image/png"
+                      :on-change="handleThirdPartyInvoicePngUpload"
+                    >
+                      <el-button size="small"><el-icon><Upload /></el-icon> Upload PNG</el-button>
+                    </el-upload>
+                    <el-button
+                      v-if="settingsStore.thirdPartyInvoicePng"
+                      size="small"
+                      text
+                      type="primary"
+                      @click="openThirdPartyInvoicePng"
+                    >
+                      Preview
+                    </el-button>
+                    <span v-if="!settingsStore.thirdPartyInvoicePng" class="field-hint">Upload a third party invoice PNG in this setting.</span>
+                  </div>
                 </el-form-item>
               </el-form>
             </el-col>
@@ -2909,10 +3024,16 @@ function handleSendReport() {
           <!-- PDF actions -->
           <div class="pdf-links" style="margin-bottom:12px">
             <el-button size="small" @click="handleGeneratePdf">
-              <el-icon><Document /></el-icon> {{ t('consultation.generatePdf') }}
+              <el-icon><Document /></el-icon> {{ t('consultation.downloadReportPdf') }}
             </el-button>
             <el-button size="small" @click="handleSendReport">
-              <el-icon><Message /></el-icon> {{ t('consultation.sendReport') }}
+              <el-icon><Message /></el-icon> {{ t('consultation.sendReportEmail') }}
+            </el-button>
+            <el-button size="small" @click="handleExportPdf">
+              <el-icon><Download /></el-icon> {{ t('consultation.downloadInvoice') }}
+            </el-button>
+            <el-button size="small" @click="handleSendInvoiceEmail">
+              <el-icon><Message /></el-icon> {{ t('consultation.sendInvoiceEmail') }}
             </el-button>
             <el-button
               v-if="canStartInvoicePaymentAction"
@@ -2950,12 +3071,20 @@ function handleSendReport() {
           <template #header>
             <div class="diff-card-header">
               <span class="sec-header">Invoice PDF Preview</span>
-              <el-button size="small" @click="handleExportPdf">{{ t('consultation.exportPdf') }}</el-button>
+              <el-button size="small" @click="handleExportPdf">{{ t('consultation.exportInvoicePdf') }}</el-button>
             </div>
           </template>
           <div class="pdf-mock">
             <div class="pdf-header">
-              <div class="pdf-logo">TCM CLINIC</div>
+              <div class="pdf-logo">
+                <el-image
+                  v-if="thirdPartyInvoicePngUrl"
+                  :src="thirdPartyInvoicePngUrl"
+                  fit="contain"
+                  class="third-party-preview"
+                />
+                <span v-else>TCM CLINIC</span>
+              </div>
               <div class="pdf-inv-title">INVOICE</div>
             </div>
             <div class="pdf-meta">
@@ -3296,7 +3425,7 @@ function handleSendReport() {
             <template #default="{ row }">
               <el-tag v-if="row.outOfStock" type="danger" size="small">Out</el-tag>
               <el-tag v-else-if="row.inventoryId" :type="row.stockSufficient ? 'success' : 'warning'" size="small">
-                {{ row.inventoryStock }}{{ row.convertedUnit }}
+                {{ formatStockQuantity(row) }}{{ getStockUnit(row) }}
               </el-tag>
               <el-tag v-else type="info" size="small">N/A</el-tag>
             </template>
@@ -3396,6 +3525,7 @@ function handleSendReport() {
 }
 
 .prog-label { font-size: 13px; font-weight: 600; color: #555; margin-bottom: 6px; display: flex; align-items: center; }
+.field-hint { font-size: 12px; color: #888; line-height: 1.4; }
 
 .rx-name-cell { font-weight: 600; color: #2d6a4f; }
 
@@ -3404,6 +3534,8 @@ function handleSendReport() {
 .wide-table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 .discount-btns { display: flex; gap: 4px; }
+.third-party-upload { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.third-party-preview { width: 120px; height: 48px; display: block; }
 
 .price-summary {
   background: #f9fafb; border-radius: 8px; padding: 16px;
@@ -3500,13 +3632,39 @@ function handleSendReport() {
   }
 
   .cv-header-right :deep(.el-button),
-  .subsection-header :deep(.el-button) {
+  .subsection-header :deep(.el-button),
+  .pdf-links :deep(.el-button) {
     width: 100%;
     justify-content: center;
   }
 
+  :deep(.el-row) {
+    row-gap: 12px;
+  }
+
+  :deep(.el-col) {
+    max-width: 100%;
+    flex: 0 0 100%;
+  }
+
   .wide-table-wrap :deep(.el-table) {
     min-width: 720px;
+  }
+
+  .pdf-links,
+  .discount-btns,
+  .third-party-upload {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .discount-btns :deep(.el-button) {
+    margin-left: 0;
+  }
+
+  .doc-upload-area {
+    align-items: stretch;
   }
 
   .section-card :deep(.el-card__body) {
