@@ -51,6 +51,7 @@ import {
   requiresStripeCheckout,
 } from '../../utils/paymentMethods'
 import { resolveInvoicePaymentAfterSave } from '../../utils/invoicePaymentFlow'
+import { compressImageFile } from '../../utils/imageCompress'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ConsultationComparePanel from './ConsultationComparePanel.vue'
 
@@ -89,8 +90,8 @@ const lastConsultation = computed(() =>
   isNew ? consultStore.getLastConsultation(patientId) : null,
 )
 const currentTreatmentLocked = computed(() => isReadOnly.value)
-const currentFeedbackLocked = computed(() => isReadOnly.value || isNew || form.value.status === 'draft')
-const previousReviewLocked = computed(() => isReadOnly.value || !lastConsultation.value?.prognosis)
+const currentFeedbackLocked = computed(() => true)
+const previousReviewLocked = computed(() => true)
 
 const differentiationNameSuggestions = computed(() =>
   [...new Set((settingsStore.differentiationNames || [])
@@ -137,7 +138,7 @@ const defaultForm = () => ({
   servicePriceList: '',
   services: [],
   consultationFee: 0,
-  consultationFeeTaxable: true,
+  consultationFeeTaxable: false,
   overrideTaxRate: null, // null=使用系统默认, 0=0%, 0.13=13%
   discountType: 'none',
   discountValue: 0,
@@ -172,6 +173,8 @@ const showPosSimulationDialog = ref(false)
 const invoicePaymentMethod = ref('bankcard')
 const pendingPosPaymentMethod = ref('')
 const invoicePaymentSubmitting = ref(false)
+const serverDocuments = ref([])
+const documentsLoading = ref(false)
 
 function cloneJson(value, fallback = null) {
   if (value === undefined) return fallback
@@ -216,6 +219,7 @@ function buildPersistPayload(source = form.value) {
   return cloneJson({
     ...source,
     diff: nextDiff,
+    consultationFeeTaxable: false,
     summary: source.chiefComplaintDescription || source.summary,
     totalWithoutTax: totalWithoutTax.value,
     taxAmount: taxAmount.value,
@@ -349,6 +353,7 @@ const paymentStatus = computed(() => getPaymentStatus(form.value))
 const paidAmount = computed(() => getPaidAmount(form.value))
 const outstandingAmount = computed(() => getOutstandingAmount(form.value))
 const latestPaymentTime = computed(() => getLatestPaymentTime(form.value))
+const documentRows = computed(() => mergeDocumentRows(form.value.documents || [], serverDocuments.value || []))
 const invoicePaymentAmount = computed(() => Math.max(0, Number(outstandingAmount.value || 0)))
 const canStartInvoicePaymentAction = computed(() =>
   canStartInvoicePayment({
@@ -463,13 +468,16 @@ function buildIntakeNarrative(intake) {
     ['Current medications', intake.currentMedications],
     ['Past medical history', intake.pastMedicalHistory || intake.medicalHistory],
     ['Family history', intake.familyHistory],
-    ['Lifestyle', intake.lifestyle],
     ['Additional notes', intake.additionalNotes],
   ]
   for (const [label, value] of fields) {
     const text = Array.isArray(value) ? value.join(', ') : String(value || '').trim()
     if (text) lines.push(`${label}: ${text}`)
   }
+  ;[intake.lifestyle, intake.femaleHealthSummary].forEach((value) => {
+    const text = Array.isArray(value) ? value.join('\n') : String(value || '').trim()
+    if (text) lines.push(text)
+  })
   return lines.join('\n')
 }
 
@@ -521,6 +529,50 @@ async function refreshThirdPartyInvoicePng() {
     thirdPartyInvoicePngUrl.value = await filesApi.resolveUrl(resource)
   } catch (error) {
     console.warn('Failed to refresh third party invoice png:', error)
+  }
+}
+
+function normalizeDocumentRow(doc = {}) {
+  return {
+    id: doc.id || doc.fileId || `${doc.resource || doc.filePath || doc.url || doc.name || doc.fileName}`,
+    name: doc.name || doc.fileName || doc.originalName || 'Document',
+    type: doc.type || doc.fileType || 'document',
+    size: doc.size || doc.fileSize || 0,
+    resource: doc.resource || doc.filePath || null,
+    url: doc.url || doc.filePath || null,
+    uploadedAt: doc.uploadedAt || doc.uploadTime || doc.createTime || '',
+    serverFile: Boolean(doc.filePath || doc.fileName || doc.uploadTime),
+  }
+}
+
+function mergeDocumentRows(localDocs = [], apiDocs = []) {
+  const rows = []
+  const seen = new Set()
+  ;[...apiDocs, ...localDocs].forEach((doc) => {
+    const row = normalizeDocumentRow(doc)
+    const key = row.resource || row.url || row.id || row.name
+    if (!key || seen.has(key)) return
+    seen.add(key)
+    rows.push(row)
+  })
+  return rows
+}
+
+async function loadConsultationFiles({ silent = true } = {}) {
+  const id = currentConsultationId.value
+  if (!id) {
+    serverDocuments.value = []
+    return
+  }
+  documentsLoading.value = true
+  try {
+    const files = await filesApi.listByConsultation(id)
+    serverDocuments.value = Array.isArray(files) ? files.map(normalizeDocumentRow) : []
+  } catch (e) {
+    serverDocuments.value = []
+    if (!silent) ElMessage.error(e.message || t('consultation.uploadFailed'))
+  } finally {
+    documentsLoading.value = false
   }
 }
 
@@ -624,9 +676,28 @@ onMounted(() => {
 
   refreshTongueImagePreview()
   refreshThirdPartyInvoicePng()
+  if (currentConsultationId.value) {
+    loadConsultationFiles().catch(() => {})
+  }
   applyHistorySnapshotToForm()
   syncSavedSnapshot()
   window.addEventListener('beforeunload', handleBeforeUnload)
+})
+
+watch(activeTab, (tab) => {
+  if (tab === 'documents') {
+    loadConsultationFiles().catch(() => {})
+  }
+})
+
+watch(currentConsultationId, (id) => {
+  if (!id) {
+    serverDocuments.value = []
+    return
+  }
+  if (activeTab.value === 'documents') {
+    loadConsultationFiles().catch(() => {})
+  }
 })
 
 onBeforeUnmount(() => {
@@ -1631,7 +1702,7 @@ const discountFactor = computed(() => {
   if (form.value.discountType === 'amount') return Math.max(0, (rawBase - (form.value.discountValue || 0)) / rawBase)
   return 1
 })
-const consultationFeeTax = computed(() => form.value.consultationFeeTaxable !== false ? (form.value.consultationFee || 0) * effectiveTaxRate.value : 0)
+const consultationFeeTax = computed(() => 0)
 const taxAmount = computed(() => (totalServiceTax.value + consultationFeeTax.value) * discountFactor.value)
 const totalAmount = computed(() => totalWithoutTax.value + taxAmount.value)
 
@@ -1666,7 +1737,6 @@ async function completeConsultation() {
         }
       }
       ElMessage.success(t('consultation.completed'))
-      consultationsApi.generateReport(id).catch(() => {})
       await navigateWithoutUnsavedPrompt(() => router.push(`/patients/${patientId}`))
     }
   } catch (e) {
@@ -1892,13 +1962,20 @@ const SIDE_OPTIONS = [
 ]
 
 // ============ ?============
-function handleTongueUpload(file) {
-  if (file.size > 2 * 1024 * 1024) {
+async function handleTongueUpload(file) {
+  const rawFile = file.raw || file
+  let uploadFile
+  try {
+    uploadFile = await compressImageFile(rawFile, { maxBytes: 512 * 1024, maxWidth: 1280, maxHeight: 1280 })
+  } catch (e) {
+    ElMessage.error(e.message || t('consultation.uploadFailed'))
+    return false
+  }
+  if (uploadFile.size > 512 * 1024) {
     ElMessage.warning(t('consultation.imageMaxSize'))
     return false
   }
-  const rawFile = file.raw || file
-  filesApi.upload(rawFile, {
+  filesApi.upload(uploadFile, {
     patientId,
     consultationId: form.value.id || undefined,
     fileType: 'tongue_image',
@@ -1928,7 +2005,7 @@ function handleDocUpload(file) {
     patientId,
     consultationId: form.value.id || undefined,
     fileType: 'document',
-  }).then((res) => {
+  }).then(async (res) => {
     form.value.documents.push({
       id: res.fileId || 'doc-' + Date.now(),
       name: res.originalName || rawFile.name,
@@ -1938,6 +2015,7 @@ function handleDocUpload(file) {
       url: res.url || res.filePath || res.fileName,
       uploadedAt: new Date().toISOString(),
     })
+    await loadConsultationFiles()
     ElMessage.success(t('consultation.fileUploaded'))
   }).catch((e) => {
     ElMessage.error(e.message || t('consultation.uploadFailed'))
@@ -1945,17 +2023,29 @@ function handleDocUpload(file) {
   return false
 }
 
-function handleThirdPartyInvoicePngUpload(file) {
-  if (file.size > 2 * 1024 * 1024) {
-    ElMessage.warning(t('consultation.imageMaxSize'))
-    return false
-  }
+async function handleThirdPartyInvoicePngUpload(file) {
   const rawFile = file.raw || file
   if (!['image/png', 'image/x-png'].includes(rawFile.type)) {
     ElMessage.warning('Please upload a PNG file.')
     return false
   }
-  settingsStore.uploadSignaturePng(rawFile).then(async () => {
+  let uploadFile
+  try {
+    uploadFile = await compressImageFile(rawFile, {
+      maxBytes: 512 * 1024,
+      maxWidth: 1400,
+      maxHeight: 1400,
+      mimeType: 'image/png',
+    })
+  } catch (e) {
+    ElMessage.error(e.message || t('consultation.uploadFailed'))
+    return false
+  }
+  if (uploadFile.size > 512 * 1024) {
+    ElMessage.warning(t('consultation.imageMaxSize'))
+    return false
+  }
+  settingsStore.uploadSignaturePng(uploadFile).then(async () => {
     await refreshThirdPartyInvoicePng()
     ElMessage.success('Third party invoice PNG uploaded.')
   }).catch((e) => {
@@ -1975,8 +2065,36 @@ async function openThirdPartyInvoicePng() {
   }
 }
 
-function removeDocument(idx) {
-  form.value.documents.splice(idx, 1)
+function removeLocalDocumentByRow(row) {
+  const key = row?.resource || row?.url || row?.id || row?.name
+  const index = form.value.documents.findIndex((doc) => {
+    const normalized = normalizeDocumentRow(doc)
+    return (normalized.resource || normalized.url || normalized.id || normalized.name) === key
+  })
+  if (index >= 0) form.value.documents.splice(index, 1)
+}
+
+async function removeDocumentByRow(row) {
+  if (!row) return
+  await ElMessageBox.confirm(
+    `确定删除文件「${row.name || 'Document'}」？`,
+    t('consultation.confirmDeleteTitle'),
+    { type: 'warning' },
+  )
+  if (row.serverFile && row.id) {
+    await filesApi.remove(row.id)
+    serverDocuments.value = serverDocuments.value.filter((doc) => String(doc.id) !== String(row.id))
+  }
+  removeLocalDocumentByRow(row)
+  await loadConsultationFiles()
+  ElMessage.success(t('common.deleted'))
+}
+
+function formatDocumentType(row) {
+  const type = row?.type || ''
+  if (!type) return '-'
+  if (type.includes('/')) return type.split('/').pop() || type
+  return type.replace(/_/g, ' ')
 }
 
 async function previewDocument(doc) {
@@ -2010,6 +2128,7 @@ async function handleGeneratePdf() {
   try {
     const res = await consultationsApi.generateReport(id)
     const pdfUrl = res.url || res.pdfUrl
+    await loadConsultationFiles()
     if (pdfUrl) {
       await filesApi.open(pdfUrl)
     } else {
@@ -2230,7 +2349,7 @@ function handleSendInvoiceEmail() {
                   />
                 </el-form-item>
                 <el-form-item label="Rate for Last Treatment">
-                  <el-rate v-model="form.rateForLast" :disabled="isReadOnly" allow-half />
+                  <el-rate v-model="form.rateForLast" :disabled="previousReviewLocked" allow-half />
                 </el-form-item>
                 <el-form-item label="Basic Condition">
                   <el-input v-model="form.previousPrognosisReview" type="textarea" :rows="3"
@@ -2941,9 +3060,6 @@ function handleSendInvoiceEmail() {
                     <el-radio-button :value="0.13">13%</el-radio-button>
                   </el-radio-group>
                 </el-form-item>
-                <el-form-item label="Consultation Fee Taxable">
-                  <el-switch v-model="form.consultationFeeTaxable" :disabled="isReadOnly" active-text="Yes" inactive-text="No" />
-                </el-form-item>
                 <el-form-item label="Include Prescription Amount?">
                   <el-switch v-model="form.includeRxAmount" :disabled="isReadOnly" active-text="Yes" inactive-text="No" />
                 </el-form-item>
@@ -3126,7 +3242,7 @@ function handleSendInvoiceEmail() {
                   <td>CONSULTATION FEE</td>
                   <td>{{ cs }}{{ form.consultationFee.toFixed(2) }}</td>
                   <td>{{ cs }}{{ form.consultationFee.toFixed(2) }}</td>
-                  <td>{{ form.consultationFeeTaxable !== false ? cs + consultationFeeTax.toFixed(2) : '-' }}</td>
+                  <td>-</td>
                 </tr>
                 <template v-if="form.includeRxAmount">
                   <tr v-for="(rx, ri) in billableRxForInvoice" :key="'rx-'+ri">
@@ -3187,7 +3303,7 @@ function handleSendInvoiceEmail() {
       <!-- Tab 7: Documents -->
 
       <el-tab-pane label="Documents" name="documents">
-        <el-card class="section-card">
+        <el-card class="section-card" v-loading="documentsLoading">
           <div class="doc-upload-area">
             <el-icon style="font-size:48px; color:#ccc"><Document /></el-icon>
             <p style="color:#aaa; margin:12px 0">{{ t('consultation.uploadHint') }}</p>
@@ -3203,15 +3319,15 @@ function handleSendInvoiceEmail() {
               </el-button>
             </el-upload>
           </div>
-          <div v-if="form.documents?.length" style="margin-top:16px">
-            <el-table :data="form.documents" size="small">
+          <div v-if="documentRows.length" style="margin-top:16px">
+            <el-table :data="documentRows" size="small">
               <el-table-column :label="t('consultation.fileName')" min-width="200">
                 <template #default="{ row }">
                   <span class="link-text" @click="previewDocument(row)">{{ row.name }}</span>
                 </template>
               </el-table-column>
               <el-table-column :label="t('consultation.fileType')" width="120">
-                <template #default="{ row }">{{ row.type?.split('/')[1] || '-' }}</template>
+                <template #default="{ row }">{{ formatDocumentType(row) }}</template>
               </el-table-column>
               <el-table-column :label="t('consultation.fileSize')" width="100">
                 <template #default="{ row }">{{ row.size ? (row.size / 1024).toFixed(1) + 'KB' : '-' }}</template>
@@ -3220,8 +3336,8 @@ function handleSendInvoiceEmail() {
                 <template #default="{ row }">{{ formatDateTime(row.uploadedAt) }}</template>
               </el-table-column>
               <el-table-column v-if="!isReadOnly" width="80">
-                <template #default="{ $index }">
-                  <el-button size="small" text type="danger" @click="removeDocument($index)">{{ t('common.delete') }}</el-button>
+                <template #default="{ row }">
+                  <el-button size="small" text type="danger" @click="removeDocumentByRow(row)">{{ t('common.delete') }}</el-button>
                 </template>
               </el-table-column>
             </el-table>

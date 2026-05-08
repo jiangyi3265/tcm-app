@@ -35,6 +35,7 @@ const canEdit = computed(() => hasPermission(roles.value, 'patient.edit'))
 const canCreate = computed(() => hasPermission(roles.value, 'consultation.create'))
 const canDelete = computed(() => hasPermission(roles.value, 'patient.delete'))
 const isApprenticeReadonly = computed(() => roles.value.includes('apprentice'))
+const isAdmin = computed(() => roles.value.includes('admin'))
 
 const patientId = route.params.id
 const patient = computed(() => patientsStore.getPatient(patientId))
@@ -84,6 +85,9 @@ const consultations = computed(() =>
   ),
 )
 const practitioners = computed(() => authStore.getPractitioners())
+function getPractitionerName(id) {
+  return practitioners.value.find(p => String(p.id) === String(id))?.name || '-'
+}
 const publicLinks = ref(loadStoredPublicLinks())
 const patientAppointments = computed(() => appointmentsStore.getPatientAppointments(patientId))
 const latestManageAppointment = computed(() => {
@@ -218,6 +222,9 @@ async function saveEdit() {
       delete updates.historyAndMedication
       delete updates.historySourceConsultId
       delete updates.historySourceConsultDate
+    }
+    if (!isAdmin.value) {
+      delete updates.practitionerId
     }
     await patientsStore.updatePatient(patientId, updates)
     editing.value = false
@@ -680,7 +687,7 @@ const fileTree = computed(() => {
                   <el-descriptions-item :label="t('patientDetail.city')">{{ patient.addressCity || '-' }}</el-descriptions-item>
                   <el-descriptions-item :label="t('patientDetail.postalCode')">{{ patient.addressPostal || '-' }}</el-descriptions-item>
                   <el-descriptions-item :label="t('patientDetail.primaryPractitioner')">
-                    {{ practitioners.find(p => p.id === patient.practitionerId)?.name || '-' }}
+                    {{ getPractitionerName(patient.practitionerId) }}
                   </el-descriptions-item>
                 </el-descriptions>
 
@@ -786,20 +793,20 @@ const fileTree = computed(() => {
                       <el-icon><Message /></el-icon> {{ t('patientDetail.sendConsentEmail') }}
                     </el-button>
                     <el-button size="small" type="warning" plain :loading="sendingIntakeEmail" @click="sendIntakeByEmail">
-                      <el-icon><EditPen /></el-icon> 发送问诊单
+                      <el-icon><EditPen /></el-icon> Send Initial Intake
                     </el-button>
                   </div>
                   <div style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed #eee; display: flex; flex-direction: column; gap: 8px;">
-                    <div style="font-size: 12px; color: #888;">公开链接</div>
+                    <div style="font-size: 12px; color: #888;">Public URL</div>
                     <div v-if="!patient.consentSigned && consentPublicLink" style="display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap;">
                       <span style="min-width: 88px; font-size: 12px; color: #555;">知情同意书</span>
                       <el-text style="flex:1; word-break: break-all;">{{ consentPublicLink }}</el-text>
                       <el-button size="small" text type="primary" @click="copyPublicLink(consentPublicLink, '知情同意书')">复制</el-button>
                     </div>
                     <div v-if="intakePublicLink" style="display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap;">
-                      <span style="min-width: 88px; font-size: 12px; color: #555;">首诊问询</span>
+                      <span style="min-width: 88px; font-size: 12px; color: #555;">Initial Intake</span>
                       <el-text style="flex:1; word-break: break-all;">{{ intakePublicLink }}</el-text>
-                      <el-button size="small" text type="primary" @click="copyPublicLink(intakePublicLink, '首诊问询')">复制</el-button>
+                      <el-button size="small" text type="primary" @click="copyPublicLink(intakePublicLink, 'Initial Intake')">复制</el-button>
                     </div>
                     <div v-if="managePublicLink" style="display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap;">
                       <span style="min-width: 88px; font-size: 12px; color: #555;">预约管理</span>
@@ -931,7 +938,7 @@ const fileTree = computed(() => {
                     </el-col>
                     <el-col :span="24">
                       <el-form-item :label="t('patientDetail.primaryPractitioner')">
-                        <el-select v-model="editForm.practitionerId" style="width:100%">
+                        <el-select v-if="isAdmin" v-model="editForm.practitionerId" style="width:100%">
                           <el-option
                             v-for="p in practitioners"
                             :key="p.id"
@@ -939,6 +946,7 @@ const fileTree = computed(() => {
                             :value="p.id"
                           />
                         </el-select>
+                        <el-input v-else :model-value="getPractitionerName(editForm.practitionerId)" disabled />
                       </el-form-item>
                     </el-col>
                   </el-row>

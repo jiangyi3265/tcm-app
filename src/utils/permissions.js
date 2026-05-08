@@ -22,7 +22,7 @@ export const ROLE_COLORS = {
   practitioner: 'success',
   apprentice: 'info',
   pharmacist: 'warning',
-  cashier: '',
+  cashier: 'primary',
 }
 
 const RECENT_RECORD_WINDOW_DAYS = 3

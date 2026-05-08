@@ -267,7 +267,7 @@ export function printInvoice(consultation, patient, practitioner, clinicName, ta
         <div class="info-item"><span class="info-label">Patient Address</span><span>${escapeHtml([patient?.addressStreet, patient?.addressCity, patient?.addressState, patient?.addressPostal].filter(Boolean).join(', ') || patient?.address || '-')}</span></div>
         <div class="info-item"><span class="info-label">Practitioner</span><span>${escapeHtml(practitioner?.name || '-')}</span></div>
         <div class="info-item"><span class="info-label">Organization</span><span>${escapeHtml(practitioner?.regulatoryBody || '-')}</span></div>
-        <div class="info-item"><span class="info-label">Registration No.</span><span>${escapeHtml(practitioner?.registrationNumber || '-')}</span></div>
+        <div class="info-item"><span class="info-label">Organization No.</span><span>${escapeHtml(practitioner?.organizationNumber || practitioner?.registrationNumber || '-')}</span></div>
       </div>
     </div>
 

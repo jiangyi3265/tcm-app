@@ -22,8 +22,13 @@ const roles = computed(() => authStore.roles)
 const canCreate = computed(() => hasPermission(roles.value, 'patient.create'))
 const canMerge = computed(() => hasPermission(roles.value, 'patient.merge'))
 const isApprenticeReadonly = computed(() => roles.value.includes('apprentice'))
+const isAdmin = computed(() => roles.value.includes('admin'))
 
 const filteredPatients = computed(() => patientsStore.searchPatients(searchQuery.value))
+
+function resolveDefaultPractitionerId() {
+  return isAdmin.value ? '' : String(authStore.userId || '')
+}
 
 // 新增表单
 const newPatient = ref({
@@ -46,7 +51,7 @@ const newPatient = ref({
   addressPostal: '',
   historyAndMedication: '',
   notes: '',
-  practitionerId: '',
+  practitionerId: resolveDefaultPractitionerId(),
 })
 
 const PREFERRED_CONTACT_OPTIONS = ['Any', 'Email', 'Mobile Phone', 'Business Phone', 'Fax']
@@ -70,6 +75,17 @@ function addEmail() { newPatient.value.emails.push('') }
 function removeEmail(idx) { newPatient.value.emails.splice(idx, 1) }
 
 const practitioners = computed(() => authStore.getPractitioners())
+const selectedPractitionerName = computed(() => {
+  const id = newPatient.value.practitionerId
+  return practitioners.value.find(p => String(p.id) === String(id))?.name
+    || authStore.currentUser?.name
+    || '-'
+})
+
+function openAddPatientDialog() {
+  resetForm()
+  showAddDialog.value = true
+}
 
 async function handleAddPatient() {
   if (!newPatient.value.lastName && !newPatient.value.firstName) {
@@ -77,6 +93,9 @@ async function handleAddPatient() {
   }
   const validEmails = newPatient.value.emails.filter((e) => e.trim())
   if (!validEmails.length) return ElMessage.warning(t('patients.emailRequired'))
+  if (!isAdmin.value && !newPatient.value.practitionerId) {
+    newPatient.value.practitionerId = resolveDefaultPractitionerId()
+  }
 
   await patientsStore.addPatient({
     ...newPatient.value,
@@ -94,7 +113,7 @@ function resetForm() {
     emails: [''], email2: '', mobilePhone: '', businessPhone: '', fax: '',
     preferredContact: 'Any', dateOfBirth: '', gender: '',
     addressStreet: '', addressCity: '', addressState: '', addressPostal: '',
-    historyAndMedication: '', notes: '', practitionerId: '',
+    historyAndMedication: '', notes: '', practitionerId: resolveDefaultPractitionerId(),
   }
 }
 
@@ -141,7 +160,7 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
         <el-button v-if="canMerge" @click="showMergeDialog = true">
           <el-icon><Merge /></el-icon> {{ t('patients.mergeRecords') }}
         </el-button>
-        <el-button v-if="canCreate" type="primary" @click="showAddDialog = true">
+        <el-button v-if="canCreate" type="primary" @click="openAddPatientDialog">
           <el-icon><Plus /></el-icon> {{ t('patients.newPatient') }}
         </el-button>
       </div>
@@ -351,7 +370,12 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
           </el-col>
           <el-col :span="12">
             <el-form-item :label="t('patients.primaryPractitioner')">
-              <el-select v-model="newPatient.practitionerId" :placeholder="t('patients.selectPractitioner')" style="width: 100%">
+              <el-select
+                v-if="isAdmin"
+                v-model="newPatient.practitionerId"
+                :placeholder="t('patients.selectPractitioner')"
+                style="width: 100%"
+              >
                 <el-option
                   v-for="p in practitioners"
                   :key="p.id"
@@ -359,6 +383,7 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
                   :value="p.id"
                 />
               </el-select>
+              <el-input v-else :model-value="selectedPractitionerName" disabled />
             </el-form-item>
           </el-col>
           <el-col :span="12">

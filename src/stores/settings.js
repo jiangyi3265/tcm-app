@@ -3,21 +3,13 @@ import { ref, computed } from 'vue'
 import { SERVICE_TYPES } from '../utils/sampleData'
 import { settingsApi } from '../utils/api'
 import { readStoredJson, writeStoredJson } from '../utils/storage'
+import { cloneDefaultEmailTemplates, normalizeEmailTemplates } from '../utils/emailTemplates'
 
 const DEFAULT_CLINIC_NAME = 'TCM Clinic Management System'
 const DEFAULT_CURRENCY = 'CAD'
 const DEFAULT_PATENT_MEDICINES = []
 const DEFAULT_FORMULA_CATEGORIES = ['经典方', '经验方', '自拟方']
 const DEFAULT_DIFFERENTIATION_NAMES = ['Qi deficiency', 'Blood deficiency', 'Qi stagnation', 'Blood stasis', 'Damp heat', 'Cold damp', 'Yin deficiency', 'Yang deficiency']
-const DEFAULT_EMAIL_TEMPLATES = {
-  appointmentConfirmation: { subject: '{{clinicName}}｜预约确认', body: '您好 {{patientName}}，您的预约已确认：{{appointmentDate}} {{appointmentTime}}。地址：{{clinicAddress}}。' },
-  appointmentCancellation: { subject: '{{clinicName}}｜预约取消通知', body: '您好 {{patientName}}，您的预约已取消。如需重新预约，请联系诊所。' },
-  consultationRecord: { subject: '{{clinicName}}｜问诊记录', body: '您好 {{patientName}}，本次问诊记录已生成。问诊编号：{{consultationId}}，日期：{{consultationDate}}。如有疑问请联系诊所。' },
-  invoice: { subject: '{{clinicName}}｜发票', body: '您好 {{patientName}}，您的发票已生成，金额：{{amount}}。感谢您的到访。' },
-  reminder: { subject: '{{clinicName}}｜预约提醒', body: '您好 {{patientName}}，提醒您将在 {{appointmentDate}} {{appointmentTime}} 到诊。' },
-  consent: { subject: '{{clinicName}}｜知情同意书签署', body: '您好 {{patientName}}，请在就诊前阅读并签署知情同意书：{{consentLink}}。' },
-  intake: { subject: '{{clinicName}}｜就诊资料表', body: '您好 {{patientName}}，请在就诊前填写就诊资料表：{{intakeLink}}。' },
-}
 
 function normalizeTagList(value) {
   if (Array.isArray(value)) {
@@ -120,7 +112,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const patentMedicines = ref([...DEFAULT_PATENT_MEDICINES])
   const formulaCategories = ref([...DEFAULT_FORMULA_CATEGORIES])
   const differentiationNames = ref([...DEFAULT_DIFFERENTIATION_NAMES])
-  const emailTemplates = ref({ ...DEFAULT_EMAIL_TEMPLATES })
+  const emailTemplates = ref(cloneDefaultEmailTemplates())
   const thirdPartySignature = ref({ path: '', url: '', uploadedAt: '' })
   const practitionerProfile = ref({ practitionerName: '', organization: '', organizationNumber: '' })
   // 每个医师的预约间隔: { [practitionerId]: minutes }
@@ -146,7 +138,7 @@ export const useSettingsStore = defineStore('settings', () => {
     patentMedicines.value = normalizeEditableList(data?.patentMedicines, DEFAULT_PATENT_MEDICINES)
     formulaCategories.value = normalizeEditableList(data?.formulaCategories, DEFAULT_FORMULA_CATEGORIES)
     differentiationNames.value = normalizeEditableList(data?.differentiationNames, DEFAULT_DIFFERENTIATION_NAMES)
-    emailTemplates.value = { ...DEFAULT_EMAIL_TEMPLATES, ...(data?.emailTemplates || {}) }
+    emailTemplates.value = normalizeEmailTemplates(data?.emailTemplates)
     thirdPartySignature.value = {
       path: data?.thirdPartySignature?.path || data?.thirdPartySignaturePath || '',
       url: data?.thirdPartySignature?.url || data?.thirdPartySignatureUrl || '',
@@ -180,7 +172,7 @@ export const useSettingsStore = defineStore('settings', () => {
       patentMedicines: patentMedicines.value,
       formulaCategories: formulaCategories.value,
       differentiationNames: differentiationNames.value,
-      emailTemplates: emailTemplates.value,
+      emailTemplates: normalizeEmailTemplates(emailTemplates.value),
       thirdPartySignature: thirdPartySignature.value,
       practitionerProfile: practitionerProfile.value,
       practitionerIntervals: practitionerIntervals.value,
@@ -287,11 +279,15 @@ export const useSettingsStore = defineStore('settings', () => {
     if (updates.patentMedicines !== undefined) patentMedicines.value = normalizeEditableList(updates.patentMedicines, DEFAULT_PATENT_MEDICINES)
     if (updates.formulaCategories !== undefined) formulaCategories.value = normalizeEditableList(updates.formulaCategories, DEFAULT_FORMULA_CATEGORIES)
     if (updates.differentiationNames !== undefined) differentiationNames.value = normalizeEditableList(updates.differentiationNames, DEFAULT_DIFFERENTIATION_NAMES)
-    if (updates.emailTemplates !== undefined) emailTemplates.value = { ...DEFAULT_EMAIL_TEMPLATES, ...updates.emailTemplates }
+    const payload = { ...updates }
+    if (updates.emailTemplates !== undefined) {
+      emailTemplates.value = normalizeEmailTemplates(updates.emailTemplates)
+      payload.emailTemplates = emailTemplates.value
+    }
     if (updates.thirdPartySignature !== undefined) thirdPartySignature.value = { ...thirdPartySignature.value, ...updates.thirdPartySignature }
     if (updates.practitionerProfile !== undefined) practitionerProfile.value = { ...practitionerProfile.value, ...updates.practitionerProfile }
-    const updated = await settingsApi.updateBase(updates)
-    if (updated?.emailTemplates) emailTemplates.value = { ...DEFAULT_EMAIL_TEMPLATES, ...updated.emailTemplates }
+    const updated = await settingsApi.updateBase(payload)
+    if (updated?.emailTemplates) emailTemplates.value = normalizeEmailTemplates(updated.emailTemplates)
     if (updated?.thirdPartySignature) thirdPartySignature.value = { ...thirdPartySignature.value, ...updated.thirdPartySignature }
     if (updated?.practitionerProfile) practitionerProfile.value = { ...practitionerProfile.value, ...updated.practitionerProfile }
     saveState()

@@ -24,10 +24,13 @@ import {
   buildWorkingHoursPayload,
   validateWorkingHours,
 } from '../../utils/workingHours'
+import { HERB_CATEGORIES, HERB_NATURES, HERB_TASTES } from '../../utils/sampleData'
 import { bindHerbSelection } from '../../utils/herbBinding'
 import { parseCsvText, rowsToObjects, toNumber } from '../../utils/csvImport'
+import { EMAIL_TEMPLATE_KEYS, EMAIL_TEMPLATE_REGISTRY, normalizeEmailTemplates } from '../../utils/emailTemplates'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { authApi, bootstrapApi, usersApi } from '../../utils/api'
+import * as XLSX from 'xlsx'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -52,7 +55,7 @@ const CURRENCY_OPTIONS = [
   { value: 'USD', label: 'US Dollar USD' },
 ]
 const currentCurrency = computed(() => settingsStore.currency || 'CAD')
-const TOXICITY_OPTIONS = ['无毒', '小毒', '有毒', '大毒']
+const BASE_TOXICITY_OPTIONS = ['无毒', '小毒', '有毒', '大毒', '1. 微毒', '2. 小毒', '3. 有毒', '4. 大毒', '5. 剧毒']
 const SERVICE_TAG_OPTIONS = computed(() => ([
   { value: 'acupuncture', label: t('admin.tagAcupuncture') },
   { value: 'moxibustion', label: t('admin.tagMoxibustion') },
@@ -66,6 +69,66 @@ function getServiceTagLabel(tag) {
   return matched?.label || tag || t('admin.tagNone')
 }
 
+function splitOptionText(value) {
+  if (Array.isArray(value)) return value.flatMap((item) => splitOptionText(item))
+  if (value === null || value === undefined) return []
+  return String(value)
+    .split(/[;,，、；\n\r]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function uniqueOptions(list = []) {
+  return [...new Set(list.map((item) => String(item || '').trim()).filter(Boolean))]
+}
+
+function collectHerbValues(key, { split = false } = {}) {
+  return herbDictStore.activeHerbs.flatMap((herb) => {
+    const value = herb?.[key]
+    return split ? splitOptionText(value) : [value]
+  })
+}
+
+const herbCategoryOptions = computed(() => uniqueOptions([...HERB_CATEGORIES, ...collectHerbValues('category')]))
+const herbNatureOptions = computed(() => uniqueOptions([...HERB_NATURES, ...collectHerbValues('nature')]))
+const herbTasteOptions = computed(() => uniqueOptions([...HERB_TASTES, ...collectHerbValues('taste', { split: true })]))
+const toxicityOptions = computed(() => uniqueOptions([...BASE_TOXICITY_OPTIONS, ...collectHerbValues('toxicity')]))
+const meridianOptions = computed(() =>
+  meridiansStore.activeMeridians
+    .map((meridian) => {
+      const value = String(meridian?.abbr || meridian?.name || '').trim()
+      if (!value) return null
+      const detail = meridian?.name || meridian?.englishName || ''
+      return {
+        value,
+        label: detail ? `${value} - ${detail}` : value,
+      }
+    })
+    .filter(Boolean),
+)
+const meridianAliasMap = computed(() => {
+  const map = new Map()
+  meridiansStore.activeMeridians.forEach((meridian) => {
+    const value = String(meridian?.abbr || meridian?.name || '').trim()
+    if (!value) return
+    ;[meridian.abbr, meridian.name, meridian.englishName, meridian.organ]
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+      .forEach((item) => map.set(item.toLowerCase(), value))
+  })
+  return map
+})
+
+function resolveMeridianValue(value) {
+  const text = String(value || '').trim()
+  if (!text) return ''
+  return meridianAliasMap.value.get(text.toLowerCase()) || text
+}
+
+function normalizeMeridianTropism(value) {
+  return uniqueOptions(splitOptionText(value).map((item) => resolveMeridianValue(item)))
+}
+
 function createHerbDraft() {
   return {
     name: '',
@@ -73,14 +136,33 @@ function createHerbDraft() {
     pinyin: '',
     category: '',
     nature: '',
-    taste: '',
+    taste: [],
     toxicity: '无毒',
-    meridianTropism: '',
+    meridianTropism: [],
     efficacy: '',
     indication: '',
     dosageRange: '',
     contraindication: '',
     notes: '',
+  }
+}
+
+function prepareHerbForm(herb = {}) {
+  return {
+    ...createHerbDraft(),
+    ...herb,
+    taste: splitOptionText(herb.taste),
+    toxicity: herb.toxicity || '无毒',
+    meridianTropism: normalizeMeridianTropism(herb.meridianTropism || herb.guijing),
+  }
+}
+
+function buildHerbPayload(form = {}) {
+  return {
+    ...form,
+    taste: splitOptionText(form.taste).join('; '),
+    toxicity: form.toxicity || '无毒',
+    meridianTropism: normalizeMeridianTropism(form.meridianTropism).join('; '),
   }
 }
 
@@ -390,19 +472,14 @@ const settingsForm = reactive({
   clinicPhone: settingsStore.clinicPhone,
   currency: settingsStore.currency || 'CAD',
 })
-const practitionerProfileForm = reactive({ ...settingsStore.practitionerProfile })
 
-const EMAIL_TEMPLATE_LABELS = {
-  appointmentConfirmation: '预约确认',
-  appointmentCancellation: '预约取消',
-  consultationRecord: '问诊记录',
-  invoice: '发票',
-  reminder: '提醒',
-  consent: '知情同意书',
-  intake: '就诊资料表',
-}
-const emailTemplateDrafts = reactive(
-  Object.fromEntries(Object.entries(settingsStore.emailTemplates).map(([key, value]) => [key, { ...value }])),
+const emailTemplateDrafts = reactive(normalizeEmailTemplates(settingsStore.emailTemplates))
+const emailTemplateRows = computed(() =>
+  EMAIL_TEMPLATE_KEYS.map((key) => ({
+    key,
+    label: EMAIL_TEMPLATE_REGISTRY[key].label,
+    draft: emailTemplateDrafts[key],
+  })),
 )
 const signaturePreviewUrl = ref(settingsStore.thirdPartySignature.url || '')
 const uploadingSignature = ref(false)
@@ -411,6 +488,9 @@ const importingCsv = ref(false)
 const csvImportForm = reactive({ target: 'herbs' })
 const CSV_IMPORT_TARGETS = [
   { value: 'herbs', label: '草药' },
+  { value: 'formulas', label: '方剂' },
+  { value: 'formulaItems', label: '方剂组成' },
+  { value: 'patentMedicines', label: '成药列表' },
   { value: 'inventory', label: '库存' },
   { value: 'differentiation', label: '辨证' },
   { value: 'acupoints', label: '针灸穴位' },
@@ -418,6 +498,9 @@ const CSV_IMPORT_TARGETS = [
 ]
 const CSV_IMPORT_HINTS = {
   herbs: 'name,category,nature,taste,meridianTropism,toxicity,efficacy,dosageRange',
+  formulas: 'Name,Formula Source,Formula Category,Description',
+  formulaItems: 'Formula,Herb,Quantity,Unit',
+  patentMedicines: 'name',
   inventory: 'name,category,quantity,unit,pricePerUnit,supplier,minStockLevel,branchId',
   differentiation: 'name',
   acupoints: 'name,pinyin,englishName,meridian,location,indication,method',
@@ -429,9 +512,93 @@ const adminListDrafts = reactive({
   formulaCategories: normalizeAdminList(settingsStore.formulaCategories).join('\n'),
   differentiationNames: normalizeAdminList(settingsStore.differentiationNames).join('\n'),
 })
+const newPatentMedicineName = ref('')
 const patentMedicineRows = computed(() =>
   normalizeAdminList(settingsStore.patentMedicines).map((name) => ({ name })),
 )
+const selectedPatentMedicineRows = ref([])
+const selectedHerbRows = ref([])
+const selectedAcupointRows = ref([])
+const selectedFormulaRows = ref([])
+
+function handlePatentMedicineSelectionChange(rows) {
+  selectedPatentMedicineRows.value = rows || []
+}
+
+function handleHerbSelectionChange(rows) {
+  selectedHerbRows.value = rows || []
+}
+
+function handleAcupointSelectionChange(rows) {
+  selectedAcupointRows.value = rows || []
+}
+
+function handleFormulaSelectionChange(rows) {
+  selectedFormulaRows.value = rows || []
+}
+
+function normalizeMatchKey(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[，,、;；\s]+/g, '')
+}
+
+function textMatchVariants(value) {
+  const text = String(value || '').trim()
+  if (!text) return []
+  const variants = [text]
+  const beforeParen = text.replace(/[（(].*?[）)]/g, '').trim()
+  const withoutParenMarks = text.replace(/[（）()]/g, ' ').trim()
+  const parenMatches = [...text.matchAll(/[（(]([^）)]+)[）)]/g)].map((match) => match[1].trim())
+  if (beforeParen && beforeParen !== text) variants.push(beforeParen)
+  if (withoutParenMarks && withoutParenMarks !== text) variants.push(withoutParenMarks)
+  variants.push(...parenMatches)
+  return uniqueOptions(variants.map(normalizeMatchKey).filter(Boolean))
+}
+
+function findFormulaByExactName(name) {
+  const key = normalizeMatchKey(name)
+  return formulasStore.activeFormulas.find((formula) => normalizeMatchKey(formula.name) === key) || null
+}
+
+function herbMatchKeys(herb = {}) {
+  return uniqueOptions([
+    ...textMatchVariants(herb.name),
+    ...textMatchVariants(herb.alias),
+    ...textMatchVariants(herb.pinyin),
+  ])
+}
+
+function findHerbForFormulaItem(name) {
+  const keys = new Set(textMatchVariants(name))
+  if (!keys.size) return null
+  return herbDictStore.activeHerbs.find((herb) =>
+    herbMatchKeys(herb).some((key) => keys.has(key)),
+  ) || null
+}
+
+function buildImportedFormulaItem(item, sortOrder) {
+  const herb = findHerbForFormulaItem(item.herb)
+  if (!herb) return null
+  return {
+    herbDictId: herb.id,
+    herbName: herb.name,
+    dosage: toNumber(item.quantity || item.dosage, 0),
+    unit: item.unit || 'g',
+    notes: '',
+    sortOrder,
+  }
+}
+
+function selectWorkbookImportSheet(workbook) {
+  const sheetName = workbook.SheetNames.find((name) => {
+    if (/hidden/i.test(name)) return false
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, blankrows: false })
+    return rows.some((row) => Array.isArray(row) && row.some((cell) => String(cell ?? '').trim()))
+  }) || workbook.SheetNames[0]
+  return workbook.Sheets[sheetName]
+}
 
 async function saveSettings() {
   await settingsStore.updateSettings({
@@ -445,13 +612,17 @@ async function saveSettings() {
     clinicAddress: settingsForm.clinicAddress,
     clinicPhone: settingsForm.clinicPhone,
     currency: settingsForm.currency || 'CAD',
-    practitionerProfile: { ...practitionerProfileForm },
   })
   ElMessage.success(t('admin.settingsSaved'))
 }
 
 async function saveEmailTemplates() {
-  await settingsStore.updateSettings({ emailTemplates: { ...emailTemplateDrafts } })
+  const cleaned = normalizeEmailTemplates(emailTemplateDrafts)
+  Object.keys(emailTemplateDrafts).forEach((key) => { delete emailTemplateDrafts[key] })
+  Object.assign(emailTemplateDrafts, cleaned)
+  await settingsStore.updateSettings({ emailTemplates: cleaned })
+  Object.keys(emailTemplateDrafts).forEach((key) => { delete emailTemplateDrafts[key] })
+  Object.assign(emailTemplateDrafts, normalizeEmailTemplates(settingsStore.emailTemplates))
   ElMessage.success(t('admin.settingsSaved'))
 }
 
@@ -475,14 +646,28 @@ async function handleSignatureUpload(file) {
 }
 
 function handleCsvFileUpload(file) {
+  const rawFile = file.raw || file
+  const fileName = String(rawFile.name || file.name || '').toLowerCase()
   const reader = new FileReader()
-  reader.onload = (e) => { importCsvText.value = e.target.result }
-  reader.readAsText(file.raw || file)
+  reader.onload = (e) => {
+    if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+      const workbook = XLSX.read(e.target.result, { type: 'array' })
+      const importSheet = selectWorkbookImportSheet(workbook)
+      importCsvText.value = XLSX.utils.sheet_to_csv(importSheet)
+      return
+    }
+    importCsvText.value = e.target.result
+  }
+  if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+    reader.readAsArrayBuffer(rawFile)
+  } else {
+    reader.readAsText(rawFile)
+  }
   return false
 }
 
 async function handleCsvImport() {
-  if (!importCsvText.value.trim()) return ElMessage.warning('请输入或上传 CSV 数据')
+  if (!importCsvText.value.trim()) return ElMessage.warning('请输入或上传 CSV/Excel 数据')
   importingCsv.value = true
   try {
     const rows = parseCsvText(importCsvText.value)
@@ -515,6 +700,89 @@ async function importCsvRows(target, rows) {
       created += 1
     }
     return created
+  }
+  if (target === 'formulas') {
+    const items = rowsToObjects(rows, {
+      name: ['name', '名称', '方剂', '方剂名称'],
+      source: ['formula source', 'source', '出处', '来源'],
+      category: ['formula category', 'category', '分类', '类别'],
+      description: ['description', 'efficacy', '功效', '说明'],
+      createdOn: ['created on', 'createdon', '创建时间'],
+    }, ['name', 'source', 'category', 'description'])
+    let created = 0
+    for (const item of items) {
+      if (!item.name || findFormulaByExactName(item.name)) continue
+      await formulasStore.addFormula({
+        name: item.name,
+        category: item.category || '',
+        description: item.description || '',
+        source: item.source || '',
+        items: [],
+      })
+      created += 1
+    }
+    return created
+  }
+  if (target === 'formulaItems') {
+    const items = rowsToObjects(rows, {
+      formula: ['formula', '方剂', '方剂名称'],
+      herb: ['herb', '草药', '药味', '药物'],
+      quantity: ['quantity', 'dosage', '剂量', '用量'],
+      unit: ['unit', '单位'],
+    }, ['formula', 'herb', 'quantity', 'unit'])
+    const grouped = new Map()
+    let skippedMissingFormula = 0
+    let skippedMissingHerb = 0
+    for (const item of items) {
+      if (!item.formula || !item.herb) continue
+      const formula = findFormulaByExactName(item.formula)
+      if (!formula) {
+        skippedMissingFormula += 1
+        continue
+      }
+      const importedItem = buildImportedFormulaItem(item, (grouped.get(formula.id)?.items.length || 0) + 1)
+      if (!importedItem) {
+        skippedMissingHerb += 1
+        continue
+      }
+      if (!grouped.has(formula.id)) grouped.set(formula.id, { formula, items: [] })
+      grouped.get(formula.id).items.push(importedItem)
+    }
+    let imported = 0
+    for (const { formula, items: formulaItems } of grouped.values()) {
+      if (!formulaItems.length) continue
+      await formulasStore.updateFormula(formula.id, {
+        ...formula,
+        items: formulaItems,
+      })
+      imported += formulaItems.length
+    }
+    if (skippedMissingFormula || skippedMissingHerb) {
+      ElMessage.warning(`部分方剂组成未导入：找不到方剂 ${skippedMissingFormula} 条，找不到草药 ${skippedMissingHerb} 条`)
+    }
+    return imported
+  }
+  if (target === 'patentMedicines') {
+    const items = rowsToObjects(rows, {
+      name: ['name', '名称', '成药', '成药名称', 'patentmedicine', 'patent medicine', 'medicine'],
+    }, ['name'])
+    const names = normalizeAdminList(items.map((item) => item.name).filter(Boolean))
+    const existing = new Set(normalizeAdminList(settingsStore.patentMedicines).map(normalizeMatchKey))
+    const nextList = [...normalizeAdminList(settingsStore.patentMedicines)]
+    let added = 0
+    names.forEach((name) => {
+      const key = normalizeMatchKey(name)
+      if (!key || existing.has(key)) return
+      nextList.push(name)
+      existing.add(key)
+      added += 1
+    })
+    if (added) {
+      await settingsStore.updateSettings({ patentMedicines: normalizeAdminList(nextList) })
+      adminListDrafts.patentMedicines = normalizeAdminList(settingsStore.patentMedicines).join('\n')
+      selectedPatentMedicineRows.value = []
+    }
+    return added
   }
   if (target === 'inventory') {
     const items = rowsToObjects(rows, {
@@ -605,6 +873,36 @@ async function saveEditableLists() {
   adminListDrafts.formulaCategories = normalizeAdminList(settingsStore.formulaCategories).join('\n')
   adminListDrafts.differentiationNames = normalizeAdminList(settingsStore.differentiationNames).join('\n')
   ElMessage.success(t('admin.settingsSaved'))
+}
+
+async function addPatentMedicine() {
+  const name = String(newPatentMedicineName.value || '').trim()
+  if (!name) return
+  const nextList = normalizeAdminList([...settingsStore.patentMedicines, name])
+  await settingsStore.updateSettings({ patentMedicines: nextList })
+  adminListDrafts.patentMedicines = nextList.join('\n')
+  newPatentMedicineName.value = ''
+  ElMessage.success(t('admin.settingsSaved'))
+}
+
+async function removePatentMedicine(name) {
+  await ElMessageBox.confirm(`从成药列表移除「${name}」？`, t('admin.confirmDeleteTitle'), { type: 'warning' })
+  const nextList = normalizeAdminList(settingsStore.patentMedicines).filter((item) => item !== name)
+  await settingsStore.updateSettings({ patentMedicines: nextList })
+  adminListDrafts.patentMedicines = nextList.join('\n')
+  ElMessage.success(t('admin.settingsSaved'))
+}
+
+async function batchRemovePatentMedicines() {
+  const names = selectedPatentMedicineRows.value.map((row) => row.name).filter(Boolean)
+  if (!names.length) return
+  await ElMessageBox.confirm(`确定批量移除选中的 ${names.length} 个成药？`, t('admin.confirmDeleteTitle'), { type: 'warning' })
+  const selected = new Set(names)
+  const nextList = normalizeAdminList(settingsStore.patentMedicines).filter((item) => !selected.has(item))
+  await settingsStore.updateSettings({ patentMedicines: nextList })
+  adminListDrafts.patentMedicines = nextList.join('\n')
+  selectedPatentMedicineRows.value = []
+  ElMessage.success(`已移除 ${names.length} 个成药`)
 }
 
 // ========== Data export ==========
@@ -983,6 +1281,19 @@ async function deleteFormula(formula) {
   ElMessage.success(t('admin.formulaDeleted'))
 }
 
+async function batchDeleteFormulas() {
+  const rows = selectedFormulaRows.value.filter((row) => row?.id)
+  if (!rows.length) return
+  await ElMessageBox.confirm(`确定批量删除选中的 ${rows.length} 个方剂？`, t('admin.confirmDeleteTitle'), { type: 'warning' })
+  let deleted = 0
+  for (const row of rows) {
+    await formulasStore.deleteFormula(row.id)
+    deleted += 1
+  }
+  selectedFormulaRows.value = []
+  ElMessage.success(`已删除 ${deleted} 个方剂`)
+}
+
 // ========== 供应商管理 ==========
 const showAddSupplierDialog = ref(false)
 const newSupplier = ref({ name: '', contactPerson: '', phone: '', email: '', address: '', notes: '' })
@@ -1088,6 +1399,19 @@ async function deleteAcupoint(acu) {
   ElMessage.success(t('admin.acupointDeleted'))
 }
 
+async function batchDeleteAcupoints() {
+  const rows = selectedAcupointRows.value.filter((row) => row?.id)
+  if (!rows.length) return
+  await ElMessageBox.confirm(`确定批量删除选中的 ${rows.length} 个穴位？`, t('admin.confirmDeleteTitle'), { type: 'warning' })
+  let deleted = 0
+  for (const row of rows) {
+    await acupointsStore.deleteAcupoint(row.id)
+    deleted += 1
+  }
+  selectedAcupointRows.value = []
+  ElMessage.success(`已删除 ${deleted} 个穴位`)
+}
+
 // ========== Unit conversion management ==========
 const showAddConversionDialog = ref(false)
 const newConversion = ref({ fromUnit: '', toUnit: '', factor: 1, notes: '' })
@@ -1127,7 +1451,7 @@ const filteredHerbs = computed(() => {
 
 async function handleAddHerb() {
   if (!newHerb.value.name) return ElMessage.warning(t('admin.fillHerbName'))
-  await herbDictStore.addHerb({ ...newHerb.value })
+  await herbDictStore.addHerb(buildHerbPayload(newHerb.value))
   ElMessage.success(t('admin.herbCreated'))
   showAddHerbDialog.value = false
   newHerb.value = createHerbDraft()
@@ -1135,14 +1459,27 @@ async function handleAddHerb() {
 
 const editingHerbId = ref(null)
 const editHerbForm = ref({})
-function startEditHerb(herb) { editingHerbId.value = herb.id; editHerbForm.value = { toxicity: '无毒', ...herb } }
+function startEditHerb(herb) { editingHerbId.value = herb.id; editHerbForm.value = prepareHerbForm({ toxicity: '无毒', ...herb }) }
 async function saveEditHerb() {
-  await herbDictStore.updateHerb(editingHerbId.value, editHerbForm.value)
+  await herbDictStore.updateHerb(editingHerbId.value, buildHerbPayload(editHerbForm.value))
   editingHerbId.value = null; ElMessage.success(t('admin.herbUpdated'))
 }
 async function deleteHerb(herb) {
   await ElMessageBox.confirm(t('admin.confirmDeleteHerb', { name: herb.name }), t('admin.confirmDeleteTitle'), { type: 'warning' })
   await herbDictStore.deleteHerb(herb.id); ElMessage.success(t('admin.herbDeleted'))
+}
+
+async function batchDeleteHerbs() {
+  const rows = selectedHerbRows.value.filter((row) => row?.id)
+  if (!rows.length) return
+  await ElMessageBox.confirm(`确定批量删除选中的 ${rows.length} 味草药？`, t('admin.confirmDeleteTitle'), { type: 'warning' })
+  let deleted = 0
+  for (const row of rows) {
+    await herbDictStore.deleteHerb(row.id)
+    deleted += 1
+  }
+  selectedHerbRows.value = []
+  ElMessage.success(`已删除 ${deleted} 味草药`)
 }
 
 async function handleImportHerbs() {
@@ -1161,7 +1498,7 @@ async function handleImportHerbs() {
         category: parts[1] || '',
         nature: parts[2] || '',
         taste: parts[3] || '',
-        guijing: parts[4] || '',
+        meridianTropism: parts[4] || '',
         toxicity: parts[5] || '无毒',
         efficacy: parts[6] || '',
       })
@@ -1348,7 +1685,7 @@ async function deleteTemplate(tmpl) {
                 </el-select>
               </div>
               <el-tag v-else-if="row.prescriptionPreference" size="small"
-                :type="{ powder: 'warning', raw_herbs: 'success', pills: '' }[row.prescriptionPreference]">
+                :type="{ powder: 'warning', raw_herbs: 'success', pills: 'info' }[row.prescriptionPreference]">
                 {{ { powder: 'Powder', raw_herbs: 'Raw Herbs', pills: 'Pills' }[row.prescriptionPreference] || row.prescriptionPreference }}
               </el-tag>
               <span v-else style="color:#bbb">-</span>
@@ -1402,7 +1739,7 @@ async function deleteTemplate(tmpl) {
               <span v-else>{{ row.regulatoryBody || '-' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="注册号码" width="120">
+          <el-table-column label="组织号" width="120">
             <template #default="{ row }">
               <el-input v-if="editingUserId === row.id" v-model="editUserForm.registrationNumber" size="small" placeholder="如 6995" />
               <span v-else>{{ row.registrationNumber || '-' }}</span>
@@ -1593,15 +1930,6 @@ async function deleteTemplate(tmpl) {
             <el-form-item :label="t('admin.clinicPhone')">
               <el-input v-model="settingsForm.clinicPhone" style="max-width: 200px" />
             </el-form-item>
-            <el-form-item label="针灸师姓名">
-              <el-input v-model="practitionerProfileForm.practitionerName" style="max-width: 300px" />
-            </el-form-item>
-            <el-form-item label="针灸师组织">
-              <el-input v-model="practitionerProfileForm.organization" style="max-width: 300px" />
-            </el-form-item>
-            <el-form-item label="组织号">
-              <el-input v-model="practitionerProfileForm.organizationNumber" style="max-width: 240px" />
-            </el-form-item>
             <el-form-item label="系统货币">
               <el-select v-model="settingsForm.currency" style="max-width: 240px">
                 <el-option v-for="option in CURRENCY_OPTIONS" :key="option.value" :label="option.label" :value="option.value" />
@@ -1701,12 +2029,12 @@ async function deleteTemplate(tmpl) {
                 <el-option v-for="option in CSV_IMPORT_TARGETS" :key="option.value" :label="option.label" :value="option.value" />
               </el-select>
             </el-form-item>
-            <el-form-item label="CSV 文件">
-              <el-upload :auto-upload="false" :show-file-list="false" accept=".csv,.txt,.tsv" :on-change="handleCsvFileUpload">
-                <el-button><el-icon><Upload /></el-icon> 选择 CSV</el-button>
+            <el-form-item label="CSV/Excel 文件">
+              <el-upload :auto-upload="false" :show-file-list="false" accept=".csv,.txt,.tsv,.xlsx,.xls" :on-change="handleCsvFileUpload">
+                <el-button><el-icon><Upload /></el-icon> 选择 CSV/Excel</el-button>
               </el-upload>
             </el-form-item>
-            <el-form-item label="CSV 内容">
+            <el-form-item label="CSV/Excel 内容">
               <el-input
                 v-model="importCsvText"
                 type="textarea"
@@ -1724,13 +2052,13 @@ async function deleteTemplate(tmpl) {
           <el-divider />
           <h4>邮件模板</h4>
           <el-form label-width="160px">
-            <div v-for="(draft, key) in emailTemplateDrafts" :key="key" class="email-template-editor">
-              <div class="email-template-title">{{ EMAIL_TEMPLATE_LABELS[key] || key }}</div>
+            <div v-for="row in emailTemplateRows" :key="row.key" class="email-template-editor">
+              <div class="email-template-title">{{ row.label }}</div>
               <el-form-item label="标题">
-                <el-input v-model="draft.subject" style="max-width: 520px" />
+                <el-input v-model="row.draft.subject" style="max-width: 520px" />
               </el-form-item>
               <el-form-item label="正文">
-                <el-input v-model="draft.body" type="textarea" :rows="4" style="max-width: 680px" />
+                <el-input v-model="row.draft.body" type="textarea" :rows="4" style="max-width: 680px" />
               </el-form-item>
             </div>
             <el-form-item>
@@ -1867,7 +2195,7 @@ async function deleteTemplate(tmpl) {
               <div v-if="editingServiceKey === row.key">
                 <el-switch v-model="serviceEditForm.roomRequired" />
               </div>
-              <el-tag v-else :type="row.roomRequired ? '' : 'info'" size="small">{{ row.roomRequired ? t('common.yes') : t('common.no') }}</el-tag>
+              <el-tag v-else :type="row.roomRequired ? 'success' : 'info'" size="small">{{ row.roomRequired ? t('common.yes') : t('common.no') }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column :label="t('admin.publicVisible')" width="130">
@@ -1954,7 +2282,7 @@ async function deleteTemplate(tmpl) {
                   </el-table-column>
                   <el-table-column :label="t('admin.taxable')" width="80" align="center">
                     <template #default="{ row: item }">
-                      <el-tag :type="item.taxable ? '' : 'info'" size="small">{{ item.taxable ? t('common.yes') : t('common.no') }}</el-tag>
+                      <el-tag :type="item.taxable ? 'success' : 'info'" size="small">{{ item.taxable ? t('common.yes') : t('common.no') }}</el-tag>
                     </template>
                   </el-table-column>
                 </el-table>
@@ -2084,8 +2412,12 @@ async function deleteTemplate(tmpl) {
           <el-button type="primary" @click="showAddFormulaDialog = true">
             <el-icon><Plus /></el-icon> {{ t('admin.addFormula') }}
           </el-button>
+          <el-button type="danger" :disabled="selectedFormulaRows.length === 0" @click="batchDeleteFormulas">
+            批量删除 {{ selectedFormulaRows.length ? `(${selectedFormulaRows.length})` : '' }}
+          </el-button>
         </div>
-        <el-table :data="formulasStore.activeFormulas" stripe>
+        <el-table :data="formulasStore.activeFormulas" stripe @selection-change="handleFormulaSelectionChange">
+          <el-table-column type="selection" width="44" />
           <el-table-column :label="t('admin.formulaName')" min-width="120">
             <template #default="{ row }">
               <span style="font-weight:600">{{ row.name }}</span>
@@ -2272,8 +2604,12 @@ async function deleteTemplate(tmpl) {
           <el-button @click="showImportAcupointsDialog = true">
             <el-icon><Upload /></el-icon> 批量导入
           </el-button>
+          <el-button type="danger" :disabled="selectedAcupointRows.length === 0" @click="batchDeleteAcupoints">
+            批量删除 {{ selectedAcupointRows.length ? `(${selectedAcupointRows.length})` : '' }}
+          </el-button>
         </div>
-        <el-table :data="acupointsStore.activeAcupoints" stripe>
+        <el-table :data="acupointsStore.activeAcupoints" stripe @selection-change="handleAcupointSelectionChange">
+          <el-table-column type="selection" width="44" />
           <el-table-column :label="t('admin.acupointName')" width="100">
             <template #default="{ row }">
               <span style="font-weight:600">{{ row.name }}</span>
@@ -2385,29 +2721,59 @@ async function deleteTemplate(tmpl) {
       <!-- Herb dictionary -->
       <el-tab-pane :label="t('admin.herbDictTab')" name="herbDict">
         <el-card class="settings-card" style="max-width: 760px; margin-bottom: 16px">
-          <template #header><span style="font-weight:600">成药列表</span></template>
+          <template #header>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px">
+              <span style="font-weight:600">成药列表</span>
+              <span style="font-size:12px; color:#888">总列表：{{ patentMedicineRows.length }} 个</span>
+            </div>
+          </template>
           <el-form label-width="100px">
-            <el-form-item label="成药名称">
-              <el-input v-model="adminListDrafts.patentMedicines" type="textarea" :rows="4" placeholder="每行一个成药名称" style="max-width: 520px" />
-            </el-form-item>
-            <el-form-item>
-              <el-button type="primary" @click="saveEditableLists">{{ t('common.save') }}</el-button>
+            <el-form-item label="新增成药">
+              <div style="display:flex; gap:8px; max-width:520px; width:100%">
+                <el-input v-model="newPatentMedicineName" placeholder="输入一个成药名称" @keyup.enter="addPatentMedicine" />
+                <el-button type="primary" @click="addPatentMedicine">{{ t('common.add') }}</el-button>
+              </div>
             </el-form-item>
           </el-form>
-          <el-table :data="patentMedicineRows" size="small" stripe :empty-text="t('common.noData')" style="max-width: 520px">
+          <div style="display:flex; align-items:center; gap:12px; margin:4px 0 8px 100px">
+            <span style="font-size:13px; font-weight:600; color:#555">总列表</span>
+            <el-button size="small" type="danger" :disabled="selectedPatentMedicineRows.length === 0" @click="batchRemovePatentMedicines">
+              批量删除 {{ selectedPatentMedicineRows.length ? `(${selectedPatentMedicineRows.length})` : '' }}
+            </el-button>
+          </div>
+          <el-table
+            :data="patentMedicineRows"
+            size="small"
+            stripe
+            :empty-text="t('common.noData')"
+            max-height="260"
+            style="max-width: 520px; margin-left:100px"
+            @selection-change="handlePatentMedicineSelectionChange"
+          >
+            <el-table-column type="selection" width="44" />
+            <el-table-column type="index" width="56" />
             <el-table-column prop="name" label="成药名称" />
+            <el-table-column :label="t('common.operation')" width="90">
+              <template #default="{ row }">
+                <el-button size="small" text type="danger" @click="removePatentMedicine(row.name)">{{ t('common.delete') }}</el-button>
+              </template>
+            </el-table-column>
           </el-table>
         </el-card>
         <div class="tab-toolbar" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
           <el-button type="primary" @click="showAddHerbDialog = true"><el-icon><Plus /></el-icon> {{ t('admin.addHerb') }}</el-button>
           <el-button @click="showImportHerbsDialog = true"><el-icon><Upload /></el-icon> 批量导入</el-button>
+          <el-button type="danger" :disabled="selectedHerbRows.length === 0" @click="batchDeleteHerbs">
+            批量删除 {{ selectedHerbRows.length ? `(${selectedHerbRows.length})` : '' }}
+          </el-button>
           <el-input v-model="herbSearchQuery" :placeholder="t('admin.herbSearchPh')" size="small" clearable style="width:180px" />
           <el-select v-model="herbCategoryFilter" :placeholder="t('admin.herbFilterCategory')" size="small" clearable style="width:140px">
             <el-option v-for="c in herbDictStore.categories" :key="c" :label="c" :value="c" />
           </el-select>
           <span style="color:#888; font-size:12px">{{ t('admin.herbTotalCount', { count: filteredHerbs.length }) }}</span>
         </div>
-        <el-table :data="filteredHerbs" stripe max-height="500">
+        <el-table :data="filteredHerbs" stripe max-height="500" @selection-change="handleHerbSelectionChange">
+          <el-table-column type="selection" width="44" />
           <el-table-column :label="t('admin.herbName')" width="90"><template #default="{ row }"><span style="font-weight:600">{{ row.name }}</span></template></el-table-column>
           <el-table-column :label="t('admin.herbCategory')" width="90" prop="category" />
           <el-table-column :label="t('admin.herbNature')" width="60" prop="nature" />
@@ -2429,15 +2795,19 @@ async function deleteTemplate(tmpl) {
             <el-row :gutter="12"><el-col :span="8"><el-form-item :label="t('admin.herbName')"><el-input v-model="editHerbForm.name" /></el-form-item></el-col>
             <el-col :span="8"><el-form-item :label="t('admin.herbPinyin')"><el-input v-model="editHerbForm.pinyin" /></el-form-item></el-col>
             <el-col :span="8"><el-form-item :label="t('admin.herbAlias')"><el-input v-model="editHerbForm.alias" /></el-form-item></el-col></el-row>
-            <el-row :gutter="12"><el-col :span="8"><el-form-item :label="t('admin.herbCategory')"><el-input v-model="editHerbForm.category" /></el-form-item></el-col>
-            <el-col :span="8"><el-form-item :label="t('admin.herbNature')"><el-input v-model="editHerbForm.nature" :placeholder="t('admin.herbNaturePh')" /></el-form-item></el-col>
-            <el-col :span="8"><el-form-item :label="t('admin.herbTaste')"><el-input v-model="editHerbForm.taste" /></el-form-item></el-col></el-row>
+            <el-row :gutter="12"><el-col :span="8"><el-form-item :label="t('admin.herbCategory')"><el-select v-model="editHerbForm.category" filterable clearable style="width:100%"><el-option v-for="option in herbCategoryOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item></el-col>
+            <el-col :span="8"><el-form-item :label="t('admin.herbNature')"><el-select v-model="editHerbForm.nature" filterable clearable style="width:100%"><el-option v-for="option in herbNatureOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item></el-col>
+            <el-col :span="8"><el-form-item :label="t('admin.herbTaste')"><el-select v-model="editHerbForm.taste" multiple filterable clearable collapse-tags collapse-tags-tooltip style="width:100%"><el-option v-for="option in herbTasteOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item></el-col></el-row>
             <el-form-item :label="t('admin.herbToxicity')">
               <el-select v-model="editHerbForm.toxicity" style="width:100%">
-                <el-option v-for="option in TOXICITY_OPTIONS" :key="option" :label="option" :value="option" />
+                <el-option v-for="option in toxicityOptions" :key="option" :label="option" :value="option" />
               </el-select>
             </el-form-item>
-            <el-form-item :label="t('admin.herbMeridianTropism')"><el-input v-model="editHerbForm.meridianTropism" /></el-form-item>
+            <el-form-item :label="t('admin.herbMeridianTropism')">
+              <el-select v-model="editHerbForm.meridianTropism" multiple filterable clearable collapse-tags collapse-tags-tooltip style="width:100%">
+                <el-option v-for="option in meridianOptions" :key="option.value" :label="option.label" :value="option.value" />
+              </el-select>
+            </el-form-item>
             <el-form-item :label="t('admin.herbEfficacy')"><el-input v-model="editHerbForm.efficacy" type="textarea" :rows="2" /></el-form-item>
             <el-row :gutter="12"><el-col :span="12"><el-form-item :label="t('admin.herbDosageRange')"><el-input v-model="editHerbForm.dosageRange" /></el-form-item></el-col>
             <el-col :span="12"><el-form-item :label="t('admin.herbContraindication')"><el-input v-model="editHerbForm.contraindication" /></el-form-item></el-col></el-row>
@@ -2454,7 +2824,7 @@ async function deleteTemplate(tmpl) {
         <el-table :data="meridiansStore.activeMeridians" stripe>
           <el-table-column :label="t('admin.meridianName')" width="130"><template #default="{ row }"><span style="font-weight:600">{{ row.name }}</span></template></el-table-column>
           <el-table-column :label="t('admin.meridianAbbr')" width="60" prop="abbr" />
-          <el-table-column :label="t('admin.meridianCategory')" width="70"><template #default="{ row }"><el-tag :type="row.category === '奇经' ? 'warning' : ''" size="small">{{ row.category === '奇经' ? t('admin.meridianExtra') : t('admin.meridianRegular') }}</el-tag></template></el-table-column>
+          <el-table-column :label="t('admin.meridianCategory')" width="70"><template #default="{ row }"><el-tag :type="row.category === '奇经' ? 'warning' : 'info'" size="small">{{ row.category === '奇经' ? t('admin.meridianExtra') : t('admin.meridianRegular') }}</el-tag></template></el-table-column>
           <el-table-column :label="t('admin.meridianOrgan')" width="80" prop="organ" />
           <el-table-column :label="t('admin.meridianAcupointCount')" width="70"><template #default="{ row }">{{ row.acupointCount }}</template></el-table-column>
           <el-table-column :label="t('admin.meridianIndication')" min-width="200"><template #default="{ row }"><span style="font-size:12px; color:#555">{{ row.indication || '-' }}</span></template></el-table-column>
@@ -2619,7 +2989,7 @@ async function deleteTemplate(tmpl) {
         <el-form-item label="组织">
           <el-input v-model="newUser.regulatoryBody" placeholder="如: CTCMPAO" />
         </el-form-item>
-        <el-form-item label="注册号码">
+        <el-form-item label="组织号">
           <el-input v-model="newUser.registrationNumber" placeholder="如: 6995" />
         </el-form-item>
         <el-form-item label="首诊时长(overlap1)">
@@ -2992,11 +3362,11 @@ async function deleteTemplate(tmpl) {
           <el-col :span="8"><el-form-item :label="t('admin.herbName')" required><el-input v-model="newHerb.name" :placeholder="t('admin.herbNamePh')" /></el-form-item></el-col>
           <el-col :span="8"><el-form-item :label="t('admin.herbAlias')"><el-input v-model="newHerb.alias" :placeholder="t('admin.herbAliasPh')" /></el-form-item></el-col>
           <el-col :span="8"><el-form-item :label="t('admin.herbPinyin')"><el-input v-model="newHerb.pinyin" :placeholder="t('admin.herbPinyinPh')" /></el-form-item></el-col>
-          <el-col :span="8"><el-form-item :label="t('admin.herbCategory')"><el-input v-model="newHerb.category" :placeholder="t('admin.herbCategoryPh')" /></el-form-item></el-col>
-          <el-col :span="8"><el-form-item :label="t('admin.herbNature')"><el-input v-model="newHerb.nature" :placeholder="t('admin.herbNaturePh')" /></el-form-item></el-col>
-          <el-col :span="8"><el-form-item :label="t('admin.herbTaste')"><el-input v-model="newHerb.taste" :placeholder="t('admin.herbTastePh')" /></el-form-item></el-col>
-          <el-col :span="8"><el-form-item :label="t('admin.herbToxicity')"><el-select v-model="newHerb.toxicity" style="width:100%"><el-option v-for="option in TOXICITY_OPTIONS" :key="option" :label="option" :value="option" /></el-select></el-form-item></el-col>
-          <el-col :span="12"><el-form-item :label="t('admin.herbMeridianTropism')"><el-input v-model="newHerb.meridianTropism" :placeholder="t('admin.herbMeridianTropismPh')" /></el-form-item></el-col>
+          <el-col :span="8"><el-form-item :label="t('admin.herbCategory')"><el-select v-model="newHerb.category" filterable clearable style="width:100%" :placeholder="t('admin.herbCategoryPh')"><el-option v-for="option in herbCategoryOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item></el-col>
+          <el-col :span="8"><el-form-item :label="t('admin.herbNature')"><el-select v-model="newHerb.nature" filterable clearable style="width:100%" :placeholder="t('admin.herbNaturePh')"><el-option v-for="option in herbNatureOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item></el-col>
+          <el-col :span="8"><el-form-item :label="t('admin.herbTaste')"><el-select v-model="newHerb.taste" multiple filterable clearable collapse-tags collapse-tags-tooltip style="width:100%" :placeholder="t('admin.herbTastePh')"><el-option v-for="option in herbTasteOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item></el-col>
+          <el-col :span="8"><el-form-item :label="t('admin.herbToxicity')"><el-select v-model="newHerb.toxicity" filterable clearable style="width:100%"><el-option v-for="option in toxicityOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item></el-col>
+          <el-col :span="12"><el-form-item :label="t('admin.herbMeridianTropism')"><el-select v-model="newHerb.meridianTropism" multiple filterable clearable collapse-tags collapse-tags-tooltip style="width:100%" :placeholder="t('admin.herbMeridianTropismPh')"><el-option v-for="option in meridianOptions" :key="option.value" :label="option.label" :value="option.value" /></el-select></el-form-item></el-col>
           <el-col :span="12"><el-form-item :label="t('admin.herbDosageRange')"><el-input v-model="newHerb.dosageRange" :placeholder="t('admin.herbDosageRangePh')" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item :label="t('admin.herbContraindication')"><el-input v-model="newHerb.contraindication" :placeholder="t('admin.herbContraindicationPh')" /></el-form-item></el-col>
           <el-col :span="12"><el-form-item :label="t('admin.herbEfficacy')"><el-input v-model="newHerb.efficacy" type="textarea" :rows="2" /></el-form-item></el-col>

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { useConsultationsStore } from '../../stores/consultations'
 import { usePatientsStore } from '../../stores/patients'
 import { useAuthStore } from '../../stores/auth'
@@ -21,23 +22,40 @@ import { getPaymentMethodLabel, getPaymentMethodOptions, normalizePaymentMethodV
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const consultationsStore = useConsultationsStore()
 const patientsStore = usePatientsStore()
 const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
 const branchesStore = useBranchesStore()
-const { showEmailDialog, emailData, openEmailPreview, sendEmail, buildInvoiceEmail } = useEmailSimulator()
+const { showEmailDialog, emailData, openEmailPreview, sendEmail, sendEmailContent, buildInvoiceEmail } = useEmailSimulator()
 
 const activeTab = ref('pending')
 const selectedConsult = ref(null)
 const showInvoiceDialog = ref(false)
 const selectedPaymentMethod = ref('cash')
 
-onMounted(() => {
-  consultationsStore.refreshFromApi().catch((error) => {
+onMounted(async () => {
+  await consultationsStore.refreshFromApi().catch((error) => {
     console.warn('收银台刷新问诊失败:', error.message)
   })
+  handleStripeReturn()
 })
+
+function handleStripeReturn() {
+  const status = String(route.query.stripe || '')
+  if (!status) return
+  if (status === 'success') {
+    ElMessage.success(t('cashier.stripeReturnSuccess'))
+  } else if (status === 'cancelled') {
+    ElMessage.info(t('cashier.stripeReturnCancelled'))
+  }
+  const query = { ...route.query }
+  delete query.stripe
+  delete query.session_id
+  router.replace({ query }).catch(() => {})
+}
 
 function toAmount(value) {
   const n = Number(value)
@@ -169,7 +187,7 @@ async function processPayment(consultation) {
 
     const emailContent = buildInvoiceEmail(refreshed.patient, refreshed, settingsStore.clinicName)
     if (refreshed.patient?.emails?.[0] || refreshed.patient?.email) {
-      openEmailPreview(emailContent)
+      sendEmailContent(emailContent)
     }
   } catch (error) {
     ElMessage.error(error.message || t('cashier.paymentFailed'))
@@ -315,7 +333,7 @@ function handleSendInvoiceEmail(consultation) {
         <div class="inv-patient-row">
           <span><strong>针灸师：</strong>{{ selectedConsult.practitioner?.name || '-' }}</span>
           <span><strong>组织：</strong>{{ selectedConsult.practitioner?.regulatoryBody || '-' }}</span>
-          <span><strong>号码：</strong>{{ selectedConsult.practitioner?.registrationNumber || '-' }}</span>
+          <span><strong>组织号：</strong>{{ selectedConsult.practitioner?.organizationNumber || selectedConsult.practitioner?.registrationNumber || '-' }}</span>
         </div>
         <el-divider />
         <el-table :data="selectedConsult.services || []" size="small">

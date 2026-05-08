@@ -112,6 +112,14 @@ const copy = computed(() => (isZh.value
       cancelFailed: 'Failed to cancel the appointment',
     }))
 
+function bilingualHeading(label, english) {
+  const text = String(label || '').trim()
+  const englishText = String(english || '').trim()
+  if (!text) return englishText
+  if (!englishText || text.toLowerCase() === englishText.toLowerCase()) return text
+  return `${text} ${englishText}`
+}
+
 const MEDICAL_HISTORY_OPTIONS = [
   '高血压 Hypertension',
   '糖尿病 Diabetes',
@@ -321,7 +329,7 @@ async function handleCancelAppointment() {
         </section>
 
         <section class="section-card dark">
-          <h2>{{ copy.history }} MEDICAL HISTORY</h2>
+          <h2>{{ bilingualHeading(copy.history, 'MEDICAL HISTORY') }}</h2>
           <div class="option-grid three">
             <label v-for="option in MEDICAL_HISTORY_OPTIONS" :key="option" class="check-option">
               <input :checked="isChecked('medicalHistorySelections', option)" type="checkbox" @change="toggleMulti('medicalHistorySelections', option)" />
@@ -339,7 +347,7 @@ async function handleCancelAppointment() {
         </section>
 
         <section class="section-card dark">
-          <h2>{{ copy.currentMeds }} CURRENT MEDICATIONS</h2>
+          <h2>{{ bilingualHeading(copy.currentMeds, 'CURRENT MEDICATIONS') }}</h2>
           <div class="option-grid two">
             <label v-for="option in CURRENT_MEDICATION_OPTIONS" :key="option" class="check-option">
               <input :checked="isChecked('currentMedicationSelections', option)" type="checkbox" @change="toggleMulti('currentMedicationSelections', option)" />
@@ -353,7 +361,7 @@ async function handleCancelAppointment() {
         </section>
 
         <section class="section-card dark">
-          <h2>{{ copy.allergies }} ALLERGIES</h2>
+          <h2>{{ bilingualHeading(copy.allergies, 'ALLERGIES') }}</h2>
           <div class="grid two">
             <label class="field-block">
               <span>药物过敏 Drug Allergies</span>
@@ -367,30 +375,30 @@ async function handleCancelAppointment() {
         </section>
 
         <section class="section-card dark">
-          <h2>{{ copy.lifestyle }} LIFESTYLE</h2>
+          <h2>{{ bilingualHeading(copy.lifestyle, 'LIFESTYLE') }}</h2>
           <div class="grid two">
             <div class="field-block">
               <span>吸烟 Smoking</span>
               <div class="radio-group">
-                <label><input v-model="form.smokingStatus" type="radio" value="无 None" /> <span>无</span></label>
-                <label><input v-model="form.smokingStatus" type="radio" value="有 Yes" /> <span>有</span></label>
-                <label><input v-model="form.smokingStatus" type="radio" value="已戒 Quit" /> <span>已戒</span></label>
+                <label><input v-model="form.smokingStatus" type="radio" value="无 None" /> <span>无 None</span></label>
+                <label><input v-model="form.smokingStatus" type="radio" value="有 Yes" /> <span>有 Yes</span></label>
+                <label><input v-model="form.smokingStatus" type="radio" value="已戒 Quit" /> <span>已戒 Quit</span></label>
               </div>
             </div>
             <div class="field-block">
               <span>饮酒 Alcohol</span>
               <div class="radio-group">
-                <label><input v-model="form.alcoholStatus" type="radio" value="无 None" /> <span>无</span></label>
-                <label><input v-model="form.alcoholStatus" type="radio" value="偶尔 Occasionally" /> <span>偶尔</span></label>
-                <label><input v-model="form.alcoholStatus" type="radio" value="经常 Frequently" /> <span>经常</span></label>
+                <label><input v-model="form.alcoholStatus" type="radio" value="无 None" /> <span>无 None</span></label>
+                <label><input v-model="form.alcoholStatus" type="radio" value="偶尔 Occasionally" /> <span>偶尔 Occasionally</span></label>
+                <label><input v-model="form.alcoholStatus" type="radio" value="经常 Frequently" /> <span>经常 Frequently</span></label>
               </div>
             </div>
             <div class="field-block">
               <span>运动习惯 Exercise</span>
               <div class="radio-group">
-                <label><input v-model="form.exerciseStatus" type="radio" value="无 None" /> <span>无</span></label>
-                <label><input v-model="form.exerciseStatus" type="radio" value="偶尔 Occasionally" /> <span>偶尔</span></label>
-                <label><input v-model="form.exerciseStatus" type="radio" value="规律 Regularly" /> <span>规律</span></label>
+                <label><input v-model="form.exerciseStatus" type="radio" value="无 None" /> <span>无 None</span></label>
+                <label><input v-model="form.exerciseStatus" type="radio" value="偶尔 Occasionally" /> <span>偶尔 Occasionally</span></label>
+                <label><input v-model="form.exerciseStatus" type="radio" value="规律 Regularly" /> <span>规律 Regularly</span></label>
               </div>
             </div>
             <label class="field-block">
@@ -401,21 +409,21 @@ async function handleCancelAppointment() {
         </section>
 
         <section class="section-card dark">
-          <h2>{{ copy.femaleOnly }} FEMALE PATIENTS ONLY</h2>
+          <h2>{{ bilingualHeading(copy.femaleOnly, 'FEMALE PATIENTS ONLY') }}</h2>
           <div class="grid three">
             <div class="field-block">
               <span>是否妊娠 Currently Pregnant</span>
               <div class="radio-group">
-                <label><input v-model="form.currentlyPregnant" type="radio" value="否 No" /> <span>否</span></label>
-                <label><input v-model="form.currentlyPregnant" type="radio" value="是 Yes" /> <span>是</span></label>
-                <label><input v-model="form.currentlyPregnant" type="radio" value="不确定 Not sure" /> <span>不确定</span></label>
+                <label><input v-model="form.currentlyPregnant" type="radio" value="否 No" /> <span>否 No</span></label>
+                <label><input v-model="form.currentlyPregnant" type="radio" value="是 Yes" /> <span>是 Yes</span></label>
+                <label><input v-model="form.currentlyPregnant" type="radio" value="不确定 Not sure" /> <span>不确定 Not sure</span></label>
               </div>
             </div>
             <div class="field-block">
               <span>是否哺乳 Breastfeeding</span>
               <div class="radio-group">
-                <label><input v-model="form.breastfeeding" type="radio" value="否 No" /> <span>否</span></label>
-                <label><input v-model="form.breastfeeding" type="radio" value="是 Yes" /> <span>是</span></label>
+                <label><input v-model="form.breastfeeding" type="radio" value="否 No" /> <span>否 No</span></label>
+                <label><input v-model="form.breastfeeding" type="radio" value="是 Yes" /> <span>是 Yes</span></label>
               </div>
             </div>
           </div>
@@ -430,7 +438,7 @@ async function handleCancelAppointment() {
         </section>
 
         <section class="section-card dark">
-          <h2>{{ copy.declaration }} INFORMED CONSENT STATEMENT</h2>
+          <h2>{{ bilingualHeading(copy.declaration, 'INFORMED CONSENT STATEMENT') }}</h2>
           <p class="declaration-text">{{ copy.declarationText }}</p>
           <div class="grid two">
             <label class="field-block">
