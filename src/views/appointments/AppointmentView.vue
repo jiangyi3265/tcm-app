@@ -167,6 +167,7 @@ function buildEmptyIntakeForm() {
 
 const practitioners = computed(() => authStore.getPractitioners())
 const filterPractitioner = ref('')
+const filterRoom = ref('')
 
 watch(practitioners, (items) => {
   if (filterPractitioner.value || !canEditOwnSchedule.value) return
@@ -203,6 +204,7 @@ const weekAppointments = computed(() => {
     .filter((appointment) => appointment.status !== 'cancelled')
     .filter((appointment) => {
       if (filterPractitioner.value && String(appointment.practitionerId) !== String(filterPractitioner.value)) return false
+      if (filterRoom.value && String(appointment.roomId || '') !== String(filterRoom.value)) return false
       const startTime = dayjs(appointment.startTime)
       return startTime.isValid() && !startTime.isBefore(start) && !startTime.isAfter(end)
     })
@@ -365,9 +367,10 @@ watch([() => newAppt.value.serviceType, practitionerOptions, filteredRooms], () 
     newAppt.value.roomId = ''
     return
   }
-  // 诊室由后端自动分配，前端不再固定选择
-  // 清空 roomId 让后端在所有符合条件的诊室中查找
-  newAppt.value.roomId = ''
+  if (newAppt.value.roomId && filteredRooms.value.some((room) => String(room.id) === String(newAppt.value.roomId))) return
+  if (filterRoom.value && filteredRooms.value.some((room) => String(room.id) === String(filterRoom.value))) {
+    newAppt.value.roomId = filterRoom.value
+  }
 })
 
 function openCreateDialog({ date, practitionerId, preferredStartTime } = {}) {
@@ -376,7 +379,7 @@ function openCreateDialog({ date, practitionerId, preferredStartTime } = {}) {
   newAppt.value = {
     patientId: '',
     practitionerId: practitionerId ?? filterPractitioner.value ?? '',
-    roomId: '',
+    roomId: filterRoom.value || '',
     serviceType: serviceOptions.value[0]?.key || 'acupuncture_new',
     date: date || dayjs(currentDate.value).format('YYYY-MM-DD'),
     notes: '',
@@ -488,7 +491,7 @@ async function loadAvailability() {
       date: newAppt.value.date,
       serviceType: newAppt.value.serviceType,
       practitionerId: newAppt.value.practitionerId || null,
-      roomId: null,
+      roomId: newAppt.value.roomId || null,
       excludeId: isEditingAppointment.value ? editingAppointmentId.value : null,
     })
     if (requestId !== availabilityRequestId) return
@@ -526,7 +529,6 @@ function getAvailablePractitionerNames(slot) {
 
 async function createAppointment() {
   if (!newAppt.value.patientId) return ElMessage.warning(t('appointments.selectPatient'))
-  if (!newAppt.value.practitionerId) return ElMessage.warning('请选择医师')
   if (!newAppt.value.serviceType) return ElMessage.warning(t('appointments.selectServiceType'))
   if (!selectedAvailabilitySlot.value) {
     return ElMessage.warning(availabilitySlots.value.length ? t('appointments.selectStartTime') : t('appointments.noAvailableSlots'))
@@ -555,7 +557,6 @@ async function createAppointment() {
 
 async function submitAppointment() {
   if (!newAppt.value.patientId) return ElMessage.warning(t('appointments.selectPatient'))
-  if (!newAppt.value.practitionerId) return ElMessage.warning('请选择医师')
   if (!newAppt.value.serviceType) return ElMessage.warning(t('appointments.selectServiceType'))
   if (!selectedAvailabilitySlot.value) {
     return ElMessage.warning(availabilitySlots.value.length ? t('appointments.selectStartTime') : t('appointments.noAvailableSlots'))
@@ -767,6 +768,9 @@ function getAppointmentBlockStyle(block) {
         <span class="week-label">{{ formatDate(visibleDays[0]) }} – {{ formatDate(visibleDays[visibleDays.length - 1]) }}</span>
       </div>
       <div class="toolbar-right">
+        <el-select v-model="filterRoom" clearable size="small" style="width:180px" placeholder="全部诊室">
+          <el-option v-for="room in settingsStore.activeRooms" :key="room.id" :label="room.name" :value="room.id" />
+        </el-select>
         <el-select v-model="filterPractitioner" clearable size="small" style="width:180px" :placeholder="t('appointments.allPractitioners')">
           <el-option v-for="practitioner in practitioners" :key="practitioner.id" :label="practitioner.name" :value="practitioner.id" />
         </el-select>
@@ -979,7 +983,7 @@ function getAppointmentBlockStyle(block) {
           </template>
         </el-form-item>
 
-        <el-form-item :label="t('appointments.practitioner')" required>
+        <el-form-item :label="t('appointments.practitioner')">
           <el-select v-model="newAppt.practitionerId" :placeholder="t('appointments.allPractitioners')" style="width:100%">
             <el-option v-for="practitioner in practitionerOptions" :key="practitioner.id" :label="practitioner.name" :value="practitioner.id" />
           </el-select>
@@ -996,6 +1000,12 @@ function getAppointmentBlockStyle(block) {
           </el-select>
         </el-form-item>
 
+        <el-form-item v-if="requiresRoomSelection" :label="t('appointments.room')">
+          <el-select v-model="newAppt.roomId" clearable placeholder="自动分配或选择诊室" style="width:100%">
+            <el-option v-for="room in filteredRooms" :key="room.id" :label="room.name" :value="room.id" />
+          </el-select>
+        </el-form-item>
+
         <!-- 诊室已改为自动分配, 不在此处选择 -->
 
         <el-form-item :label="t('appointments.dateLabel')" required>
@@ -1006,7 +1016,7 @@ function getAppointmentBlockStyle(block) {
           <div class="availability-wrapper">
             <div v-if="availabilityLoading" class="availability-empty">{{ t('common.loading') }}</div>
             <div v-else-if="!availabilitySlots.length" class="availability-empty">
-              {{ requiresRoomSelection && !newAppt.roomId ? t('appointments.selectRoomFirst') : t('appointments.noAvailableSlots') }}
+              {{ t('appointments.noAvailableSlots') }}
             </div>
             <div v-else class="availability-list">
               <button

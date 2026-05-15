@@ -10,6 +10,73 @@ const DEFAULT_CURRENCY = 'CAD'
 const DEFAULT_PATENT_MEDICINES = []
 const DEFAULT_FORMULA_CATEGORIES = ['经典方', '经验方', '自拟方']
 const DEFAULT_DIFFERENTIATION_NAMES = ['Qi deficiency', 'Blood deficiency', 'Qi stagnation', 'Blood stasis', 'Damp heat', 'Cold damp', 'Yin deficiency', 'Yang deficiency']
+const DEFAULT_CONSENT_TEMPLATE = {
+  title: 'OTCM Acupuncture Clinic Informed Consent',
+  version: 'otcm-consent-2026-04',
+  sections: [
+    {
+      key: 'patient_consent',
+      title: 'Patient Consent / 患者同意',
+      paragraphs: [
+        'I consent to Traditional Chinese Medicine diagnosis and treatments including acupuncture, Chinese herbal medicine, auricular acupuncture, cupping, and related modalities provided by the clinic team.',
+        'I understand treatment methods may include acupuncture, electrical stimulation, moxibustion, cupping, skin scraping, bloodletting, Tui-Na, Chinese herbal medicine, medicated diet, and other related TCM therapies.',
+      ],
+    },
+    {
+      key: 'risks_and_side_effects',
+      title: 'Risks and Side Effects / 风险与副作用',
+      paragraphs: [
+        'I understand that possible side effects include bruising, bleeding, numbness or tingling, dizziness or fainting, temporary skin marks, allergic reactions, and other unexpected responses.',
+        'I understand rare risks may include infection, burns or scarring from moxibustion, tissue damage, organ puncture, spontaneous miscarriage, and other serious complications.',
+      ],
+    },
+    {
+      key: 'herbal_medicine_and_pregnancy',
+      title: 'Herbal Medicine and Pregnancy / 草药与怀孕',
+      paragraphs: [
+        'I understand that some herbs or acupuncture points may be inappropriate during pregnancy or while breastfeeding.',
+        'I agree to notify the clinic immediately if I experience unpleasant effects, or if I am or become pregnant.',
+      ],
+    },
+    {
+      key: 'medical_history_disclosure',
+      title: 'Medical History Disclosure / 病史披露',
+      paragraphs: [
+        'I confirm that I have disclosed relevant health history, medications, allergies, implants, bleeding disorders, pacemaker, infectious diseases, and other information needed for safe care.',
+      ],
+    },
+    {
+      key: 'confidentiality',
+      title: 'Confidentiality / 隐私保密',
+      paragraphs: [
+        'I understand my clinical and administrative records will be kept confidential and will not be released without my written consent except where required by law.',
+      ],
+    },
+    {
+      key: 'financial_obligations',
+      title: 'Financial Obligations / 费用责任',
+      paragraphs: [
+        'I understand the fees are not covered under OHIP and I am responsible for full and prompt payment after services have been rendered.',
+        'I understand treatment fees, herbs, and other goods or services are non-refundable after purchase or service completion unless clinic policy states otherwise.',
+      ],
+    },
+    {
+      key: 'cancellation_policy',
+      title: 'Cancellation, No-Show, and Purchase Policy / 取消与缺席政策',
+      paragraphs: [
+        'I understand appointments are reserved specifically for me and the clinic requests at least 24 hours notice for cancellation or rescheduling.',
+      ],
+    },
+    {
+      key: 'consent_statement',
+      title: 'Consent Statement / 同意声明',
+      paragraphs: [
+        'By signing this consent, I confirm that I have read, understood, and had the opportunity to ask questions about the benefits, risks, and alternatives of treatment.',
+        'I understand that I may withdraw consent at any time by clearly notifying the clinic.',
+      ],
+    },
+  ],
+}
 
 function normalizeTagList(value) {
   if (Array.isArray(value)) {
@@ -47,6 +114,68 @@ function normalizeEditableList(value, fallback = []) {
   }
   if (!Array.isArray(source)) source = fallback
   return [...new Set(source.map((item) => String(item || '').trim()).filter(Boolean))]
+}
+
+function normalizeConsentParagraphs(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean)
+  }
+  if (typeof value === 'string') {
+    return value.split(/\n{2,}/).map((item) => item.trim()).filter(Boolean)
+  }
+  return []
+}
+
+function buildConsentSectionKey(title, index, usedKeys) {
+  const base = String(title || `section_${index + 1}`)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || `section_${index + 1}`
+  let key = base
+  let suffix = 2
+  while (usedKeys.has(key)) {
+    key = `${base}_${suffix}`
+    suffix += 1
+  }
+  usedKeys.add(key)
+  return key
+}
+
+function normalizeConsentTemplate(value) {
+  let source = value
+  if (typeof source === 'string' && source.trim()) {
+    try {
+      source = JSON.parse(source)
+    } catch {
+      source = null
+    }
+  }
+  if (!source || typeof source !== 'object') source = DEFAULT_CONSENT_TEMPLATE
+  const usedKeys = new Set()
+  const sections = (Array.isArray(source.sections) ? source.sections : DEFAULT_CONSENT_TEMPLATE.sections)
+    .map((section, index) => {
+      const title = String(section?.title || '').trim()
+      const paragraphs = normalizeConsentParagraphs(section?.paragraphs)
+      if (!title && !paragraphs.length) return null
+      const rawKey = String(section?.key || '').trim()
+      let key = rawKey || buildConsentSectionKey(title, index, usedKeys)
+      if (rawKey) {
+        if (usedKeys.has(key)) key = buildConsentSectionKey(key, index, usedKeys)
+        else usedKeys.add(key)
+      }
+      return {
+        key,
+        title: title || `Section ${index + 1}`,
+        paragraphs: paragraphs.length ? paragraphs : [''],
+      }
+    })
+    .filter(Boolean)
+  return {
+    title: String(source.title || DEFAULT_CONSENT_TEMPLATE.title).trim() || DEFAULT_CONSENT_TEMPLATE.title,
+    version: String(source.version || DEFAULT_CONSENT_TEMPLATE.version).trim() || DEFAULT_CONSENT_TEMPLATE.version,
+    sections: sections.length ? sections : DEFAULT_CONSENT_TEMPLATE.sections,
+  }
 }
 
 function normalizeRoom(room = {}) {
@@ -113,7 +242,9 @@ export const useSettingsStore = defineStore('settings', () => {
   const formulaCategories = ref([...DEFAULT_FORMULA_CATEGORIES])
   const differentiationNames = ref([...DEFAULT_DIFFERENTIATION_NAMES])
   const emailTemplates = ref(cloneDefaultEmailTemplates())
+  const consentTemplate = ref(normalizeConsentTemplate())
   const thirdPartySignature = ref({ path: '', url: '', uploadedAt: '' })
+  const clinicSeal = ref({ path: '', url: '', uploadedAt: '' })
   const practitionerProfile = ref({ practitionerName: '', organization: '', organizationNumber: '' })
   // 每个医师的预约间隔: { [practitionerId]: minutes }
   const practitionerIntervals = ref({})
@@ -139,10 +270,16 @@ export const useSettingsStore = defineStore('settings', () => {
     formulaCategories.value = normalizeEditableList(data?.formulaCategories, DEFAULT_FORMULA_CATEGORIES)
     differentiationNames.value = normalizeEditableList(data?.differentiationNames, DEFAULT_DIFFERENTIATION_NAMES)
     emailTemplates.value = normalizeEmailTemplates(data?.emailTemplates)
+    consentTemplate.value = normalizeConsentTemplate(data?.consentTemplate)
     thirdPartySignature.value = {
       path: data?.thirdPartySignature?.path || data?.thirdPartySignaturePath || '',
       url: data?.thirdPartySignature?.url || data?.thirdPartySignatureUrl || '',
       uploadedAt: data?.thirdPartySignature?.uploadedAt || '',
+    }
+    clinicSeal.value = {
+      path: data?.clinicSeal?.path || data?.clinicSealPath || '',
+      url: data?.clinicSeal?.url || data?.clinicSealUrl || '',
+      uploadedAt: data?.clinicSeal?.uploadedAt || '',
     }
     practitionerProfile.value = {
       practitionerName: data?.practitionerProfile?.practitionerName || data?.practitionerName || '',
@@ -173,7 +310,9 @@ export const useSettingsStore = defineStore('settings', () => {
       formulaCategories: formulaCategories.value,
       differentiationNames: differentiationNames.value,
       emailTemplates: normalizeEmailTemplates(emailTemplates.value),
+      consentTemplate: normalizeConsentTemplate(consentTemplate.value),
       thirdPartySignature: thirdPartySignature.value,
+      clinicSeal: clinicSeal.value,
       practitionerProfile: practitionerProfile.value,
       practitionerIntervals: practitionerIntervals.value,
     })
@@ -279,16 +418,20 @@ export const useSettingsStore = defineStore('settings', () => {
     if (updates.patentMedicines !== undefined) patentMedicines.value = normalizeEditableList(updates.patentMedicines, DEFAULT_PATENT_MEDICINES)
     if (updates.formulaCategories !== undefined) formulaCategories.value = normalizeEditableList(updates.formulaCategories, DEFAULT_FORMULA_CATEGORIES)
     if (updates.differentiationNames !== undefined) differentiationNames.value = normalizeEditableList(updates.differentiationNames, DEFAULT_DIFFERENTIATION_NAMES)
+    if (updates.consentTemplate !== undefined) consentTemplate.value = normalizeConsentTemplate(updates.consentTemplate)
     const payload = { ...updates }
     if (updates.emailTemplates !== undefined) {
       emailTemplates.value = normalizeEmailTemplates(updates.emailTemplates)
       payload.emailTemplates = emailTemplates.value
     }
     if (updates.thirdPartySignature !== undefined) thirdPartySignature.value = { ...thirdPartySignature.value, ...updates.thirdPartySignature }
+    if (updates.clinicSeal !== undefined) clinicSeal.value = { ...clinicSeal.value, ...updates.clinicSeal }
     if (updates.practitionerProfile !== undefined) practitionerProfile.value = { ...practitionerProfile.value, ...updates.practitionerProfile }
     const updated = await settingsApi.updateBase(payload)
     if (updated?.emailTemplates) emailTemplates.value = normalizeEmailTemplates(updated.emailTemplates)
+    if (updated?.consentTemplate) consentTemplate.value = normalizeConsentTemplate(updated.consentTemplate)
     if (updated?.thirdPartySignature) thirdPartySignature.value = { ...thirdPartySignature.value, ...updated.thirdPartySignature }
+    if (updated?.clinicSeal) clinicSeal.value = { ...clinicSeal.value, ...updated.clinicSeal }
     if (updated?.practitionerProfile) practitionerProfile.value = { ...practitionerProfile.value, ...updated.practitionerProfile }
     saveState()
   }
@@ -302,6 +445,17 @@ export const useSettingsStore = defineStore('settings', () => {
     }
     await updateSettings({ thirdPartySignature: nextSignature, thirdPartyInvoicePng: nextSignature.path })
     return nextSignature
+  }
+
+  async function uploadClinicSealPng(file) {
+    const uploaded = await settingsApi.uploadSealPng(file)
+    const nextSeal = {
+      path: uploaded.path || uploaded.resource || '',
+      url: uploaded.url || '',
+      uploadedAt: uploaded.uploadedAt || new Date().toISOString(),
+    }
+    await updateSettings({ clinicSeal: nextSeal })
+    return nextSeal
   }
 
   const activeRooms = computed(() => rooms.value.filter((room) => room.isActive))
@@ -364,7 +518,9 @@ export const useSettingsStore = defineStore('settings', () => {
     formulaCategories,
     differentiationNames,
     emailTemplates,
+    consentTemplate,
     thirdPartySignature,
+    clinicSeal,
     practitionerProfile,
     updateTaxRate,
     addRoom,
@@ -381,5 +537,6 @@ export const useSettingsStore = defineStore('settings', () => {
     getPractitionerInterval,
     setPractitionerInterval,
     uploadSignaturePng,
+    uploadClinicSealPng,
   }
 })

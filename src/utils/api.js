@@ -97,6 +97,20 @@ export const bootstrapApi = {
     a.click()
     URL.revokeObjectURL(url)
   },
+  async importData(file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    const token = getToken()
+    if (!token) throw new Error('Please log in again.')
+    const res = await fetch('/api/bootstrap/import', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    })
+    const payload = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(payload.msg || payload.message || 'Import failed')
+    return payload
+  },
 }
 
 export const auditLogsApi = {
@@ -122,6 +136,23 @@ export const usersApi = {
   create(data) { return request('/api/users', { method: 'POST', body: data }) },
   update(id, data) { return request(`/api/users/${id}`, { method: 'PUT', body: data }) },
   addInternshipToday(id) { return request(`/api/users/${id}/internship-today`, { method: 'POST' }) },
+  recordApprenticeSession(action) {
+    return request('/api/users/me/apprentice-session', { method: 'POST', body: { action } })
+  },
+  async uploadSignaturePng(id, file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    const token = getToken()
+    if (!token) throw new Error('Please log in again.')
+    const res = await fetch(`/api/users/${id}/signature/upload`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    })
+    const payload = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(payload.msg || payload.message || 'Upload failed')
+    return payload
+  },
   remove(id) { return request(`/api/users/${id}`, { method: 'DELETE' }) },
 }
 
@@ -136,7 +167,7 @@ export const patientsApi = {
   merge(keepId, mergeId) {
     return request(`/api/patients/${keepId}/merge`, { method: 'POST', body: { mergeId } })
   },
-  signConsent(id) { return request(`/api/patients/${id}/consent`, { method: 'PATCH' }) },
+  signConsent(id, data = {}) { return request(`/api/patients/${id}/consent`, { method: 'PATCH', body: data }) },
   sendConsentEmail(id, data = {}) {
     return request(`/api/patients/${id}/consent/send`, { method: 'POST', body: data })
   },
@@ -169,6 +200,7 @@ export const consultationsApi = {
   create(data) { return request('/api/consultations', { method: 'POST', body: data }) },
   update(id, data) { return request(`/api/consultations/${id}`, { method: 'PUT', body: data }) },
   complete(id) { return request(`/api/consultations/${id}/complete`, { method: 'PATCH' }) },
+  reactivate(id) { return request(`/api/consultations/${id}/reactivate`, { method: 'PATCH' }) },
   paid(id, data = {}) {
     return request(`/api/consultations/${id}/paid`, { method: 'PATCH', body: data })
   },
@@ -183,6 +215,16 @@ export const consultationsApi = {
   },
   deletePrescription(id, prescriptionId, data = {}) {
     return request(`/api/consultations/${id}/prescriptions/${prescriptionId}/delete`, { method: 'PATCH', body: data })
+  },
+  deletedPrescriptions() {
+    return request('/api/consultations/deleted-prescriptions')
+  },
+  restoreDeletedPrescription(id, prescriptionId) {
+    return request(`/api/consultations/${id}/prescriptions/${prescriptionId}/restore-deleted`, { method: 'PATCH' })
+  },
+  hardDeletePrescription(id, prescriptionId, { restoreInventory = false } = {}) {
+    const params = restoreInventory ? '?restoreInventory=true' : ''
+    return request(`/api/consultations/${id}/prescriptions/${prescriptionId}${params}`, { method: 'DELETE' })
   },
   reopenPrescription(id, prescriptionId) {
     return request(`/api/consultations/${id}/prescriptions/${prescriptionId}/reopen`, { method: 'PATCH' })
@@ -268,6 +310,20 @@ export const settingsApi = {
     const token = getToken()
     if (!token) throw new Error('Please log in again.')
     const res = await fetch('/api/settings/signature/upload', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    })
+    const payload = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(payload.msg || payload.message || 'Upload failed')
+    return payload
+  },
+  async uploadSealPng(file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    const token = getToken()
+    if (!token) throw new Error('Please log in again.')
+    const res = await fetch('/api/settings/seal/upload', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
       body: formData,

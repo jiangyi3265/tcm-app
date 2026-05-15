@@ -11,6 +11,7 @@ const token = route.params.token
 const loading = ref(true)
 const error = ref('')
 const patientName = ref('')
+const documentTitle = ref('')
 const documentVersion = ref('')
 const sections = ref([])
 const agreements = ref({})
@@ -26,7 +27,7 @@ const isZh = computed(() => locale.value === 'zh-CN')
 
 const text = computed(() => (isZh.value
   ? {
-      appTitle: (clinicName.value || 'OTCM') + ' 知情同意书',
+      appTitle: documentTitle.value || ((clinicName.value || 'OTCM') + ' 知情同意书'),
       appSubtitle: '请逐段阅读并确认后再签署',
       loading: '正在加载同意书...',
       invalidTitle: '无法处理请求',
@@ -48,7 +49,7 @@ const text = computed(() => (isZh.value
       sectionMissing: '请逐段阅读并同意所有内容后再签署',
     }
   : {
-      appTitle: (clinicName.value || 'OTCM') + ' Informed Consent',
+      appTitle: documentTitle.value || ((clinicName.value || 'OTCM') + ' Informed Consent'),
       appSubtitle: 'Please review each section and confirm before signing',
       loading: 'Loading consent form...',
       invalidTitle: 'Unable to process this request',
@@ -84,6 +85,7 @@ onMounted(async () => {
   try {
     const info = await consentPublicApi.getInfo(token)
     patientName.value = info.patientName || ''
+    documentTitle.value = info.consentTitle || ''
     documentVersion.value = info.consentVersion || ''
     sections.value = Array.isArray(info.sections) ? info.sections : []
     agreements.value = Object.fromEntries(sections.value.map((section) => [section.key, false]))

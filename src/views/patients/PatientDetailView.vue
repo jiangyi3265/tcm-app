@@ -29,6 +29,7 @@ const patientsStore = usePatientsStore()
 const consultationsStore = useConsultationsStore()
 const authStore = useAuthStore()
 const appointmentsStore = useAppointmentsStore()
+const settingsStore = useSettingsStore()
 
 const roles = computed(() => authStore.roles)
 const canEdit = computed(() => hasPermission(roles.value, 'patient.edit'))
@@ -236,23 +237,30 @@ async function saveEdit() {
 
 // ── 知情同意书签署 ──
 const showConsentDialog = ref(false)
-const consentForm = ref({ agreed: false, signatureName: '' })
+const consentForm = ref({ agreements: {}, signatureName: '' })
+
+const consentTemplate = computed(() => settingsStore.consentTemplate || { title: 'Informed Consent', version: '', sections: [] })
+const consentSections = computed(() => Array.isArray(consentTemplate.value.sections) ? consentTemplate.value.sections : [])
+const allConsentAgreed = computed(() =>
+  consentSections.value.length > 0
+  && consentSections.value.every((section) => consentForm.value.agreements?.[section.key] === true),
+)
 
 function openConsentDialog() {
-  consentForm.value = { agreed: false, signatureName: '' }
+  consentForm.value = {
+    agreements: Object.fromEntries(consentSections.value.map((section) => [section.key, false])),
+    signatureName: '',
+  }
   showConsentDialog.value = true
 }
 
 async function confirmConsent() {
-  if (!consentForm.value.agreed) return ElMessage.warning(t('patientDetail.pleaseAgree'))
+  if (!allConsentAgreed.value) return ElMessage.warning(t('patientDetail.pleaseAgree'))
   if (!consentForm.value.signatureName.trim()) return ElMessage.warning(t('patientDetail.pleaseSignName'))
   try {
-    await patientsStore.signConsent(patientId)
-    await patientsStore.updatePatient(patientId, {
-      consentSigned: true,
-      consentSignedAt: new Date().toISOString(),
-      consentSignedBy: consentForm.value.signatureName.trim(),
-      consentVersion: '1.0',
+    await patientsStore.signConsent(patientId, {
+      signatureName: consentForm.value.signatureName.trim(),
+      sectionAcknowledgements: consentForm.value.agreements,
     })
     showConsentDialog.value = false
     ElMessage.success(t('patientDetail.consentSigned'))
@@ -371,7 +379,6 @@ const PROVINCE_OPTIONS = [
 ]
 
 // ── 邮件签署同意书 ──
-const settingsStore = useSettingsStore()
 const sendingConsentEmail = ref(false)
 
 async function sendConsentByEmail() {
@@ -1415,22 +1422,19 @@ const fileTree = computed(() => {
   <!-- 知情同意书签署对话框 -->
   <el-drawer v-model="showConsentDialog" :title="t('patientDetail.signConsentDialog')" size="600px" direction="rtl" :close-on-press-escape="true">
     <div style="max-height: 300px; overflow-y: auto; padding: 16px; background: #f9f9f9; border-radius: 8px; margin-bottom: 16px; font-size: 14px; line-height: 1.8; color: #555">
-      <h3 style="color:#1b4332; margin-bottom: 12px">{{ t('patientDetail.consentDocTitle') }}</h3>
-      <p><strong>{{ t('patientDetail.consentSection1Title') }}</strong></p>
-      <p>{{ t('patientDetail.consentSection1') }}</p>
-      <p><strong>{{ t('patientDetail.consentSection2Title') }}</strong></p>
-      <p>{{ t('patientDetail.consentSection2') }}</p>
-      <p><strong>{{ t('patientDetail.consentSection3Title') }}</strong></p>
-      <p>{{ t('patientDetail.consentSection3') }}</p>
-      <p><strong>{{ t('patientDetail.consentSection4Title') }}</strong></p>
-      <p>{{ t('patientDetail.consentSection4') }}</p>
-      <p><strong>{{ t('patientDetail.consentSection5Title') }}</strong></p>
-      <p>{{ t('patientDetail.consentSection5') }}</p>
+      <h3 style="color:#1b4332; margin-bottom: 4px">{{ consentTemplate.title }}</h3>
+      <p v-if="consentTemplate.version" style="margin-top:0;color:#888;font-size:12px">Version: {{ consentTemplate.version }}</p>
+      <div v-for="(section, index) in consentSections" :key="section.key" class="consent-section-preview">
+        <p><strong>{{ index + 1 }}. {{ section.title }}</strong></p>
+        <p v-for="(paragraph, paragraphIndex) in section.paragraphs || []" :key="`${section.key}-${paragraphIndex}`">
+          {{ paragraph }}
+        </p>
+      </div>
     </div>
     <el-form :model="consentForm" label-width="80px">
-      <el-form-item>
-        <el-checkbox v-model="consentForm.agreed">
-          {{ t('patientDetail.consentAgree') }}
+      <el-form-item v-for="section in consentSections" :key="`agree-${section.key}`">
+        <el-checkbox v-model="consentForm.agreements[section.key]">
+          {{ section.title }} · {{ t('patientDetail.consentAgree') }}
         </el-checkbox>
       </el-form-item>
       <el-form-item :label="t('patientDetail.signatureName')">
@@ -1439,13 +1443,14 @@ const fileTree = computed(() => {
     </el-form>
     <template #footer>
       <el-button @click="showConsentDialog = false">{{ t('common.cancel') }}</el-button>
-      <el-button type="primary" :disabled="!consentForm.agreed || !consentForm.signatureName.trim()" @click="confirmConsent">{{ t('patientDetail.confirmSign') }}</el-button>
+      <el-button type="primary" :disabled="!allConsentAgreed || !consentForm.signatureName.trim()" @click="confirmConsent">{{ t('patientDetail.confirmSign') }}</el-button>
     </template>
   </el-drawer>
 </template>
 
 <style scoped>
 .patient-detail { max-width: 100%; }
+.consent-section-preview { margin-top: 12px; padding-top: 10px; border-top: 1px solid #e5e7eb; }
 
 /* ── 页头 ── */
 .patient-header {

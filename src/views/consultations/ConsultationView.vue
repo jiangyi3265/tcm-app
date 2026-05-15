@@ -80,18 +80,27 @@ const isNew = route.name === 'consultation-new'
 
 const patient = computed(() => patientsStore.getPatient(patientId))
 const roles = computed(() => authStore.roles)
-const isReadOnly = computed(() => !hasPermission(roles.value, 'consultation.edit'))
+const lacksEditPermission = computed(() => !hasPermission(roles.value, 'consultation.edit'))
+const isConsultationLocked = computed(() =>
+  !isNew && (
+    form.value.status === 'completed'
+    || form.value.status === 'paid'
+    || Boolean(form.value.lockedAt)
+  ),
+)
+const isReadOnly = computed(() => lacksEditPermission.value || isConsultationLocked.value)
 const isApprenticeReadonly = computed(() => roles.value.includes('apprentice'))
 const canMarkPaid = computed(() => hasPermission(roles.value, 'invoice.manage'))
 const canDeleteConsultation = computed(() => hasPermission(roles.value, 'consultation.delete'))
+const canReactivateConsultation = computed(() => !lacksEditPermission.value && isConsultationLocked.value)
 const canViewInvoiceTab = computed(() => ['admin', 'cashier'].some((role) => roles.value?.includes(role)))
 
 const lastConsultation = computed(() =>
   isNew ? consultStore.getLastConsultation(patientId) : null,
 )
 const currentTreatmentLocked = computed(() => isReadOnly.value)
-const currentFeedbackLocked = computed(() => true)
-const previousReviewLocked = computed(() => true)
+const currentFeedbackLocked = computed(() => isReadOnly.value)
+const previousReviewLocked = computed(() => isReadOnly.value)
 
 const differentiationNameSuggestions = computed(() =>
   [...new Set((settingsStore.differentiationNames || [])
@@ -1775,6 +1784,26 @@ async function markPaid() {
   }
 }
 
+async function reactivateConsultation() {
+  const id = consultId || consultation.value?.id
+  if (!id) return
+  try {
+    await ElMessageBox.confirm(
+      'Reactivate 后会进入下一版本，并允许继续编辑这条问诊。',
+      t('common.confirm'),
+      { type: 'warning' },
+    )
+    const updated = await consultStore.reactivateConsultation(id)
+    if (updated) {
+      applySavedConsultation(updated)
+      syncSavedSnapshot()
+    }
+    ElMessage.success('Consultation reactivated')
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e.message)
+  }
+}
+
 async function deleteConsultation() {
   try {
     await ElMessageBox.confirm(t('consultation.confirmDelete'), t('consultation.confirmDeleteTitle'), { type: 'warning' })
@@ -1975,17 +2004,19 @@ async function handleTongueUpload(file) {
     ElMessage.warning(t('consultation.imageMaxSize'))
     return false
   }
-  filesApi.upload(uploadFile, {
-    patientId,
-    consultationId: form.value.id || undefined,
-    fileType: 'tongue_image',
-  }).then((res) => {
+  try {
+    const res = await filesApi.upload(uploadFile, {
+      patientId,
+      consultationId: form.value.id || undefined,
+      fileType: 'tongue_image',
+    })
+    if (!form.value.diff) form.value.diff = {}
     form.value.diff.tongueImageResource = res.resource || res.filePath || null
     form.value.diff.tongueImage = res.url || res.filePath || res.fileName
     ElMessage.success(t('consultation.tongueImageUploaded'))
-  }).catch((e) => {
+  } catch (e) {
     ElMessage.error(e.message || t('consultation.uploadFailed'))
-  })
+  }
   return false
 }
 
@@ -1996,11 +2027,11 @@ function removeTongueImage() {
 
 // ============ ?============
 function handleDocUpload(file) {
-  if (file.size > 5 * 1024 * 1024) {
+  const rawFile = file.raw || file
+  if (rawFile.size > 5 * 1024 * 1024) {
     ElMessage.warning(t('consultation.fileMaxSize'))
     return false
   }
-  const rawFile = file.raw || file
   filesApi.upload(rawFile, {
     patientId,
     consultationId: form.value.id || undefined,
@@ -2184,8 +2215,9 @@ function handleSendInvoiceEmail() {
         <template v-if="!isReadOnly">
         <el-button size="small" :loading="saving" @click="saveDraft">{{ t('common.save') }}</el-button>
         <el-button v-if="form.status === 'draft' || isNew" size="small" type="success" @click="completeConsultation">{{ t('consultation.complete') }}</el-button>
-        <el-button v-if="canDeleteConsultation" size="small" type="danger" text @click="deleteConsultation">{{ t('common.delete') }}</el-button>
         </template>
+        <el-button v-if="canReactivateConsultation" size="small" type="warning" @click="reactivateConsultation">Reactivate</el-button>
+        <el-button v-if="canDeleteConsultation" size="small" type="danger" text @click="deleteConsultation">{{ t('common.delete') }}</el-button>
       </div>
     </div>
 
@@ -2870,7 +2902,7 @@ function handleSendInvoiceEmail() {
                     {{ t('consultation.reopenRx') }}
                   </el-button>
                   <el-button
-                    v-if="getPrescriptionStatus(row) !== 'dispensed'"
+                    v-if="getPrescriptionStatus(row) !== 'dispensed' && roles.includes('admin')"
                     size="small"
                     text
                     type="danger"
@@ -3139,18 +3171,6 @@ function handleSendInvoiceEmail() {
         <el-card class="section-card" style="margin-bottom:12px">
           <!-- PDF actions -->
           <div class="pdf-links" style="margin-bottom:12px">
-            <el-button size="small" @click="handleGeneratePdf">
-              <el-icon><Document /></el-icon> {{ t('consultation.downloadReportPdf') }}
-            </el-button>
-            <el-button size="small" @click="handleSendReport">
-              <el-icon><Message /></el-icon> {{ t('consultation.sendReportEmail') }}
-            </el-button>
-            <el-button size="small" @click="handleExportPdf">
-              <el-icon><Download /></el-icon> {{ t('consultation.downloadInvoice') }}
-            </el-button>
-            <el-button size="small" @click="handleSendInvoiceEmail">
-              <el-icon><Message /></el-icon> {{ t('consultation.sendInvoiceEmail') }}
-            </el-button>
             <el-button
               v-if="canStartInvoicePaymentAction"
               size="small"
@@ -3182,89 +3202,6 @@ function handleSendInvoiceEmail() {
           <div class="table-rows-count">Rows: {{ paymentRecords.length }}</div>
         </el-card>
 
-        <!-- Invoice PDF Preview (image17) -->
-        <el-card class="section-card invoice-pdf-preview">
-          <template #header>
-            <div class="diff-card-header">
-              <span class="sec-header">Invoice PDF Preview</span>
-              <el-button size="small" @click="handleExportPdf">{{ t('consultation.exportInvoicePdf') }}</el-button>
-            </div>
-          </template>
-          <div class="pdf-mock">
-            <div class="pdf-header">
-              <div class="pdf-logo">
-                <el-image
-                  v-if="thirdPartyInvoicePngUrl"
-                  :src="thirdPartyInvoicePngUrl"
-                  fit="contain"
-                  class="third-party-preview"
-                />
-                <span v-else>TCM CLINIC</span>
-              </div>
-              <div class="pdf-inv-title">INVOICE</div>
-            </div>
-            <div class="pdf-meta">
-              <div>
-                <strong>{{ settingsStore.clinicName }}</strong><br>
-                {{ settingsStore.clinicAddress }}<br>
-                {{ settingsStore.clinicPhone }}<br>
-                <template v-if="invoicePractitioner?.regulatoryBody || invoicePractitioner?.registrationNumber">
-                  {{ invoicePractitioner.regulatoryBody }}<span v-if="invoicePractitioner.regulatoryBody && invoicePractitioner.registrationNumber"> # </span>{{ invoicePractitioner.registrationNumber }}
-                </template>
-              </div>
-              <div class="pdf-meta-right">
-                <div>INVOICE # {{ form.consultationId }}</div>
-                <div>DATE: {{ latestPaymentTime || form.date }}</div>
-              </div>
-            </div>
-            <div class="pdf-bill-to">
-              <strong>BILL TO:</strong> {{ patient.name }}
-              &nbsp;|&nbsp; {{ patient.emails?.[0] }}
-              &nbsp;|&nbsp; {{ patient.mobilePhone || patient.phone }}
-              <template v-if="patientFullAddress">
-                <br>{{ patientFullAddress }}
-              </template>
-            </div>
-            <table class="pdf-items">
-              <thead>
-                <tr><th>QTY</th><th>DESCRIPTION</th><th>UNIT PRICE</th><th>AMOUNT</th><th>TAX</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="(s, i) in form.services" :key="i">
-                  <td>{{ s.quantity }}</td>
-                  <td>{{ s.name.toUpperCase() }}</td>
-                  <td>{{ cs }}{{ s.price.toFixed(2) }}</td>
-                  <td>{{ cs }}{{ getServiceExtended(s).toFixed(2) }}</td>
-                  <td>{{ s.taxable ? cs + getServiceTax(s).toFixed(2) : '-' }}</td>
-                </tr>
-                <tr v-if="form.consultationFee > 0">
-                  <td>1</td>
-                  <td>CONSULTATION FEE</td>
-                  <td>{{ cs }}{{ form.consultationFee.toFixed(2) }}</td>
-                  <td>{{ cs }}{{ form.consultationFee.toFixed(2) }}</td>
-                  <td>-</td>
-                </tr>
-                <template v-if="form.includeRxAmount">
-                  <tr v-for="(rx, ri) in billableRxForInvoice" :key="'rx-'+ri">
-                    <td>{{ rx.quantity || 1 }}</td>
-                    <td>{{ (rx.formulaName || rx.prescriptionType || 'PRESCRIPTION').toUpperCase() }}</td>
-                    <td>{{ cs }}{{ (rx.perDoseSubtotal || 0).toFixed(2) }}</td>
-                    <td>{{ cs }}{{ (rx.subtotal || 0).toFixed(2) }}</td>
-                    <td>-</td>
-                  </tr>
-                </template>
-              </tbody>
-            </table>
-            <div class="pdf-totals">
-              <div>SUBTOTAL: {{ cs }}{{ totalWithoutTax.toFixed(2) }}</div>
-              <div>TAX ({{ (effectiveTaxRate*100).toFixed(0) }}%): {{ cs }}{{ taxAmount.toFixed(2) }}</div>
-              <div>GRAND TOTAL: <strong>{{ cs }}{{ totalAmount.toFixed(2) }}</strong></div>
-              <div>PAID AMOUNT: <strong>{{ cs }}{{ paidAmount.toFixed(2) }}</strong></div>
-              <div>BALANCE AMOUNT: <strong>{{ cs }}{{ outstandingAmount.toFixed(2) }}</strong></div>
-            </div>
-            <div class="pdf-footer">THANK YOU FOR YOUR BUSINESS!</div>
-          </div>
-        </el-card>
       </el-tab-pane>
 
       <!-- Tab 6: History -->
@@ -3668,21 +3605,6 @@ function handleSendInvoiceEmail() {
 .pdf-links { display: flex; gap: 16px; flex-wrap: wrap; }
 .pdf-link-item { display: flex; align-items: center; gap: 4px; font-size: 13px; }
 
-/* Invoice PDF preview */
-.invoice-pdf-preview { font-family: 'Courier New', monospace; }
-.pdf-mock { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 24px; font-size: 12px; }
-.pdf-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
-.pdf-logo { font-size: 18px; font-weight: 700; color: #2d6a4f; }
-.pdf-inv-title { font-size: 28px; font-weight: 900; color: #1b4332; letter-spacing: 2px; }
-.pdf-meta { display: flex; justify-content: space-between; margin-bottom: 12px; color: #444; line-height: 1.8; }
-.pdf-meta-right { text-align: right; }
-.pdf-bill-to { background: #f9f9f9; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; color: #444; }
-.pdf-items { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
-.pdf-items th { background: #1b4332; color: #fff; padding: 6px 10px; text-align: left; }
-.pdf-items td { border-bottom: 1px solid #f0f0f0; padding: 6px 10px; color: #333; }
-.pdf-totals { text-align: right; padding: 8px 0; color: #333; line-height: 2; }
-.pdf-footer { text-align: center; color: #888; font-size: 11px; margin-top: 12px; }
-
 /* Formula suggestions in dialog */
 .formula-suggestions-dialog {
   position: absolute; top: 100%; left: 0; right: 0;
@@ -3736,8 +3658,6 @@ function handleSendInvoiceEmail() {
   .diff-card-header,
   .subsection-header,
   .price-row,
-  .pdf-header,
-  .pdf-meta,
   .history-med-header {
     align-items: flex-start;
     flex-direction: column;

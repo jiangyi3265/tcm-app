@@ -34,6 +34,7 @@ const showAdjustDialog = ref(false)
 const showDetailDialog = ref(false)
 const showBatchImportDialog = ref(false)
 const showHistoryDialog = ref(false)
+const selectedInventoryRows = ref([])
 const batchImportText = ref('')
 const batchImporting = ref(false)
 const adjustmentHistory = ref([])
@@ -165,6 +166,7 @@ watch(activeTab, () => {
   if (newItem.value.herbDictId) {
     newItem.value = syncInventoryNameBinding(newItem.value, newItem.value.herbDictId)
   }
+  selectedInventoryRows.value = []
 }, { immediate: true })
 
 // 自动计算售价：进价 × (1 + 利润比例)
@@ -294,6 +296,23 @@ async function deleteItem(item) {
   ElMessage.success(t('inventory.disabled'))
 }
 
+function handleInventorySelectionChange(category, rows) {
+  if (category === activeTab.value) {
+    selectedInventoryRows.value = rows || []
+  }
+}
+
+async function batchDeleteInventoryItems() {
+  const rows = selectedInventoryRows.value || []
+  if (!rows.length) return ElMessage.warning('请选择要删除的库存条目')
+  await ElMessageBox.confirm(`确认删除 ${rows.length} 条库存记录？`, t('common.confirm'), { type: 'warning' })
+  for (const row of rows) {
+    await inventoryStore.deleteItem(row.id)
+  }
+  selectedInventoryRows.value = []
+  ElMessage.success(`已删除 ${rows.length} 条库存记录`)
+}
+
 // 编辑
 const editingId = ref(null)
 const editForm = ref({})
@@ -412,6 +431,15 @@ async function openAdjustmentHistory(item) {
         </el-button>
       </div>
       <div style="display:flex;gap:8px">
+        <el-button
+          v-if="canEdit"
+          type="danger"
+          plain
+          :disabled="!selectedInventoryRows.length"
+          @click="batchDeleteInventoryItems"
+        >
+          批量删除
+        </el-button>
         <el-button v-if="canEdit" @click="showBatchImportDialog = true">
           <el-icon><Upload /></el-icon> {{ t('inventory.batchImport') }}
         </el-button>
@@ -428,7 +456,8 @@ async function openAdjustmentHistory(item) {
     <el-card class="inventory-card">
       <el-tabs v-model="activeTab">
         <el-tab-pane v-for="(config, key) in CATEGORY_CONFIG" :key="key" :label="config.label" :name="key">
-          <el-table :data="getCategoryItems(key)" stripe>
+          <el-table :data="getCategoryItems(key)" stripe @selection-change="rows => handleInventorySelectionChange(key, rows)">
+            <el-table-column v-if="canEdit" type="selection" width="46" />
             <el-table-column :label="t('inventory.itemName')" min-width="180">
               <template #default="{ row }">
                 <div v-if="editingId === row.id">

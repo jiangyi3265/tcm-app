@@ -76,6 +76,11 @@ export const usePatientsStore = defineStore('patients', () => {
   async function updatePatient(id, updates) {
     const idx = patients.value.findIndex((p) => p.id === id)
     if (idx !== -1) {
+      if (Array.isArray(updates.emails)) {
+        const validEmails = updates.emails.map((email) => String(email || '').trim()).filter(Boolean)
+        updates.emails = validEmails
+        if (validEmails.length) updates.email = validEmails[0]
+      }
       // 同步 name 字段
       if (updates.firstName !== undefined || updates.lastName !== undefined) {
         const p = patients.value[idx]
@@ -128,11 +133,12 @@ export const usePatientsStore = defineStore('patients', () => {
     return true
   }
 
-  async function signConsent(id) {
-    const updated = await patientsApi.signConsent(id)
+  async function signConsent(id, data = {}) {
+    const updated = await patientsApi.signConsent(id, data)
     const idx = patients.value.findIndex((p) => p.id === id)
     if (idx !== -1) patients.value[idx] = updated
     saveState()
+    return updated
   }
 
   function getPatientsByPractitioner(practitionerId) {

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { intakePublicApi } from '../../utils/api'
@@ -9,7 +9,8 @@ const { locale } = useI18n()
 const token = route.params.token
 
 const loading = ref(true)
-const error = ref('')
+const pageError = ref('')
+const submitError = ref('')
 const appointmentInfo = ref(null)
 const submitting = ref(false)
 const submitted = ref(false)
@@ -180,6 +181,7 @@ function createIntakeForm() {
 }
 
 const form = ref(createIntakeForm())
+const chiefComplaintField = ref(null)
 
 const formattedStartTime = computed(() => {
   const value = appointmentInfo.value?.startTime
@@ -197,7 +199,7 @@ onMounted(async () => {
       submitted.value = true
     }
   } catch (e) {
-    error.value = e.message || copy.value.loadFailed
+    pageError.value = e.message || copy.value.loadFailed
   } finally {
     loading.value = false
   }
@@ -217,16 +219,18 @@ function isChecked(field, option) {
 
 async function handleSubmit() {
   if (!form.value.chiefComplaint.trim()) {
-    error.value = copy.value.fillChiefComplaint
+    submitError.value = copy.value.fillChiefComplaint
+    await nextTick()
+    chiefComplaintField.value?.focus()
     return
   }
   submitting.value = true
-  error.value = ''
+  submitError.value = ''
   try {
     await intakePublicApi.submit(token, form.value)
     submitted.value = true
   } catch (e) {
-    error.value = e.message || copy.value.submitFailed
+    submitError.value = e.message || copy.value.submitFailed
   } finally {
     submitting.value = false
   }
@@ -234,12 +238,12 @@ async function handleSubmit() {
 
 async function handleCancelAppointment() {
   cancelling.value = true
-  error.value = ''
+  submitError.value = ''
   try {
     await intakePublicApi.cancel(token)
     cancelled.value = true
   } catch (e) {
-    error.value = e.message || copy.value.cancelFailed
+    submitError.value = e.message || copy.value.cancelFailed
   } finally {
     cancelling.value = false
   }
@@ -265,9 +269,9 @@ async function handleCancelAppointment() {
         <p>{{ copy.loading }}</p>
       </div>
 
-      <div v-else-if="error && !submitted && !cancelled" class="state-box error">
+      <div v-else-if="pageError && !submitted && !cancelled" class="state-box error">
         <h2>{{ copy.invalidTitle }}</h2>
-        <p>{{ error }}</p>
+        <p>{{ pageError }}</p>
       </div>
 
       <div v-else-if="submitted" class="state-box success">
@@ -297,7 +301,14 @@ async function handleCancelAppointment() {
           <div class="grid two">
             <label class="field-block full">
               <span>{{ copy.chiefComplaint }}</span>
-              <textarea v-model="form.chiefComplaint" class="form-textarea" rows="3" :placeholder="copy.chiefComplaintPh"></textarea>
+              <textarea
+                ref="chiefComplaintField"
+                v-model="form.chiefComplaint"
+                class="form-textarea"
+                rows="3"
+                :placeholder="copy.chiefComplaintPh"
+                @input="submitError = ''"
+              ></textarea>
             </label>
             <label class="field-block">
               <span>{{ copy.duration }}</span>
@@ -456,7 +467,7 @@ async function handleCancelAppointment() {
           </div>
         </section>
 
-        <div v-if="error" class="submit-error">{{ error }}</div>
+        <div v-if="submitError" class="submit-error" role="alert">{{ submitError }}</div>
 
         <button class="submit-button" :disabled="submitting" @click="handleSubmit">
           {{ submitting ? copy.submitting : copy.submit }}

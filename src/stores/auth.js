@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { naturalCompareText } from '../utils/naturalSort'
 import { applyBootstrapToLocalStorage, authApi, bootstrapApi, usersApi } from '../utils/api'
 import { clearClinicCache, getStoredItem, readStoredJson, removeStoredKey, writeStoredJson } from '../utils/storage'
 
@@ -14,6 +15,10 @@ function normalizeUserRoles(user) {
   return []
 }
 
+function hasUserRole(user, roleKey) {
+  return normalizeUserRoles(user).map((role) => String(role).toLowerCase()).includes(roleKey)
+}
+
 function resolvePractitionerSortOrder(user) {
   const sortOrder = Number(user?.practitionerSortOrder)
   return Number.isFinite(sortOrder) ? sortOrder : Number.MAX_SAFE_INTEGER
@@ -22,9 +27,9 @@ function resolvePractitionerSortOrder(user) {
 function comparePractitioners(left, right) {
   const sortDiff = resolvePractitionerSortOrder(left) - resolvePractitionerSortOrder(right)
   if (sortDiff !== 0) return sortDiff
-  const nameDiff = String(left?.name || '').localeCompare(String(right?.name || ''), 'zh-Hans-CN')
+  const nameDiff = naturalCompareText(left?.name, right?.name)
   if (nameDiff !== 0) return nameDiff
-  return String(left?.id || '').localeCompare(String(right?.id || ''))
+  return naturalCompareText(left?.id, right?.id)
 }
 
 export const useAuthStore = defineStore('auth', () => {
@@ -93,6 +98,14 @@ export const useAuthStore = defineStore('auth', () => {
       }
 
       await loadUsers()
+      if (hasUserRole(currentUser.value, 'apprentice')) {
+        try {
+          const updated = await usersApi.recordApprenticeSession('login')
+          syncUser(updated)
+        } catch {
+          // Tracking should not block login.
+        }
+      }
       return { success: true }
     } catch (e) {
       return {
@@ -103,6 +116,9 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function logout() {
+    if (hasUserRole(currentUser.value, 'apprentice')) {
+      void usersApi.recordApprenticeSession('logout').catch(() => {})
+    }
     currentUser.value = null
     removeStoredKey(TOKEN_KEY)
     clearClinicCache()
@@ -130,6 +146,7 @@ export const useAuthStore = defineStore('auth', () => {
       'organization',
       'organizationNumber',
       'dripEnabled',
+      'signature',
     ].forEach((key) => {
       if (updates && Object.prototype.hasOwnProperty.call(updates, key) && (merged[key] === undefined || merged[key] === null)) {
         merged[key] = updates[key]

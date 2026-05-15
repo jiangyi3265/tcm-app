@@ -129,6 +129,34 @@ export const EMAIL_TEMPLATE_REGISTRY = Object.freeze({
 
 export const EMAIL_TEMPLATE_KEYS = Object.freeze(Object.keys(EMAIL_TEMPLATE_REGISTRY))
 
+export const EMAIL_TEMPLATE_VARIABLES = Object.freeze([
+  { key: 'clinicName', label: '诊所名称' },
+  { key: 'clinicAddress', label: '诊所地址' },
+  { key: 'clinicPhone', label: '诊所电话' },
+  { key: 'clinicEmail', label: '诊所邮箱' },
+  { key: 'patientName', label: '病人姓名' },
+  { key: 'patientEmail', label: '病人邮箱' },
+  { key: 'patientPhone', label: '病人电话' },
+  { key: 'serviceLabel', label: '服务名称' },
+  { key: 'servicePrice', label: '服务价格' },
+  { key: 'practitionerName', label: '中医师姓名' },
+  { key: 'appointmentDate', label: '预约日期' },
+  { key: 'appointmentTime', label: '预约时间' },
+  { key: 'appointmentSummary', label: '预约摘要' },
+  { key: 'previousAppointmentSummary', label: '原预约摘要' },
+  { key: 'manageLink', label: '预约管理/取消链接' },
+  { key: 'cancelLink', label: '取消链接' },
+  { key: 'consentLink', label: '知情同意书链接' },
+  { key: 'intakeLink', label: '就诊资料表链接' },
+  { key: 'consultationId', label: '问诊编号' },
+  { key: 'consultationDate', label: '问诊日期' },
+  { key: 'chiefComplaint', label: '主诉' },
+  { key: 'reportLink', label: '问诊报告链接' },
+  { key: 'invoiceLink', label: '发票链接' },
+  { key: 'amount', label: '金额' },
+  { key: 'cancellationSource', label: '取消来源' },
+])
+
 export const EMAIL_TEMPLATE_ALIASES = Object.freeze({
   appointment_confirm: 'appointmentConfirmation',
   appointment_confirmation: 'appointmentConfirmation',

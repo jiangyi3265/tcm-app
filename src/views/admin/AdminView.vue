@@ -1,5 +1,5 @@
 ﻿<script setup>
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth'
 import { useSettingsStore } from '../../stores/settings'
@@ -24,12 +24,13 @@ import {
   buildWorkingHoursPayload,
   validateWorkingHours,
 } from '../../utils/workingHours'
-import { HERB_CATEGORIES, HERB_NATURES, HERB_TASTES } from '../../utils/sampleData'
 import { bindHerbSelection } from '../../utils/herbBinding'
 import { parseCsvText, rowsToObjects, toNumber } from '../../utils/csvImport'
-import { EMAIL_TEMPLATE_KEYS, EMAIL_TEMPLATE_REGISTRY, normalizeEmailTemplates } from '../../utils/emailTemplates'
+import { EMAIL_TEMPLATE_KEYS, EMAIL_TEMPLATE_REGISTRY, EMAIL_TEMPLATE_VARIABLES, normalizeEmailTemplates } from '../../utils/emailTemplates'
+import { naturalCompareText, naturalSortedUnique } from '../../utils/naturalSort'
+import { compressImageFile } from '../../utils/imageCompress'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { authApi, bootstrapApi, usersApi } from '../../utils/api'
+import { authApi, bootstrapApi, filesApi, usersApi } from '../../utils/api'
 import * as XLSX from 'xlsx'
 
 const { t } = useI18n()
@@ -49,13 +50,16 @@ const templatesStore = useTemplatesStore()
 
 const activeTab = ref('users')
 
+onMounted(() => {
+  consultationsStore.refreshDeletedPrescriptions?.().catch(() => {})
+})
+
 const herbOptions = computed(() => herbDictStore.activeHerbs)
 const CURRENCY_OPTIONS = [
   { value: 'CAD', label: 'Canadian Dollar CAD' },
   { value: 'USD', label: 'US Dollar USD' },
 ]
 const currentCurrency = computed(() => settingsStore.currency || 'CAD')
-const BASE_TOXICITY_OPTIONS = ['无毒', '小毒', '有毒', '大毒', '1. 微毒', '2. 小毒', '3. 有毒', '4. 大毒', '5. 剧毒']
 const SERVICE_TAG_OPTIONS = computed(() => ([
   { value: 'acupuncture', label: t('admin.tagAcupuncture') },
   { value: 'moxibustion', label: t('admin.tagMoxibustion') },
@@ -79,7 +83,7 @@ function splitOptionText(value) {
 }
 
 function uniqueOptions(list = []) {
-  return [...new Set(list.map((item) => String(item || '').trim()).filter(Boolean))]
+  return naturalSortedUnique(list)
 }
 
 function collectHerbValues(key, { split = false } = {}) {
@@ -89,10 +93,10 @@ function collectHerbValues(key, { split = false } = {}) {
   })
 }
 
-const herbCategoryOptions = computed(() => uniqueOptions([...HERB_CATEGORIES, ...collectHerbValues('category')]))
-const herbNatureOptions = computed(() => uniqueOptions([...HERB_NATURES, ...collectHerbValues('nature')]))
-const herbTasteOptions = computed(() => uniqueOptions([...HERB_TASTES, ...collectHerbValues('taste', { split: true })]))
-const toxicityOptions = computed(() => uniqueOptions([...BASE_TOXICITY_OPTIONS, ...collectHerbValues('toxicity')]))
+const herbCategoryOptions = computed(() => uniqueOptions(collectHerbValues('category')))
+const herbNatureOptions = computed(() => uniqueOptions(collectHerbValues('nature')))
+const herbTasteOptions = computed(() => uniqueOptions(collectHerbValues('taste', { split: true })))
+const toxicityOptions = computed(() => uniqueOptions(collectHerbValues('toxicity')))
 const meridianOptions = computed(() =>
   meridiansStore.activeMeridians
     .map((meridian) => {
@@ -104,7 +108,8 @@ const meridianOptions = computed(() =>
         label: detail ? `${value} - ${detail}` : value,
       }
     })
-    .filter(Boolean),
+    .filter(Boolean)
+    .sort((a, b) => naturalCompareText(a.label, b.label)),
 )
 const meridianAliasMap = computed(() => {
   const map = new Map()
@@ -312,8 +317,10 @@ const profileForm = ref({
   internshipDates: [],
   homeAddress: { street: '', city: '', province: '', postalCode: '', country: '' },
   workingHours: {},
-  dripEnabled: true
+  dripEnabled: true,
+  signature: { path: '', url: '', uploadedAt: '' },
 })
+const uploadingPractitionerSignature = ref(false)
 const WEEKDAY_LABELS = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' }
 
 function getUserRoles(user) {
@@ -391,7 +398,8 @@ function openProfileDrawer(user) {
       country: user.homeAddress?.country || ''
     },
     workingHours: normalizeWorkingHoursForForm(user.workingHours || {}),
-    dripEnabled: user.dripEnabled !== false
+    dripEnabled: user.dripEnabled !== false,
+    signature: user.signature || { path: '', url: '', uploadedAt: '' },
   }
   showProfileDrawer.value = true
 }
@@ -433,6 +441,187 @@ async function handleInternshipToday(user = profileTarget.value) {
   } catch (e) {
     ElMessage.error(e.message || t('admin.saveFailed'))
   }
+}
+
+async function handlePractitionerSignatureUpload(file) {
+  const rawFile = file.raw || file
+  if (!profileTarget.value?.id) return false
+  if (rawFile.type && rawFile.type !== 'image/png') {
+    ElMessage.warning('请上传 PNG 签名图片')
+    return false
+  }
+  uploadingPractitionerSignature.value = true
+  try {
+    const uploadFile = await compressImageFile(rawFile, { maxBytes: 512 * 1024, maxWidth: 1200, maxHeight: 1200, mimeType: 'image/png' })
+    const updated = await usersApi.uploadSignaturePng(profileTarget.value.id, uploadFile)
+    authStore.syncUser(updated)
+    profileTarget.value = updated
+    profileForm.value.signature = updated.signature || { path: '', url: '', uploadedAt: '' }
+    ElMessage.success('医师签名已上传')
+  } catch (e) {
+    ElMessage.error(e.message || '医师签名上传失败')
+  } finally {
+    uploadingPractitionerSignature.value = false
+  }
+  return false
+}
+
+function normalizeNameForMatch(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, '')
+}
+
+function findTeacherUser(teacherName) {
+  const key = normalizeNameForMatch(teacherName)
+  if (!key) return null
+  return authStore.users.find((user) => {
+    const userName = normalizeNameForMatch(user.name)
+    const nickName = normalizeNameForMatch(user.nickName)
+    return userName === key || nickName === key
+  }) || null
+}
+
+const internshipExportRows = computed(() =>
+  authStore.users
+    .filter(isApprenticeUser)
+    .flatMap((user) => {
+      const base = {
+        apprentice: user.name || '',
+        clinicName: settingsStore.clinicName || settingsForm.clinicName || '',
+        clinicAddress: settingsStore.clinicAddress || settingsForm.clinicAddress || '',
+        clinicSeal: settingsStore.clinicSeal || null,
+      }
+      const sessions = Array.isArray(user.internshipSessions) ? user.internshipSessions : []
+      if (sessions.length) {
+        return sessions.map((session) => {
+          const teacher = session.teacher || ''
+          const teacherUser = findTeacherUser(teacher)
+          return {
+            ...base,
+            date: session.date || '',
+            loginTime: session.loginTime || '',
+            logoutTime: session.logoutTime || '',
+            teacher,
+            teacherSignature: teacherUser?.signature || null,
+          }
+        })
+      }
+      return (user.internshipDates || []).map((date) => ({
+        ...base,
+        date,
+        loginTime: '',
+        logoutTime: '',
+        teacher: '',
+        teacherSignature: null,
+      }))
+    })
+    .sort((a, b) => naturalCompareText(a.date, b.date) || naturalCompareText(a.apprentice, b.apprentice)),
+)
+
+function exportInternshipExcel() {
+  const rows = internshipExportRows.value
+  if (!rows.length) return ElMessage.warning('暂无学徒跟诊记录可导出')
+  const sheet = XLSX.utils.json_to_sheet(rows.map((row) => ({
+    学徒: row.apprentice,
+    日期: row.date,
+    登录时间: row.loginTime,
+    登出时间: row.logoutTime,
+    跟诊老师: row.teacher,
+    诊所名称: row.clinicName,
+    诊所地址: row.clinicAddress,
+  })))
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, sheet, 'Internship')
+  XLSX.writeFile(workbook, `internship-records-${new Date().toISOString().slice(0, 10)}.xlsx`)
+}
+
+function escapePrintHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+async function resolvePrintableImageUrl(image) {
+  const source = typeof image === 'string' ? image : (image?.url || image?.path || '')
+  if (!source) return ''
+  if (/^(data:|blob:|https?:|\/api\/public\/files\/access)/.test(source)) return source
+  try {
+    return await filesApi.resolveUrl(source)
+  } catch {
+    return source
+  }
+}
+
+async function printInternshipPdf() {
+  const rows = internshipExportRows.value
+  if (!rows.length) return ElMessage.warning('暂无学徒跟诊记录可导出')
+  const clinicName = escapePrintHtml(settingsStore.clinicName || settingsForm.clinicName || '')
+  const clinicAddress = escapePrintHtml(settingsStore.clinicAddress || settingsForm.clinicAddress || '')
+  const clinicSealUrl = await resolvePrintableImageUrl(settingsStore.clinicSeal)
+  const printableRows = await Promise.all(rows.map(async (row) => ({
+    ...row,
+    teacherSignatureUrl: await resolvePrintableImageUrl(row.teacherSignature),
+  })))
+  const tableRows = printableRows.map((row) => `
+    <tr>
+      <td>${escapePrintHtml(row.apprentice)}</td>
+      <td>${escapePrintHtml(row.date)}</td>
+      <td>${escapePrintHtml(row.loginTime)}</td>
+      <td>${escapePrintHtml(row.logoutTime)}</td>
+      <td>${escapePrintHtml(row.teacher)}</td>
+    </tr>
+  `).join('')
+  const teacherSignatureBlocks = printableRows
+    .filter((row) => row.teacherSignatureUrl)
+    .filter((row, index, list) => list.findIndex((item) => item.teacher === row.teacher && item.teacherSignatureUrl === row.teacherSignatureUrl) === index)
+    .map((row) => `
+      <div class="signature-box">
+        <img src="${escapePrintHtml(row.teacherSignatureUrl)}" alt="teacher signature" />
+        <div class="line">${escapePrintHtml(row.teacher || '跟诊老师')} 签名</div>
+      </div>
+    `).join('')
+  const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=960,height=720')
+  if (!printWindow) return ElMessage.warning('浏览器拦截了打印窗口')
+  printWindow.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <title>Internship Records</title>
+        <style>
+          body { font-family: Arial, sans-serif; color: #253b2f; margin: 32px; }
+          h1 { margin: 0 0 8px; font-size: 24px; }
+          .clinic { color: #666; margin-bottom: 24px; line-height: 1.5; }
+          table { width: 100%; border-collapse: collapse; }
+          th, td { border: 1px solid #dfe5e1; padding: 10px; text-align: left; font-size: 13px; }
+          th { background: #eff6f1; }
+          .signatures { display: flex; gap: 32px; margin-top: 48px; flex-wrap: wrap; }
+          .signature-box { min-width: 220px; min-height: 112px; display: flex; flex-direction: column; justify-content: flex-end; }
+          .signature-box img { display: block; max-width: 220px; max-height: 82px; object-fit: contain; margin-bottom: 8px; }
+          .signature-placeholder { height: 82px; }
+          .line { border-top: 1px solid #8a948d; width: 220px; padding-top: 8px; color: #666; }
+        </style>
+      </head>
+      <body>
+        <h1>${clinicName || 'Clinic'} 学徒跟诊记录</h1>
+        <div class="clinic">${clinicAddress}</div>
+        <table>
+          <thead><tr><th>学徒</th><th>日期</th><th>登录时间</th><th>登出时间</th><th>跟诊老师</th></tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+        <div class="signatures">
+          <div class="signature-box">
+            ${clinicSealUrl ? `<img src="${escapePrintHtml(clinicSealUrl)}" alt="clinic seal" />` : '<div class="signature-placeholder"></div>'}
+            <div class="line">诊所印章</div>
+          </div>
+          ${teacherSignatureBlocks || '<div class="signature-box"><div class="signature-placeholder"></div><div class="line">跟诊老师签名</div></div>'}
+        </div>
+      </body>
+    </html>
+  `)
+  printWindow.document.close()
+  printWindow.focus()
+  printWindow.print()
 }
 
 // ========== Admin password reset ==========
@@ -481,8 +670,100 @@ const emailTemplateRows = computed(() =>
     draft: emailTemplateDrafts[key],
   })),
 )
+function formatEmailVariable(key) {
+  return `{{${key}}}`
+}
+
+function cloneConsentTemplateForDraft(template = settingsStore.consentTemplate) {
+  const source = template || {}
+  const sections = Array.isArray(source.sections) ? source.sections : []
+  return {
+    title: source.title || 'OTCM Acupuncture Clinic Informed Consent',
+    version: source.version || 'otcm-consent-2026-04',
+    sections: sections.map((section, index) => ({
+      key: section.key || `section_${index + 1}`,
+      title: section.title || '',
+      paragraphsText: Array.isArray(section.paragraphs)
+        ? section.paragraphs.join('\n\n')
+        : String(section.paragraphs || ''),
+    })),
+  }
+}
+
+const consentTemplateDraft = reactive(cloneConsentTemplateForDraft())
+
+function resetConsentTemplateDraft() {
+  Object.keys(consentTemplateDraft).forEach((key) => { delete consentTemplateDraft[key] })
+  Object.assign(consentTemplateDraft, cloneConsentTemplateForDraft(settingsStore.consentTemplate))
+}
+
+function makeConsentSectionKey(title, index, usedKeys) {
+  const base = String(title || `section_${index + 1}`)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || `section_${index + 1}`
+  let key = base
+  let suffix = 2
+  while (usedKeys.has(key)) {
+    key = `${base}_${suffix}`
+    suffix += 1
+  }
+  usedKeys.add(key)
+  return key
+}
+
+function buildConsentTemplatePayload() {
+  const usedKeys = new Set()
+  const sections = (consentTemplateDraft.sections || []).map((section, index) => {
+    const title = String(section.title || '').trim()
+    const rawKey = String(section.key || '').trim()
+    let key = rawKey || makeConsentSectionKey(title, index, usedKeys)
+    if (rawKey) {
+      if (usedKeys.has(key)) key = makeConsentSectionKey(key, index, usedKeys)
+      else usedKeys.add(key)
+    }
+    return {
+      key,
+      title: title || `Section ${index + 1}`,
+      paragraphs: String(section.paragraphsText || '')
+        .split(/\n{2,}/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    }
+  }).filter((section) => section.title && section.paragraphs.length)
+  return {
+    title: String(consentTemplateDraft.title || '').trim() || 'OTCM Acupuncture Clinic Informed Consent',
+    version: String(consentTemplateDraft.version || '').trim() || 'otcm-consent-2026-04',
+    sections,
+  }
+}
+
+function addConsentTemplateSection() {
+  consentTemplateDraft.sections.push({
+    key: `section_${consentTemplateDraft.sections.length + 1}`,
+    title: '',
+    paragraphsText: '',
+  })
+}
+
+function removeConsentTemplateSection(index) {
+  consentTemplateDraft.sections.splice(index, 1)
+}
+
+async function saveConsentTemplate() {
+  const payload = buildConsentTemplatePayload()
+  if (!payload.sections.length) return ElMessage.warning('请至少保留一段同意书内容')
+  await settingsStore.updateSettings({ consentTemplate: payload })
+  resetConsentTemplateDraft()
+  ElMessage.success('知情同意书模板已保存')
+}
+
 const signaturePreviewUrl = ref(settingsStore.thirdPartySignature.url || '')
+const sealPreviewUrl = ref(settingsStore.clinicSeal.url || '')
 const uploadingSignature = ref(false)
+const uploadingSeal = ref(false)
+const importingBackup = ref(false)
 const importCsvText = ref('')
 const importingCsv = ref(false)
 const csvImportForm = reactive({ target: 'herbs' })
@@ -634,13 +915,34 @@ async function handleSignatureUpload(file) {
   }
   uploadingSignature.value = true
   try {
-    const uploaded = await settingsStore.uploadSignaturePng(rawFile)
+    const uploadFile = await compressImageFile(rawFile, { maxBytes: 512 * 1024, maxWidth: 1200, maxHeight: 1200, mimeType: 'image/png' })
+    const uploaded = await settingsStore.uploadSignaturePng(uploadFile)
     signaturePreviewUrl.value = uploaded.url || ''
     ElMessage.success('签名已上传')
   } catch (e) {
     ElMessage.error(e.message || '签名上传失败')
   } finally {
     uploadingSignature.value = false
+  }
+  return false
+}
+
+async function handleClinicSealUpload(file) {
+  const rawFile = file.raw || file
+  if (rawFile.type && rawFile.type !== 'image/png') {
+    ElMessage.warning('请上传 PNG 印章图片')
+    return false
+  }
+  uploadingSeal.value = true
+  try {
+    const uploadFile = await compressImageFile(rawFile, { maxBytes: 512 * 1024, maxWidth: 1200, maxHeight: 1200, mimeType: 'image/png' })
+    const uploaded = await settingsStore.uploadClinicSealPng(uploadFile)
+    sealPreviewUrl.value = uploaded.url || ''
+    ElMessage.success('诊所印章已上传')
+  } catch (e) {
+    ElMessage.error(e.message || '印章上传失败')
+  } finally {
+    uploadingSeal.value = false
   }
   return false
 }
@@ -988,6 +1290,31 @@ function resetNewServiceForm() {
   }
 }
 
+async function handleImportBackupFile(file) {
+  const rawFile = file.raw || file
+  if (!rawFile) return false
+  try {
+    await ElMessageBox.confirm(
+      '上传备份包会按备份内容更新系统数据。建议先导出一份当前备份，再继续恢复。',
+      '确认恢复备份',
+      { type: 'warning', confirmButtonText: '恢复', cancelButtonText: t('common.cancel') },
+    )
+  } catch {
+    return false
+  }
+  importingBackup.value = true
+  try {
+    const result = await bootstrapApi.importData(rawFile)
+    ElMessage.success(`恢复完成，处理 ${result?.restored || 0} 条记录`)
+    window.setTimeout(() => window.location.reload(), 600)
+  } catch (e) {
+    ElMessage.error(e.message || '备份恢复失败')
+  } finally {
+    importingBackup.value = false
+  }
+  return false
+}
+
 async function handleAddService() {
   const form = newServiceForm.value
   if (!form.label) return ElMessage.warning('请填写服务名称')
@@ -1124,14 +1451,6 @@ function cancelEditPriceList() {
 }
 
 // ========== 已删除数据管理（回收站）==========
-function canPhysicalDelete(deletedAt) {
-  if (!deletedAt) return false
-  const deletedDate = new Date(deletedAt)
-  const threeMonthsAgo = new Date()
-  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
-  return deletedDate <= threeMonthsAgo
-}
-
 async function restorePatient(id) {
   await patientsStore.restorePatient(id)
   ElMessage.success(t('admin.patientRestored'))
@@ -1154,6 +1473,20 @@ async function physicalDeleteConsultation(id) {
   const ok = await consultationsStore.physicalDeleteConsultation(id)
   if (ok) ElMessage.success(t('admin.permanentlyDeleted'))
   else ElMessage.warning(t('admin.cannotDeleteYet'))
+}
+
+async function restoreDeletedPrescription(row) {
+  await consultationsStore.restoreDeletedPrescription(row.consultationRecordId, row.id)
+  ElMessage.success('Prescription restored')
+}
+
+async function physicalDeletePrescription(row, restoreInventory) {
+  const message = restoreInventory
+    ? '永久删除这条处方记录，并把它占用的草药还回库存？'
+    : '永久删除这条处方记录，不修改它占用过的库存？'
+  await ElMessageBox.confirm(message, t('admin.permanentDeleteTitle'), { type: 'error' })
+  await consultationsStore.permanentlyDeletePrescription(row.consultationRecordId, row.id, { restoreInventory })
+  ElMessage.success(t('admin.permanentlyDeleted'))
 }
 
 async function restoreInventoryItem(id) {
@@ -1619,6 +1952,12 @@ async function deleteTemplate(tmpl) {
           <el-button type="primary" @click="showAddUserDialog = true">
             <el-icon><Plus /></el-icon> {{ t('admin.addUser') }}
           </el-button>
+          <el-button @click="exportInternshipExcel">
+            <el-icon><Download /></el-icon> 导出跟诊表
+          </el-button>
+          <el-button @click="printInternshipPdf">
+            <el-icon><Printer /></el-icon> 跟诊 PDF
+          </el-button>
         </div>
         <el-table :data="authStore.users" stripe>
           <el-table-column :label="t('admin.name')" min-width="100">
@@ -1814,6 +2153,24 @@ async function deleteTemplate(tmpl) {
               </el-form-item>
             </el-col>
           </el-row>
+
+          <template v-if="profileSupportsScheduling">
+            <el-divider content-position="left">医师签名 PNG</el-divider>
+            <el-form-item label="上传签名">
+              <el-upload :auto-upload="false" :show-file-list="false" accept="image/png,.png" :on-change="handlePractitionerSignatureUpload">
+                <el-button :loading="uploadingPractitionerSignature">
+                  <el-icon><Upload /></el-icon> 上传 PNG
+                </el-button>
+              </el-upload>
+              <div class="profile-helper-text">用于 consultation report、invoice 等 PDF 的医师签章。</div>
+            </el-form-item>
+            <el-form-item v-if="profileForm.signature?.url || profileForm.signature?.path" label="预览">
+              <div class="signature-preview">
+                <img v-if="profileForm.signature?.url" :src="profileForm.signature.url" alt="practitioner signature" />
+                <span v-else>{{ profileForm.signature.path }}</span>
+              </div>
+            </el-form-item>
+          </template>
 
           <el-row v-if="profileSupportsScheduling" :gutter="16">
             <el-col :span="12">
@@ -2051,6 +2408,17 @@ async function deleteTemplate(tmpl) {
           </el-form>
           <el-divider />
           <h4>邮件模板</h4>
+          <div class="template-variable-panel">
+            <div class="template-variable-title">可用变量</div>
+            <el-tag
+              v-for="variable in EMAIL_TEMPLATE_VARIABLES"
+              :key="variable.key"
+              class="template-variable-tag"
+              effect="plain"
+            >
+              {{ formatEmailVariable(variable.key) }} · {{ variable.label }}
+            </el-tag>
+          </div>
           <el-form label-width="160px">
             <div v-for="row in emailTemplateRows" :key="row.key" class="email-template-editor">
               <div class="email-template-title">{{ row.label }}</div>
@@ -2063,6 +2431,53 @@ async function deleteTemplate(tmpl) {
             </div>
             <el-form-item>
               <el-button type="primary" @click="saveEmailTemplates">{{ t('common.save') }}</el-button>
+            </el-form-item>
+          </el-form>
+          <el-divider />
+          <h4>知情同意书模板</h4>
+          <el-form :model="consentTemplateDraft" label-width="160px">
+            <el-form-item label="标题">
+              <el-input v-model="consentTemplateDraft.title" style="max-width: 520px" />
+            </el-form-item>
+            <el-form-item label="版本">
+              <el-input v-model="consentTemplateDraft.version" style="max-width: 320px" />
+            </el-form-item>
+            <div
+              v-for="(section, index) in consentTemplateDraft.sections"
+              :key="`${section.key}-${index}`"
+              class="consent-template-section"
+            >
+              <div class="consent-template-section-header">
+                <strong>段落 {{ index + 1 }}</strong>
+                <el-button
+                  size="small"
+                  text
+                  type="danger"
+                  :disabled="consentTemplateDraft.sections.length <= 1"
+                  @click="removeConsentTemplateSection(index)"
+                >
+                  删除
+                </el-button>
+              </div>
+              <el-form-item label="Key">
+                <el-input v-model="section.key" style="max-width: 320px" />
+              </el-form-item>
+              <el-form-item label="段落标题">
+                <el-input v-model="section.title" style="max-width: 520px" />
+              </el-form-item>
+              <el-form-item label="正文">
+                <el-input
+                  v-model="section.paragraphsText"
+                  type="textarea"
+                  :rows="5"
+                  placeholder="用空行分隔多个段落"
+                  style="max-width: 720px"
+                />
+              </el-form-item>
+            </div>
+            <el-form-item>
+              <el-button @click="addConsentTemplateSection"><el-icon><Plus /></el-icon> 添加段落</el-button>
+              <el-button type="primary" @click="saveConsentTemplate">{{ t('common.save') }}</el-button>
             </el-form-item>
           </el-form>
           <el-divider />
@@ -2081,11 +2496,33 @@ async function deleteTemplate(tmpl) {
             </el-form-item>
           </el-form>
           <el-divider />
+          <h4>诊所印章 PNG</h4>
+          <el-form label-width="160px">
+            <el-form-item label="上传印章">
+              <el-upload :auto-upload="false" :show-file-list="false" accept="image/png,.png" :on-change="handleClinicSealUpload">
+                <el-button :loading="uploadingSeal"><el-icon><Upload /></el-icon> 上传 PNG</el-button>
+              </el-upload>
+            </el-form-item>
+            <el-form-item v-if="sealPreviewUrl || settingsStore.clinicSeal.path" label="预览">
+              <div class="signature-preview">
+                <img v-if="sealPreviewUrl" :src="sealPreviewUrl" alt="clinic seal" />
+                <span v-else>{{ settingsStore.clinicSeal.path }}</span>
+              </div>
+            </el-form-item>
+          </el-form>
+          <el-divider />
           <h4>{{ t('admin.dataBackup') }}</h4>
           <p style="font-size:13px;color:#888;margin-bottom:12px">{{ t('admin.exportDataHint') }}</p>
-          <el-button type="success" :loading="exporting" @click="handleExportData">
-            <el-icon><Download /></el-icon> {{ t('admin.exportData') }}
-          </el-button>
+          <div class="backup-actions">
+            <el-button type="success" :loading="exporting" @click="handleExportData">
+              <el-icon><Download /></el-icon> {{ t('admin.exportData') }}
+            </el-button>
+            <el-upload :auto-upload="false" :show-file-list="false" accept="application/json,.json" :on-change="handleImportBackupFile">
+              <el-button :loading="importingBackup">
+                <el-icon><Upload /></el-icon> 恢复备份包
+              </el-button>
+            </el-upload>
+          </div>
         </el-card>
       </el-tab-pane>
 
@@ -2909,8 +3346,8 @@ async function deleteTemplate(tmpl) {
             <el-table-column :label="t('admin.operation')" width="200">
               <template #default="{ row }">
                 <el-button size="small" text type="success" @click="restorePatient(row.id)">{{ t('admin.restore') }}</el-button>
-                <el-button size="small" text type="danger" :disabled="!canPhysicalDelete(row.deletedAt)" @click="physicalDeletePatient(row.id)">
-                  {{ t('admin.permanentDelete') }}{{ canPhysicalDelete(row.deletedAt) ? '' : t('admin.notYet3Months') }}
+                <el-button size="small" text type="danger" @click="physicalDeletePatient(row.id)">
+                  {{ t('admin.permanentDelete') }}
                 </el-button>
               </template>
             </el-table-column>
@@ -2932,8 +3369,44 @@ async function deleteTemplate(tmpl) {
             <el-table-column :label="t('admin.operation')" width="200">
               <template #default="{ row }">
                 <el-button size="small" text type="success" @click="restoreConsultation(row.id)">{{ t('admin.restore') }}</el-button>
-                <el-button size="small" text type="danger" :disabled="!canPhysicalDelete(row.deletedAt)" @click="physicalDeleteConsultation(row.id)">
-                  {{ t('admin.permanentDelete') }}{{ canPhysicalDelete(row.deletedAt) ? '' : t('admin.notYet3Months') }}
+                <el-button size="small" text type="danger" @click="physicalDeleteConsultation(row.id)">
+                  {{ t('admin.permanentDelete') }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+
+        <el-card class="settings-card" style="max-width:1100px; margin-bottom:16px">
+          <template #header><span style="font-weight:600; color:#e63946">Deleted Prescriptions</span></template>
+          <el-table :data="consultationsStore.deletedPrescriptions" stripe size="small" empty-text="No deleted prescriptions">
+            <el-table-column label="Prescription" min-width="180">
+              <template #default="{ row }">{{ row.formulaName || row.id }}</template>
+            </el-table-column>
+            <el-table-column :label="t('admin.consultationId')" width="150">
+              <template #default="{ row }">{{ row.consultationId }}</template>
+            </el-table-column>
+            <el-table-column :label="t('admin.patient')" width="120">
+              <template #default="{ row }">{{ patientsStore.getPatient(row.patientId)?.name || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="Inventory" width="120">
+              <template #default="{ row }">
+                <el-tag size="small" :type="row.inventoryHeld ? 'warning' : 'info'">
+                  {{ row.inventoryHeld ? 'Held' : 'Released' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('admin.deletedDate')" width="130">
+              <template #default="{ row }">{{ formatDate(row.deletedAt) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('admin.operation')" width="360">
+              <template #default="{ row }">
+                <el-button size="small" text type="success" @click="restoreDeletedPrescription(row)">{{ t('admin.restore') }}</el-button>
+                <el-button size="small" text type="danger" @click="physicalDeletePrescription(row, true)">
+                  Delete + restore inventory
+                </el-button>
+                <el-button size="small" text type="danger" @click="physicalDeletePrescription(row, false)">
+                  Delete only
                 </el-button>
               </template>
             </el-table-column>
@@ -3439,8 +3912,14 @@ async function deleteTemplate(tmpl) {
 .settings-card { max-width: 600px; border-radius: 10px; }
 .email-template-editor { margin-bottom: 16px; padding-bottom: 4px; border-bottom: 1px solid #eee; }
 .email-template-title { margin: 0 0 10px 160px; font-weight: 600; color: #333; }
+.template-variable-panel { margin: 8px 0 18px 160px; max-width: 680px; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #fafafa; }
+.template-variable-title { font-size: 13px; font-weight: 600; color: #606266; margin-bottom: 8px; }
+.template-variable-tag { margin: 0 6px 6px 0; }
+.consent-template-section { max-width: 860px; border: 1px solid #ebeef5; border-radius: 8px; padding: 14px 16px 2px; margin: 12px 0; background: #fcfdfc; }
+.consent-template-section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: #1b4332; }
 .signature-preview { min-height: 80px; padding: 12px; border: 1px solid #dcdfe6; background: #fafafa; }
 .signature-preview img { display: block; max-width: 320px; max-height: 120px; object-fit: contain; }
+.backup-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .profile-helper-text { font-size: 12px; color: #888; line-height: 1.5; margin-top: 6px; }
 .schedule-day-card { border: 1px solid #eee; border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fafafa; }
 .schedule-day-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }

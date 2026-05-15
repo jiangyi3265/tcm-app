@@ -19,6 +19,7 @@ function genConsultId() {
 
 export const useConsultationsStore = defineStore('consultations', () => {
   const consultations = ref([])
+  const deletedPrescriptions = ref([])
   const inventoryStore = useInventoryStore()
 
   function normalizeConsultation(consultation) {
@@ -185,7 +186,15 @@ export const useConsultationsStore = defineStore('consultations', () => {
     const idx = consultations.value.findIndex((c) => c.id === id)
     if (idx !== -1) consultations.value[idx] = updated
     saveState()
-    return true
+    return updated
+  }
+
+  async function reactivateConsultation(id) {
+    const updated = await consultationsApi.reactivate(id)
+    const idx = consultations.value.findIndex((c) => c.id === id)
+    if (idx !== -1) consultations.value[idx] = updated
+    saveState()
+    return updated
   }
 
   async function markAsPaid(id, paymentInfo = {}) {
@@ -222,6 +231,32 @@ export const useConsultationsStore = defineStore('consultations', () => {
     consultations.value = consultations.value.filter((c) => c.id !== id)
     saveState()
     return true
+  }
+
+  async function refreshDeletedPrescriptions() {
+    const list = await consultationsApi.deletedPrescriptions()
+    deletedPrescriptions.value = Array.isArray(list) ? list : []
+    return deletedPrescriptions.value
+  }
+
+  async function restoreDeletedPrescription(consultationId, prescriptionId) {
+    const updated = await consultationsApi.restoreDeletedPrescription(consultationId, prescriptionId)
+    const idx = consultations.value.findIndex((c) => c.id === consultationId)
+    if (idx !== -1) consultations.value[idx] = updated
+    await refreshDeletedPrescriptions()
+    await refreshInventoryAfterPrescriptionChange()
+    saveState()
+    return updated
+  }
+
+  async function permanentlyDeletePrescription(consultationId, prescriptionId, options = {}) {
+    const updated = await consultationsApi.hardDeletePrescription(consultationId, prescriptionId, options)
+    const idx = consultations.value.findIndex((c) => c.id === consultationId)
+    if (idx !== -1) consultations.value[idx] = updated
+    await refreshDeletedPrescriptions()
+    await refreshInventoryAfterPrescriptionChange()
+    saveState()
+    return updated
   }
 
   const deletedConsultations = computed(() => consultations.value.filter((c) => c.deletedAt))
@@ -272,6 +307,7 @@ export const useConsultationsStore = defineStore('consultations', () => {
     const idx = consultations.value.findIndex((c) => c.id === id)
     if (idx !== -1) consultations.value[idx] = updated
     saveState()
+    await refreshDeletedPrescriptions()
     await refreshInventoryAfterPrescriptionChange()
     return updated
   }
@@ -297,14 +333,15 @@ export const useConsultationsStore = defineStore('consultations', () => {
 
   return {
     consultations, todayConsultations, pendingPrescriptions, pendingPayments,
-    deletedConsultations,
+    deletedConsultations, deletedPrescriptions,
     hasDispensingCompleted,
     getOutstandingAmount,
     getPaymentStatus,
     refreshFromApi,
     getConsultation, getPatientConsultations, getPractitionerConsultations, getLastConsultation,
-    createConsultation, updateConsultation, completeConsultation, markAsPaid,
+    createConsultation, updateConsultation, completeConsultation, reactivateConsultation, markAsPaid,
     deleteConsultation, restoreConsultation, physicalDeleteConsultation,
+    refreshDeletedPrescriptions, restoreDeletedPrescription, permanentlyDeletePrescription,
     markDispensingComplete, syncPatientHistorySnapshot,
     syncPrescription, completePrescription, deletePrescription, reopenPrescription, dispensePrescription,
   }
