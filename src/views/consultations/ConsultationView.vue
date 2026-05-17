@@ -182,6 +182,8 @@ const showPosSimulationDialog = ref(false)
 const invoicePaymentMethod = ref('bankcard')
 const pendingPosPaymentMethod = ref('')
 const invoicePaymentSubmitting = ref(false)
+const reportPdfGenerating = ref(false)
+const invoicePdfGenerating = ref(false)
 const serverDocuments = ref([])
 const documentsLoading = ref(false)
 
@@ -2150,41 +2152,92 @@ function checkStorageCapacity() {
 }
 
 // ============ PDF ?============
-async function handleGeneratePdf() {
+async function generateReportPdf({ openFile = true } = {}) {
   const id = consultId || consultation.value?.id
   if (!id) {
     ElMessage.warning(t('consultation.saveBefore'))
-    return
+    return null
   }
+  reportPdfGenerating.value = true
   try {
     const res = await consultationsApi.generateReport(id)
-    const pdfUrl = res.url || res.pdfUrl
+    const pdfUrl = res.url || res.pdfUrl || res.filePath
+    form.value.reportPdfUrl = res.url || res.pdfUrl || form.value.reportPdfUrl
+    form.value.reportPdfPath = res.filePath || res.resource || form.value.reportPdfPath
+    form.value.consultationPdfUrl = form.value.reportPdfUrl
+    form.value.consultationPdfPath = form.value.reportPdfPath
     await loadConsultationFiles()
-    if (pdfUrl) {
+    if (openFile && pdfUrl) {
       await filesApi.open(pdfUrl)
-    } else {
+    } else if (openFile) {
       const practitioner = authStore.users.find(u => u.id === form.value.practitionerId)
       printConsultationReport(form.value, patient.value, practitioner, settingsStore.clinicName)
     }
+    return res
   } catch (e) {
     ElMessage.error(t('consultation.pdfFailed') + (e.message || ''))
-    // fallback to client-side print
-    const practitioner = authStore.users.find(u => u.id === form.value.practitionerId)
-    printConsultationReport(form.value, patient.value, practitioner, settingsStore.clinicName)
+    if (openFile) {
+      const practitioner = authStore.users.find(u => u.id === form.value.practitionerId)
+      printConsultationReport(form.value, patient.value, practitioner, settingsStore.clinicName)
+    }
+    return null
+  } finally {
+    reportPdfGenerating.value = false
   }
 }
 
-// ============ ?============
-function handleSendReport() {
-  const emailContent = buildConsultationReportEmail(patient.value, form.value, settingsStore.clinicName)
-  openEmailPreview(emailContent)
+async function handleGeneratePdf() {
+  await generateReportPdf({ openFile: true })
 }
 
-function handleSendInvoiceEmail() {
+async function generateInvoicePdf({ openFile = true } = {}) {
+  const id = consultId || consultation.value?.id
+  if (!id) {
+    ElMessage.warning(t('consultation.saveBefore'))
+    return null
+  }
+  invoicePdfGenerating.value = true
+  try {
+    const res = await consultationsApi.generateInvoice(id)
+    const pdfUrl = res.url || res.pdfUrl || res.filePath
+    form.value.invoicePdfUrl = res.url || res.pdfUrl || form.value.invoicePdfUrl
+    form.value.invoicePdfPath = res.filePath || res.resource || form.value.invoicePdfPath
+    await loadConsultationFiles()
+    if (openFile && pdfUrl) {
+      await filesApi.open(pdfUrl)
+    }
+    return res
+  } catch (e) {
+    ElMessage.error(t('consultation.pdfFailed') + (e.message || ''))
+    return null
+  } finally {
+    invoicePdfGenerating.value = false
+  }
+}
+
+async function handleGenerateInvoicePdf() {
+  await generateInvoicePdf({ openFile: true })
+}
+
+// ============ ?============
+async function handleSendReport() {
   if (!patient.value?.emails?.[0] && !patient.value?.email) {
     ElMessage.warning(t('patientDetail.noEmailForConsent'))
     return
   }
+  const result = await generateReportPdf({ openFile: false })
+  if (!result) return
+  const emailContent = buildConsultationReportEmail(patient.value, form.value, settingsStore.clinicName)
+  openEmailPreview(emailContent)
+}
+
+async function handleSendInvoiceEmail() {
+  if (!patient.value?.emails?.[0] && !patient.value?.email) {
+    ElMessage.warning(t('patientDetail.noEmailForConsent'))
+    return
+  }
+  const result = await generateInvoicePdf({ openFile: false })
+  if (!result) return
   openEmailPreview(buildInvoiceEmail(patient.value, form.value, settingsStore.clinicName))
 }
 </script>
@@ -2212,6 +2265,12 @@ function handleSendInvoiceEmail() {
       </div>
       <div class="cv-header-right">
         <el-button size="small" @click="showCompare = true">{{ t('consultation.compareHistory') }}</el-button>
+        <el-button v-if="!isNew" size="small" :loading="reportPdfGenerating" @click="handleGeneratePdf">
+          {{ t('consultation.downloadReportPdf') }}
+        </el-button>
+        <el-button v-if="!isNew" size="small" type="success" :loading="reportPdfGenerating" @click="handleSendReport">
+          {{ t('consultation.sendReportEmail') }}
+        </el-button>
         <template v-if="!isReadOnly">
         <el-button size="small" :loading="saving" @click="saveDraft">{{ t('common.save') }}</el-button>
         <el-button v-if="form.status === 'draft' || isNew" size="small" type="success" @click="completeConsultation">{{ t('consultation.complete') }}</el-button>
@@ -3004,7 +3063,7 @@ function handleSendInvoiceEmail() {
                       </span>
                       <span style="color:#888; font-size:12px; white-space:nowrap">
                         {{ currencyLabel }} {{ opt.price }}
-                        <el-tag v-if="opt.taxable" size="small" type="warning" style="margin-left:4px">Tax</el-tag>
+                        <el-tag v-if="opt.taxable" size="small" type="warning" style="margin-left:4px">HST</el-tag>
                       </span>
                     </div>
                   </el-option>
@@ -3038,13 +3097,13 @@ function handleSendInvoiceEmail() {
                 <span style="font-weight:600">{{ cs }}{{ getServiceExtended(row).toFixed(2) }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="Taxable" width="70">
+            <el-table-column label="HST" width="70">
               <template #default="{ row }">
                 <el-checkbox v-if="!isReadOnly" v-model="row.taxable" />
                 <el-icon v-else-if="row.taxable"><Select /></el-icon>
               </template>
             </el-table-column>
-            <el-table-column label="Tax" width="90" align="right">
+            <el-table-column label="HST" width="90" align="right">
               <template #default="{ row }">
                 <span v-if="row.taxable" style="color:#888; font-size:12px">{{ cs }}{{ getServiceTax(row).toFixed(2) }}</span>
                 <span v-else style="color:#ccc">-</span>
@@ -3085,7 +3144,7 @@ function handleSendInvoiceEmail() {
                   <el-input-number v-if="form.discountType !== 'none' && !isReadOnly"
                     v-model="form.discountValue" :min="0" size="small" style="width:120px; margin-left:8px" />
                 </el-form-item>
-                <el-form-item :label="localizeMixedLabel('Tax Rate 税率')">
+                <el-form-item :label="localizeMixedLabel('HST Rate 税率')">
                   <el-radio-group v-model="form.overrideTaxRate" :disabled="isReadOnly" size="small">
                     <el-radio-button :value="null">Default ({{ (settingsStore.taxRate * 100).toFixed(0) }}%)</el-radio-button>
                     <el-radio-button :value="0">{{ localizeMixedLabel('0% 免税') }}</el-radio-button>
@@ -3146,7 +3205,7 @@ function handleSendInvoiceEmail() {
                   <span class="price-lock">{{ cs }}{{ totalWithoutTax.toFixed(2) }} <el-icon><Lock /></el-icon></span>
                 </div>
                 <div class="price-row tax-row">
-                  <span>Tax {{ (effectiveTaxRate * 100).toFixed(0) }}% - {{ t('consultation.perItemTax') }}</span>
+                  <span>HST {{ (effectiveTaxRate * 100).toFixed(0) }}% - {{ t('consultation.perItemTax') }}</span>
                   <span>{{ cs }}{{ taxAmount.toFixed(2) }}</span>
                 </div>
                 <div class="price-row grand-total">
@@ -3171,6 +3230,22 @@ function handleSendInvoiceEmail() {
         <el-card class="section-card" style="margin-bottom:12px">
           <!-- PDF actions -->
           <div class="pdf-links" style="margin-bottom:12px">
+            <el-button
+              size="small"
+              type="info"
+              :loading="invoicePdfGenerating"
+              @click="handleGenerateInvoicePdf"
+            >
+              {{ t('consultation.exportInvoicePdf') }}
+            </el-button>
+            <el-button
+              size="small"
+              type="success"
+              :loading="invoicePdfGenerating"
+              @click="handleSendInvoiceEmail"
+            >
+              {{ t('consultation.sendInvoiceEmail') }}
+            </el-button>
             <el-button
               v-if="canStartInvoicePaymentAction"
               size="small"

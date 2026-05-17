@@ -1150,7 +1150,7 @@ export default {
     taxIncluded: '含税',
     taxCol: '税额',
     subtotal: '小计',
-    salesTax: '消费税（{rate}%）',
+    salesTax: 'HST（{rate}%）',
     totalAmount: '总计',
     statusPaid: '已付款',
     statusPartial: '部分付款',

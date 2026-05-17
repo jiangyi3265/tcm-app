@@ -69,6 +69,82 @@ function getConsultationPrescriptionTotal(consultation = {}) {
   return prescriptions.reduce((sum, rx) => sum + Number(rx?.subtotal || 0), 0)
 }
 
+function getPaidAmount(consultation = {}) {
+  if (consultation?.paidAmount != null) return Number(consultation.paidAmount || 0)
+  const records = Array.isArray(consultation?.paymentRecords) ? consultation.paymentRecords : []
+  return records.reduce((sum, record) => sum + Number(record?.amount || 0), 0)
+}
+
+function getHstLabel(rate) {
+  const numericRate = Number(rate || 0)
+  if (!Number.isFinite(numericRate) || numericRate <= 0) return 'HST'
+  const percent = numericRate > 1 ? numericRate : numericRate * 100
+  return `HST (${Number(percent.toFixed(2)).toString()}%)`
+}
+
+function getPractitionerSignatureUrl(practitioner = {}) {
+  const signature = practitioner?.signature
+  if (signature && typeof signature === 'object') return signature.url || ''
+  return practitioner?.signatureUrl || ''
+}
+
+function buildInvoiceChargeRows(consultation = {}, currency = 'CAD') {
+  const rows = []
+  const consultationFee = Number(consultation?.consultationFee || 0)
+  if (consultationFee > 0) {
+    rows.push({
+      description: 'Consultation Fee / 诊疗费',
+      quantity: 1,
+      unitPrice: consultationFee,
+      amount: consultationFee,
+    })
+  }
+
+  const services = Array.isArray(consultation?.services) ? consultation.services : []
+  services.forEach((service) => {
+    const quantity = Number(service?.quantity || 1)
+    const unitPrice = Number(service?.price || 0)
+    const amount = getServiceExtended(service)
+    if (!service?.name && amount <= 0) return
+    rows.push({
+      description: service?.name || 'Service / 服务',
+      quantity,
+      unitPrice,
+      amount,
+    })
+  })
+
+  if (consultation?.includeRxAmount) {
+    const prescriptions = Array.isArray(consultation?.prescriptions) ? consultation.prescriptions : []
+    prescriptions
+      .filter((rx) => !rx?.deletedAt && rx?.rxStatus !== 'deleted')
+      .filter((rx) => !rx?.rxStatus || ['pending', 'dispensed'].includes(rx.rxStatus))
+      .forEach((rx) => {
+        const quantity = Math.max(1, Number(rx?.quantity || 1))
+        const amount = Number(rx?.subtotal || 0)
+        const unitPrice = rx?.perDoseSubtotal != null ? Number(rx.perDoseSubtotal || 0) : amount / quantity
+        const name = rx?.formulaName || rx?.name || rx?.prescriptionType || 'Prescription / 中药'
+        rows.push({
+          description: `Prescription / 中药: ${name}`,
+          quantity,
+          unitPrice,
+          amount,
+        })
+      })
+  }
+
+  if (rows.length === 0) {
+    return `<tr><td colspan="4" class="muted">No charge items / 暂无收费项目</td></tr>`
+  }
+
+  return rows.map((row) => `<tr>
+    <td>${escapeHtml(row.description)}</td>
+    <td>${escapeHtml(String(row.quantity || '-'))}</td>
+    <td>${formatMoney(row.unitPrice, currency)}</td>
+    <td>${formatMoney(row.amount, currency)}</td>
+  </tr>`).join('')
+}
+
 function buildDiffSummary(diff = {}) {
   const fields = [
     ['Cold / Heat', diff.coldHeat],
@@ -224,31 +300,12 @@ export function printConsultationReport(consultation, patient, practitioner, cli
 export function printInvoice(consultation, patient, practitioner, clinicName, taxRate) {
   const clinic = clinicName || 'TCM Clinic Management System'
   const currency = consultation?.currency || 'CAD'
-  const services = Array.isArray(consultation?.services) ? consultation.services : []
-  const totalServiceAmount = getConsultationServiceTotal(consultation)
-  const prescriptionAmount = getConsultationPrescriptionTotal(consultation)
-  const serviceRows = buildRows(
-    services,
-    (service) => {
-      const quantity = Number(service.quantity || 0)
-      const price = Number(service.price || 0)
-      const discount = Number(service.manualDiscount || 0)
-      const extended = getServiceExtended(service)
-      const taxableRate = service.taxable ? Number(taxRate || 0) : 0
-      const tax = extended * taxableRate
-      return `<tr>
-        <td>${escapeHtml(service.name || '-')}</td>
-        <td>${escapeHtml(String(quantity || '-'))}</td>
-        <td>${formatMoney(price, currency)}</td>
-        <td>${formatMoney(discount, currency)}</td>
-        <td>${formatMoney(extended, currency)}</td>
-        <td>${service.taxable ? 'Yes' : 'No'}</td>
-        <td>${formatMoney(tax, currency)}</td>
-      </tr>`
-    },
-    'No services recorded.',
-    7,
-  )
+  const chargeRows = buildInvoiceChargeRows(consultation, currency)
+  const paidAmount = getPaidAmount(consultation)
+  const balanceAmount = Math.max(0, Number(consultation?.totalAmount || 0) - paidAmount)
+  const signatureUrl = getPractitionerSignatureUrl(practitioner)
+  const organization = practitioner?.organization || practitioner?.regulatoryBody || '-'
+  const organizationNumber = practitioner?.organizationNumber || practitioner?.registrationNumber || '-'
 
   const bodyHtml = `
     <div class="header">
@@ -266,36 +323,32 @@ export function printInvoice(consultation, patient, practitioner, clinicName, ta
         <div class="info-item"><span class="info-label">Patient</span><span>${escapeHtml(patient?.name || '-')}</span></div>
         <div class="info-item"><span class="info-label">Patient Address</span><span>${escapeHtml([patient?.addressStreet, patient?.addressCity, patient?.addressState, patient?.addressPostal].filter(Boolean).join(', ') || patient?.address || '-')}</span></div>
         <div class="info-item"><span class="info-label">Practitioner</span><span>${escapeHtml(practitioner?.name || '-')}</span></div>
-        <div class="info-item"><span class="info-label">Organization</span><span>${escapeHtml(practitioner?.regulatoryBody || '-')}</span></div>
-        <div class="info-item"><span class="info-label">Organization No.</span><span>${escapeHtml(practitioner?.organizationNumber || practitioner?.registrationNumber || '-')}</span></div>
+        <div class="info-item"><span class="info-label">Organization</span><span>${escapeHtml(organization)}</span></div>
+        <div class="info-item"><span class="info-label">Organization No.</span><span>${escapeHtml(organizationNumber)}</span></div>
       </div>
     </div>
 
     <div class="section">
-      <div class="section-title">Services</div>
+      <div class="section-title">收费项目 / Service Items</div>
       <table>
-        <tr><th>Service</th><th>Qty</th><th>Price</th><th>Discount</th><th>Extended</th><th>Taxable</th><th>Tax</th></tr>
-        ${serviceRows}
+        <tr><th>Description / 收费项目</th><th>Qty / 数量</th><th>Unit Price / 单价</th><th>Amount / 金额</th></tr>
+        ${chargeRows}
       </table>
-    </div>
-
-    <div class="section">
-      <div class="section-title">Prescriptions / Medicines</div>
-      ${buildPrescriptionTables(consultation?.prescriptions || [], currency)}
     </div>
 
     <div class="section">
       <div class="section-title">Totals</div>
       <table>
         <tr><th>Field</th><th>Value</th></tr>
-        <tr><td>Consultation Fee</td><td>${formatMoney(consultation?.consultationFee, currency)}</td></tr>
-        <tr><td>Total Service</td><td>${formatMoney(totalServiceAmount, currency)}</td></tr>
-        <tr><td>Prescription Amount</td><td>${formatMoney(prescriptionAmount, currency)}</td></tr>
         <tr><td>Total Without Tax</td><td>${formatMoney(consultation?.totalWithoutTax, currency)}</td></tr>
-        <tr><td>Tax Amount</td><td>${formatMoney(consultation?.taxAmount, currency)}</td></tr>
+        <tr><td>${escapeHtml(getHstLabel(taxRate))}</td><td>${formatMoney(consultation?.taxAmount, currency)}</td></tr>
         <tr><td>Grand Total</td><td>${formatMoney(consultation?.totalAmount, currency)}</td></tr>
+        <tr><td>Paid Amount</td><td>${formatMoney(paidAmount, currency)}</td></tr>
+        <tr><td>Balance Amount</td><td>${formatMoney(balanceAmount, currency)}</td></tr>
       </table>
     </div>
+
+    ${signatureUrl ? `<div class="section"><div class="section-title">Practitioner Signature / 医师签名</div><img src="${escapeHtml(signatureUrl)}" alt="Practitioner signature" style="max-width:220px;max-height:82px;object-fit:contain" /></div>` : ''}
 
     <div class="section">
       <div class="section-title">Comments</div>

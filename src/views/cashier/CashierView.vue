@@ -10,7 +10,7 @@ import { useBranchesStore } from '../../stores/branches'
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
 import { printInvoice } from '../../utils/pdfExport'
 import { useEmailSimulator } from '../../utils/emailSimulator'
-import { stripeApi } from '../../utils/api'
+import { consultationsApi, filesApi, stripeApi } from '../../utils/api'
 import {
   getLatestPaymentTime,
   getOutstandingAmount,
@@ -74,6 +74,10 @@ function money(value, currency = null) {
 
 function consultationMoney(consultation, value) {
   return money(value, consultation?.currency)
+}
+
+function consultationTaxRate(consultation) {
+  return consultation?.overrideTaxRate ?? settingsStore.taxRate
 }
 
 function getPaymentStatusTagType(status) {
@@ -194,9 +198,21 @@ async function processPayment(consultation) {
   }
 }
 
-function handlePrintInvoice(consultation) {
+async function handlePrintInvoice(consultation) {
   if (!consultation) return
-  printInvoice(consultation, consultation.patient, consultation.practitioner, settingsStore.clinicName, settingsStore.taxRate)
+  try {
+    if (consultation.id) {
+      const res = await consultationsApi.generateInvoice(consultation.id)
+      const pdfUrl = res.url || res.pdfUrl || res.filePath
+      if (pdfUrl) {
+        await filesApi.open(pdfUrl)
+        return
+      }
+    }
+  } catch (error) {
+    ElMessage.warning(error.message || t('consultation.pdfFailed'))
+  }
+  printInvoice(consultation, consultation.patient, consultation.practitioner, settingsStore.clinicName, consultationTaxRate(consultation))
 }
 
 function handleSendInvoiceEmail(consultation) {
@@ -346,7 +362,7 @@ function handleSendInvoiceEmail(consultation) {
           </el-table-column>
           <el-table-column :label="t('cashier.taxCol')" width="80" align="right">
             <template #default="{ row }">
-              <span v-if="row.taxable">{{ consultationMoney(selectedConsult, ((Number(row.price || 0) * (row.quantity || 1)) - (row.manualDiscount || 0)) * toAmount(settingsStore.taxRate)) }}</span>
+              <span v-if="row.taxable">{{ consultationMoney(selectedConsult, ((Number(row.price || 0) * (row.quantity || 1)) - (row.manualDiscount || 0)) * toAmount(consultationTaxRate(selectedConsult))) }}</span>
               <span v-else>-</span>
             </template>
           </el-table-column>
@@ -367,7 +383,7 @@ function handleSendInvoiceEmail(consultation) {
         </div>
         <div class="inv-totals">
           <div class="inv-row"><span>{{ t('cashier.subtotal') }}</span><span>{{ consultationMoney(selectedConsult, selectedConsult.totalAmount - selectedConsult.taxAmount) }}</span></div>
-          <div class="inv-row"><span>{{ t('cashier.salesTax', { rate: (toAmount(settingsStore.taxRate) * 100).toFixed(0) }) }}</span><span>{{ consultationMoney(selectedConsult, selectedConsult.taxAmount) }}</span></div>
+          <div class="inv-row"><span>{{ t('cashier.salesTax', { rate: (toAmount(consultationTaxRate(selectedConsult)) * 100).toFixed(0) }) }}</span><span>{{ consultationMoney(selectedConsult, selectedConsult.taxAmount) }}</span></div>
           <div class="inv-row"><span>{{ t('cashier.totalCharge') }}</span><span>{{ consultationMoney(selectedConsult, selectedConsult.totalAmount) }}</span></div>
           <div class="inv-row"><span>{{ t('cashier.paidAmount') }}</span><span>{{ consultationMoney(selectedConsult, selectedConsult.paidAmount) }}</span></div>
           <div class="inv-row total"><span>{{ t('cashier.currentCharge') }}</span><span>{{ consultationMoney(selectedConsult, selectedConsult.outstandingAmount) }}</span></div>

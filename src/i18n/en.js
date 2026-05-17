@@ -1144,7 +1144,7 @@ export default {
     taxIncluded: 'Tax Incl.',
     taxCol: 'Tax',
     subtotal: 'Subtotal',
-    salesTax: 'Sales Tax ({rate}%)',
+    salesTax: 'HST ({rate}%)',
     totalAmount: 'Total',
     statusPaid: 'Paid',
     statusPartial: 'Partially Paid',
