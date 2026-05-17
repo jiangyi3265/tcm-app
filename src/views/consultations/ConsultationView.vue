@@ -16,7 +16,7 @@ import { useTemplatesStore } from '../../stores/templates'
 import { hasPermission, getAuthorizedServiceKeys } from '../../utils/permissions'
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
 import { TCM_OPTIONS, CHIEF_COMPLAINTS, emptyDiff, normalizeDiff } from '../../utils/sampleData'
-import { printConsultationReport, printPrescription } from '../../utils/pdfExport'
+import { printPrescription } from '../../utils/pdfExport'
 import { useEmailSimulator } from '../../utils/emailSimulator'
 import { filesApi, consultationsApi, stripeApi } from '../../utils/api'
 import { calculatePrescription, recalcWithSupplier } from '../../utils/prescriptionCalc'
@@ -2160,6 +2160,9 @@ async function generateReportPdf({ openFile = true } = {}) {
   }
   reportPdfGenerating.value = true
   try {
+    if (!isReadOnly.value) {
+      await persistConsultationDraft({ silent: true, syncRoute: false })
+    }
     const res = await consultationsApi.generateReport(id)
     const pdfUrl = res.url || res.pdfUrl || res.filePath
     form.value.reportPdfUrl = res.url || res.pdfUrl || form.value.reportPdfUrl
@@ -2169,17 +2172,10 @@ async function generateReportPdf({ openFile = true } = {}) {
     await loadConsultationFiles()
     if (openFile && pdfUrl) {
       await filesApi.open(pdfUrl)
-    } else if (openFile) {
-      const practitioner = authStore.users.find(u => u.id === form.value.practitionerId)
-      printConsultationReport(form.value, patient.value, practitioner, settingsStore.clinicName)
     }
     return res
   } catch (e) {
     ElMessage.error(t('consultation.pdfFailed') + (e.message || ''))
-    if (openFile) {
-      const practitioner = authStore.users.find(u => u.id === form.value.practitionerId)
-      printConsultationReport(form.value, patient.value, practitioner, settingsStore.clinicName)
-    }
     return null
   } finally {
     reportPdfGenerating.value = false
