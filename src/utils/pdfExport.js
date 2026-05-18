@@ -7,8 +7,72 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;')
 }
 
-function formatMoney(value, currency = 'CAD') {
-  return `${escapeHtml(currency)} ${Number(value || 0).toFixed(2)}`
+function formatMoney(value) {
+  const amount = Number(value ?? 0)
+  const safeAmount = Number.isFinite(amount) ? amount : 0
+  return `CAD ${safeAmount.toFixed(2)}`
+}
+
+function formatStructuredValue(value) {
+  if (value == null || value === '' || value === '-' || value === '[]' || value === '{}') return '-'
+  if (Array.isArray(value)) {
+    const parts = value.map(formatStructuredValue).filter((item) => item && item !== '-')
+    return parts.length ? parts.join(', ') : '-'
+  }
+  if (typeof value === 'object') {
+    const parts = Object.entries(value)
+      .filter(([, item]) => item != null && item !== '' && item !== '-' && item !== '[]' && item !== '{}')
+      .map(([key, item]) => `${key}: ${formatStructuredValue(item)}`)
+    return parts.length ? parts.join('\n') : '-'
+  }
+  return String(value).trim() || '-'
+}
+
+function firstValue(...values) {
+  const found = values.find((value) => {
+    if (value == null) return false
+    const text = String(value).trim()
+    return text && text !== '-' && text !== '[]' && text !== '{}'
+  })
+  return found == null ? '-' : String(found).trim()
+}
+
+function buildPatientAddress(patient = {}) {
+  const parts = [
+    firstValue(patient.addressStreet, patient.street, patient.address),
+    firstValue(patient.addressCity, patient.city),
+    firstValue(patient.addressState, patient.province),
+    firstValue(patient.addressPostal, patient.postalCode),
+  ].filter((item) => item && item !== '-')
+  return parts.length ? parts.join(', ') : firstValue(patient.fullAddress, patient.mailingAddress)
+}
+
+function getPractitionerName(practitioner = {}) {
+  return firstValue(practitioner.practitionerName, practitioner.name, practitioner.nickName)
+}
+
+function getPractitionerOrganization(practitioner = {}) {
+  return firstValue(practitioner.organization, practitioner.regulatoryBody)
+}
+
+function getPractitionerNumber(practitioner = {}) {
+  return firstValue(practitioner.organizationNumber, practitioner.registrationNumber, practitioner.licenseNumber)
+}
+
+function getSubtotal(consultation = {}) {
+  if (consultation.totalWithoutTax != null) return Number(consultation.totalWithoutTax || 0)
+  const total = Number(consultation.totalAmount || 0)
+  const tax = Number(consultation.taxAmount || 0)
+  return Math.max(0, total - tax)
+}
+
+function getTaxAmount(consultation = {}) {
+  return Number(consultation.taxAmount || 0)
+}
+
+function getTotalAmount(consultation = {}) {
+  if (consultation.totalAmount != null) return Number(consultation.totalAmount || 0)
+  return getSubtotal(consultation) + getTaxAmount(consultation)
 }
 
 function openPrintWindow(title, bodyHtml) {
@@ -30,6 +94,7 @@ function openPrintWindow(title, bodyHtml) {
     .info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
     .info-item { display: flex; gap: 8px; }
     .info-label { min-width: 120px; color: #6b7280; font-weight: 600; }
+    .preline { white-space: pre-wrap; }
     table { width: 100%; border-collapse: collapse; margin-top: 8px; }
     th, td { border: 1px solid #d1d5db; padding: 8px 10px; text-align: left; vertical-align: top; }
     th { background: #f3f4f6; font-weight: 700; }
@@ -165,7 +230,7 @@ function buildDiffSummary(diff = {}) {
   }
 
   return `<ul>${fields.map(([label, value]) => {
-    const displayVal = Array.isArray(value) ? value.join(', ') : value
+    const displayVal = formatStructuredValue(value)
     return `<li><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(displayVal))}</li>`
   }).join('')}</ul>`
 }
@@ -233,23 +298,39 @@ export function printConsultationReport(consultation, patient, practitioner, cli
     2,
   )
   const currency = consultation?.currency || 'CAD'
+  const chargeRows = buildInvoiceChargeRows(consultation, currency)
+  const paidAmount = getPaidAmount(consultation)
+  const totalAmount = getTotalAmount(consultation)
+  const balanceAmount = Math.max(0, totalAmount - paidAmount)
+  const practitionerName = getPractitionerName(practitioner)
+  const organization = getPractitionerOrganization(practitioner)
+  const organizationNumber = getPractitionerNumber(practitioner)
+  const hstLabel = getHstLabel(consultation?.overrideTaxRate || consultation?.taxRate)
 
   const bodyHtml = `
     <div class="header">
       <div>
         <h1>${escapeHtml(clinic)}</h1>
-        <div class="subtitle">Consultation Report</div>
+        <div class="subtitle">Clinical Record: Consultation</div>
       </div>
-      <div class="muted">Printed ${escapeHtml(new Date().toLocaleDateString())}</div>
     </div>
 
     <div class="section">
-      <div class="section-title">Patient Summary</div>
+      <div class="section-title">Patient and Insurance Details / 报销信息</div>
       <div class="info-grid">
         <div class="info-item"><span class="info-label">Consultation ID</span><span>${escapeHtml(consultation?.consultationId || '-')}</span></div>
         <div class="info-item"><span class="info-label">Date</span><span>${escapeHtml(consultation?.date || '-')}</span></div>
         <div class="info-item"><span class="info-label">Patient</span><span>${escapeHtml(patient?.name || '-')}</span></div>
-        <div class="info-item"><span class="info-label">Practitioner</span><span>${escapeHtml(practitioner?.name || '-')}</span></div>
+        <div class="info-item"><span class="info-label">Date of Birth</span><span>${escapeHtml(firstValue(patient?.dateOfBirth, patient?.birthDate, patient?.dob))}</span></div>
+        <div class="info-item"><span class="info-label">Patient Phone</span><span>${escapeHtml(firstValue(patient?.phone, patient?.phoneNumber, patient?.mobile))}</span></div>
+        <div class="info-item"><span class="info-label">Patient Email</span><span>${escapeHtml(firstValue(patient?.email))}</span></div>
+        <div class="info-item"><span class="info-label">Patient Address</span><span>${escapeHtml(buildPatientAddress(patient))}</span></div>
+        <div class="info-item"><span class="info-label">Clinic</span><span>${escapeHtml(clinic)}</span></div>
+        <div class="info-item"><span class="info-label">Practitioner</span><span>${escapeHtml(practitionerName)}</span></div>
+        <div class="info-item"><span class="info-label">Title</span><span>${escapeHtml(firstValue(practitioner?.title))}</span></div>
+        <div class="info-item"><span class="info-label">Organization</span><span>${escapeHtml(organization)}</span></div>
+        <div class="info-item"><span class="info-label">Organization No.</span><span>${escapeHtml(organizationNumber)}</span></div>
+        <div class="info-item"><span class="info-label">Practitioner Phone</span><span>${escapeHtml(firstValue(practitioner?.practitionerPhone, practitioner?.phone, practitioner?.phonenumber))}</span></div>
       </div>
     </div>
 
@@ -279,6 +360,13 @@ export function printConsultationReport(consultation, patient, practitioner, cli
     </div>
 
     <div class="section">
+      <div class="section-title">Treatment / 治疗</div>
+      <p><strong>Treatment Plan:</strong> ${escapeHtml(firstValue(consultation?.treatment, consultation?.treatmentPlan, consultation?.acupunctureTreatment))}</p>
+      <p><strong>Prognosis:</strong> ${escapeHtml(firstValue(consultation?.prognosis))}</p>
+      <p><strong>Follow Up:</strong> ${escapeHtml(firstValue(consultation?.followUp, consultation?.followUpAdvice, consultation?.aftercare))}</p>
+    </div>
+
+    <div class="section">
       <div class="section-title">Acupuncture</div>
       <table>
         <tr><th>Point</th><th>Side</th><th>Notes</th></tr>
@@ -287,6 +375,26 @@ export function printConsultationReport(consultation, patient, practitioner, cli
     </div>
 
     ${buildPrescriptionTables(consultation?.prescriptions || [], currency)}
+
+    <div class="section">
+      <div class="section-title">收费项目 / Service Items</div>
+      <table>
+        <tr><th>Description / 收费项目</th><th>Qty / 数量</th><th>Unit Price / 单价</th><th>Subtotal / 小计</th></tr>
+        ${chargeRows}
+      </table>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Payment Summary / 付款摘要</div>
+      <table>
+        <tr><th>Field</th><th>Value</th></tr>
+        <tr><td>Subtotal</td><td>${formatMoney(getSubtotal(consultation), currency)}</td></tr>
+        <tr><td>${escapeHtml(hstLabel)}</td><td>${formatMoney(getTaxAmount(consultation), currency)}</td></tr>
+        <tr><td>Total</td><td>${formatMoney(totalAmount, currency)}</td></tr>
+        <tr><td>Paid Amount</td><td>${formatMoney(paidAmount, currency)}</td></tr>
+        <tr><td>Balance Amount</td><td>${formatMoney(balanceAmount, currency)}</td></tr>
+      </table>
+    </div>
 
     <div class="section">
       <div class="section-title">Notes</div>
@@ -302,10 +410,13 @@ export function printInvoice(consultation, patient, practitioner, clinicName, ta
   const currency = consultation?.currency || 'CAD'
   const chargeRows = buildInvoiceChargeRows(consultation, currency)
   const paidAmount = getPaidAmount(consultation)
-  const balanceAmount = Math.max(0, Number(consultation?.totalAmount || 0) - paidAmount)
+  const totalAmount = getTotalAmount(consultation)
+  const balanceAmount = Math.max(0, totalAmount - paidAmount)
   const signatureUrl = getPractitionerSignatureUrl(practitioner)
-  const organization = practitioner?.organization || practitioner?.regulatoryBody || '-'
-  const organizationNumber = practitioner?.organizationNumber || practitioner?.registrationNumber || '-'
+  const organization = getPractitionerOrganization(practitioner)
+  const organizationNumber = getPractitionerNumber(practitioner)
+  const practitionerName = getPractitionerName(practitioner)
+  const hstLabel = getHstLabel(consultation?.overrideTaxRate || consultation?.taxRate || taxRate)
 
   const bodyHtml = `
     <div class="header">
@@ -313,7 +424,6 @@ export function printInvoice(consultation, patient, practitioner, clinicName, ta
         <h1>${escapeHtml(clinic)}</h1>
         <div class="subtitle">Invoice</div>
       </div>
-      <div class="muted">Printed ${escapeHtml(new Date().toLocaleDateString())}</div>
     </div>
 
     <div class="section">
@@ -321,10 +431,14 @@ export function printInvoice(consultation, patient, practitioner, clinicName, ta
         <div class="info-item"><span class="info-label">Invoice ID</span><span>${escapeHtml(consultation?.consultationId || consultation?.id || '-')}</span></div>
         <div class="info-item"><span class="info-label">Date</span><span>${escapeHtml(consultation?.date || '-')}</span></div>
         <div class="info-item"><span class="info-label">Patient</span><span>${escapeHtml(patient?.name || '-')}</span></div>
-        <div class="info-item"><span class="info-label">Patient Address</span><span>${escapeHtml([patient?.addressStreet, patient?.addressCity, patient?.addressState, patient?.addressPostal].filter(Boolean).join(', ') || patient?.address || '-')}</span></div>
-        <div class="info-item"><span class="info-label">Practitioner</span><span>${escapeHtml(practitioner?.name || '-')}</span></div>
+        <div class="info-item"><span class="info-label">Patient Phone</span><span>${escapeHtml(firstValue(patient?.phone, patient?.phoneNumber, patient?.mobile))}</span></div>
+        <div class="info-item"><span class="info-label">Patient Email</span><span>${escapeHtml(firstValue(patient?.email))}</span></div>
+        <div class="info-item"><span class="info-label">Patient Address</span><span>${escapeHtml(buildPatientAddress(patient))}</span></div>
+        <div class="info-item"><span class="info-label">Practitioner</span><span>${escapeHtml(practitionerName)}</span></div>
+        <div class="info-item"><span class="info-label">Title</span><span>${escapeHtml(firstValue(practitioner?.title))}</span></div>
         <div class="info-item"><span class="info-label">Organization</span><span>${escapeHtml(organization)}</span></div>
         <div class="info-item"><span class="info-label">Organization No.</span><span>${escapeHtml(organizationNumber)}</span></div>
+        <div class="info-item"><span class="info-label">Practitioner Phone</span><span>${escapeHtml(firstValue(practitioner?.practitionerPhone, practitioner?.phone, practitioner?.phonenumber))}</span></div>
       </div>
     </div>
 
@@ -340,9 +454,9 @@ export function printInvoice(consultation, patient, practitioner, clinicName, ta
       <div class="section-title">Totals</div>
       <table>
         <tr><th>Field</th><th>Value</th></tr>
-        <tr><td>Total Without Tax</td><td>${formatMoney(consultation?.totalWithoutTax, currency)}</td></tr>
-        <tr><td>${escapeHtml(getHstLabel(taxRate))}</td><td>${formatMoney(consultation?.taxAmount, currency)}</td></tr>
-        <tr><td>Grand Total</td><td>${formatMoney(consultation?.totalAmount, currency)}</td></tr>
+        <tr><td>Subtotal</td><td>${formatMoney(getSubtotal(consultation), currency)}</td></tr>
+        <tr><td>${escapeHtml(hstLabel)}</td><td>${formatMoney(getTaxAmount(consultation), currency)}</td></tr>
+        <tr><td>Total</td><td>${formatMoney(totalAmount, currency)}</td></tr>
         <tr><td>Paid Amount</td><td>${formatMoney(paidAmount, currency)}</td></tr>
         <tr><td>Balance Amount</td><td>${formatMoney(balanceAmount, currency)}</td></tr>
       </table>
