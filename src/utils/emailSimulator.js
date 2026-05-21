@@ -35,11 +35,28 @@ function formatMoney(value) {
   return Number(value || 0).toFixed(2)
 }
 
+function formatCurrency(value, currency = 'CAD') {
+  const code = String(currency || 'CAD').toUpperCase()
+  return `${code} ${formatMoney(value)}`
+}
+
+function toAbsoluteUrl(value) {
+  const text = String(value || '').trim()
+  if (!text) return ''
+  if (/^(https?:|mailto:|tel:)/i.test(text)) return text
+  const origin = typeof window !== 'undefined' && window.location?.origin
+    ? window.location.origin
+    : ''
+  if (!origin) return text
+  return text.startsWith('/') ? `${origin}${text}` : `${origin}/${text}`
+}
+
 function getCommonVariables({ patient, clinicName, clinicAddress, appointment, consultation, practitioner, serviceLabel, links = {} } = {}) {
   const start = appointment?.startTime || ''
   const [appointmentDate, appointmentTime = ''] = String(start).split(/[T ]/)
+  const currency = consultation?.currency || 'CAD'
   const amount = consultation
-    ? formatMoney(consultation?.totalAmount ?? consultation?.outstandingAmount ?? 0)
+    ? formatCurrency(consultation?.totalAmount ?? consultation?.outstandingAmount ?? 0, currency)
     : ''
   return {
     clinicName: resolveClinicName(clinicName || practitioner?.clinicName),
@@ -57,13 +74,13 @@ function getCommonVariables({ patient, clinicName, clinicAddress, appointment, c
     chiefComplaint: consultation?.chiefComplaint || '',
     amount,
     totalAmount: amount,
-    taxAmount: consultation ? formatMoney(consultation?.taxAmount) : '',
-    consentLink: links.consentLink || '',
-    intakeLink: links.intakeLink || '',
-    reportLink: links.reportLink || consultation?.reportPdfUrl || consultation?.reportUrl || '',
-    invoiceLink: links.invoiceLink || consultation?.invoicePdfUrl || consultation?.invoiceUrl || '',
-    cancelLink: links.cancelLink || links.manageLink || '',
-    manageLink: links.manageLink || '',
+    taxAmount: consultation ? formatCurrency(consultation?.taxAmount, currency) : '',
+    consentLink: toAbsoluteUrl(links.consentLink),
+    intakeLink: toAbsoluteUrl(links.intakeLink),
+    reportLink: toAbsoluteUrl(links.reportLink || consultation?.reportPdfUrl || consultation?.reportUrl || ''),
+    invoiceLink: toAbsoluteUrl(links.invoiceLink || consultation?.invoicePdfUrl || consultation?.invoiceUrl || ''),
+    cancelLink: toAbsoluteUrl(links.cancelLink || links.manageLink || ''),
+    manageLink: toAbsoluteUrl(links.manageLink || ''),
   }
 }
 

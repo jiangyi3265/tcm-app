@@ -212,7 +212,10 @@ async function handlePrintInvoice(consultation) {
   } catch (error) {
     ElMessage.warning(error.message || t('consultation.pdfFailed'))
   }
-  printInvoice(consultation, consultation.patient, consultation.practitioner, settingsStore.clinicName, consultationTaxRate(consultation))
+  printInvoice(consultation, consultation.patient, consultation.practitioner, settingsStore.clinicName, consultationTaxRate(consultation), {
+    address: settingsStore.clinicAddress,
+    phone: settingsStore.clinicPhone,
+  })
 }
 
 function handleSendInvoiceEmail(consultation) {

@@ -95,6 +95,7 @@ function openPrintWindow(title, bodyHtml) {
     .info-item { display: flex; gap: 8px; }
     .info-label { min-width: 120px; color: #6b7280; font-weight: 600; }
     .preline { white-space: pre-wrap; }
+    .highlight-line { margin-top: 10px; padding: 8px 10px; border: 1px solid #d1d5db; background: #f9fafb; font-weight: 700; color: #2d6a4f; }
     table { width: 100%; border-collapse: collapse; margin-top: 8px; }
     th, td { border: 1px solid #d1d5db; padding: 8px 10px; text-align: left; vertical-align: top; }
     th { background: #f3f4f6; font-weight: 700; }
@@ -151,6 +152,17 @@ function getPractitionerSignatureUrl(practitioner = {}) {
   const signature = practitioner?.signature
   if (signature && typeof signature === 'object') return signature.url || ''
   return practitioner?.signatureUrl || ''
+}
+
+function buildPractitionerSummary(practitioner = {}) {
+  const parts = [
+    ['Practitioner', getPractitionerName(practitioner)],
+    ['Organization', getPractitionerOrganization(practitioner)],
+    ['Registration No.', getPractitionerNumber(practitioner)],
+  ]
+    .filter(([, value]) => value && value !== '-')
+    .map(([label, value]) => `${label}: ${value}`)
+  return parts.join('  |  ')
 }
 
 function buildInvoiceChargeRows(consultation = {}, currency = 'CAD') {
@@ -306,6 +318,7 @@ export function printConsultationReport(consultation, patient, practitioner, cli
   const organization = getPractitionerOrganization(practitioner)
   const organizationNumber = getPractitionerNumber(practitioner)
   const hstLabel = getHstLabel(consultation?.overrideTaxRate || consultation?.taxRate)
+  const practitionerSummary = buildPractitionerSummary(practitioner)
 
   const bodyHtml = `
     <div class="header">
@@ -314,6 +327,8 @@ export function printConsultationReport(consultation, patient, practitioner, cli
         <div class="subtitle">Clinical Record: Consultation</div>
       </div>
     </div>
+
+    ${practitionerSummary ? `<div class="highlight-line">${escapeHtml(practitionerSummary)}</div>` : ''}
 
     <div class="section">
       <div class="section-title">Patient and Insurance Details / 报销信息</div>
@@ -405,7 +420,7 @@ export function printConsultationReport(consultation, patient, practitioner, cli
   openPrintWindow('Consultation Report', bodyHtml)
 }
 
-export function printInvoice(consultation, patient, practitioner, clinicName, taxRate) {
+export function printInvoice(consultation, patient, practitioner, clinicName, taxRate, clinicInfo = {}) {
   const clinic = clinicName || 'TCM Clinic Management System'
   const currency = consultation?.currency || 'CAD'
   const chargeRows = buildInvoiceChargeRows(consultation, currency)
@@ -417,6 +432,10 @@ export function printInvoice(consultation, patient, practitioner, clinicName, ta
   const organizationNumber = getPractitionerNumber(practitioner)
   const practitionerName = getPractitionerName(practitioner)
   const hstLabel = getHstLabel(consultation?.overrideTaxRate || consultation?.taxRate || taxRate)
+  const practitionerSummary = buildPractitionerSummary(practitioner)
+  const clinicDetails = [clinic, clinicInfo?.address, clinicInfo?.phone, clinicInfo?.email]
+    .filter((item) => item && item !== '-')
+    .join('\n')
 
   const bodyHtml = `
     <div class="header">
@@ -424,6 +443,11 @@ export function printInvoice(consultation, patient, practitioner, clinicName, ta
         <h1>${escapeHtml(clinic)}</h1>
         <div class="subtitle">Invoice</div>
       </div>
+    </div>
+
+    <div class="section">
+      <div class="preline">${escapeHtml(clinicDetails)}</div>
+      ${practitionerSummary ? `<div class="highlight-line">${escapeHtml(practitionerSummary)}</div>` : ''}
     </div>
 
     <div class="section">
