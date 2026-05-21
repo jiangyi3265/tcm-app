@@ -1,6 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildCopiedTreatmentData, rehydrateCopiedPrescriptions } from '../src/utils/consultationCopy.js'
+import {
+  buildCopiedTreatmentData,
+  rehydrateCopiedPrescriptions,
+  sanitizeCopiedConsultationData,
+} from '../src/utils/consultationCopy.js'
 
 test('复制处方后会重绑当前库存，并保留新供应商信息', () => {
   const copied = buildCopiedTreatmentData({
@@ -44,6 +48,32 @@ test('复制处方后会重绑当前库存，并保留新供应商信息', () =>
   assert.equal(rebound[0].items[0].convertedQty, 70)
   assert.equal(rebound[0].subtotal, 35)
   assert.equal(rebound[0].perDoseSubtotal, 5)
+})
+
+test('copied consultation data does not carry old record identity or billing state', () => {
+  const copied = sanitizeCopiedConsultationData({
+    id: 'consult-old',
+    consultationId: 'ORD-OLD',
+    date: '2026-05-11',
+    consultDate: '2026-05-11 10:00:00',
+    status: 'completed',
+    totalAmount: 135.6,
+    paymentRecords: [{ amount: 135.6 }],
+    invoicePdfUrl: '/old-invoice.pdf',
+    chiefComplaint: 'Back Pain',
+    services: [{ name: 'Acupuncture' }],
+  })
+
+  assert.equal(copied.id, undefined)
+  assert.equal(copied.consultationId, undefined)
+  assert.equal(copied.date, undefined)
+  assert.equal(copied.consultDate, undefined)
+  assert.equal(copied.status, undefined)
+  assert.equal(copied.totalAmount, undefined)
+  assert.equal(copied.paymentRecords, undefined)
+  assert.equal(copied.invoicePdfUrl, undefined)
+  assert.equal(copied.chiefComplaint, 'Back Pain')
+  assert.deepEqual(copied.services, [{ name: 'Acupuncture' }])
 })
 
 test('当前库存没有匹配项时，复制处方仍保留原供应商名称用于显示', () => {

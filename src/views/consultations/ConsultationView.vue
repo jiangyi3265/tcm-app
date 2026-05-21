@@ -14,13 +14,13 @@ import { useAcupointsStore } from '../../stores/acupoints'
 import { useHerbDictStore } from '../../stores/herbDict'
 import { useTemplatesStore } from '../../stores/templates'
 import { hasPermission, getAuthorizedServiceKeys } from '../../utils/permissions'
-import { formatDate, formatDateTime } from '../../utils/dateUtils'
+import { formatDate, formatDateTime, todayDate } from '../../utils/dateUtils'
 import { TCM_OPTIONS, CHIEF_COMPLAINTS, emptyDiff, normalizeDiff } from '../../utils/sampleData'
 import { printPrescription } from '../../utils/pdfExport'
 import { useEmailSimulator } from '../../utils/emailSimulator'
 import { filesApi, consultationsApi, stripeApi } from '../../utils/api'
 import { calculatePrescription, recalcWithSupplier } from '../../utils/prescriptionCalc'
-import { rehydrateCopiedPrescriptions } from '../../utils/consultationCopy'
+import { rehydrateCopiedPrescriptions, sanitizeCopiedConsultationData } from '../../utils/consultationCopy'
 import { persistCopiedConsultationData } from '../../utils/consultationCopyFlow'
 import {
   hasEditablePrescriptionItems,
@@ -125,7 +125,7 @@ const defaultForm = () => ({
   patientId,
   practitionerId: authStore.userId,
   parentConsultationId: null,
-  date: new Date().toISOString().split('T')[0],
+  date: todayDate(),
   status: 'draft',
   // Summary
   chiefComplaint: '', chiefComplaintDuration: '', chiefComplaintDescription: '',
@@ -443,7 +443,7 @@ async function saveHistoryMed() {
 }
 
 async function onCopySection(data) {
-  const { diff, prescriptions, ...rest } = data || {}
+  const { diff, prescriptions, ...rest } = sanitizeCopiedConsultationData(data || {})
   if (diff) {
     form.value.diff = { ...form.value.diff, ...diff }
   }
@@ -462,12 +462,13 @@ async function onCopySection(data) {
 }
 
 function onUpdateField(data) {
-  if (data.diff) {
-    form.value.diff = { ...form.value.diff, ...data.diff }
+  const sanitized = sanitizeCopiedConsultationData(data || {})
+  if (sanitized.diff) {
+    form.value.diff = { ...form.value.diff, ...sanitized.diff }
   } else {
-    Object.assign(form.value, data)
+    Object.assign(form.value, sanitized)
   }
-  if (Object.prototype.hasOwnProperty.call(data || {}, 'servicePriceList')) {
+  if (Object.prototype.hasOwnProperty.call(sanitized || {}, 'servicePriceList')) {
     form.value.servicePriceList = normalizeServicePriceListSelection(form.value.servicePriceList)
   }
 }
@@ -642,8 +643,9 @@ onMounted(() => {
     const copyRaw = sessionStorage.getItem('tcm_copy_consult')
     if (copyRaw) {
       try {
-        const copyData = JSON.parse(copyRaw)
+        const copyData = sanitizeCopiedConsultationData(JSON.parse(copyRaw))
         Object.assign(form.value, copyData)
+        form.value.date = todayDate()
         if (copyData.diff) form.value.diff = normalizeDiff(copyData.diff)
         if (copyData.acupuncture) form.value.acupuncture = [...copyData.acupuncture]
         if (copyData.prescriptions) {

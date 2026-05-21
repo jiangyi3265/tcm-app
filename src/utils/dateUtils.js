@@ -20,6 +20,10 @@ export function formatTime(date) {
   return dayjs(date).format('HH:mm')
 }
 
+export function todayDate() {
+  return dayjs().format('YYYY-MM-DD')
+}
+
 export function fromNow(date) {
   if (!date) return ''
   return dayjs(date).fromNow()

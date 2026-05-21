@@ -10,7 +10,7 @@ import { hasPermission, canAccessPatientRecords, filterAccessibleConsultations }
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
 import { filesApi, patientsApi } from '../../utils/api'
 import { useSettingsStore } from '../../stores/settings'
-import { buildCopiedTreatmentData } from '../../utils/consultationCopy'
+import { buildCopiedTreatmentData, sanitizeCopiedConsultationData } from '../../utils/consultationCopy'
 import { getPaymentStatus } from '../../utils/prescriptionWorkflow'
 import {
   canSelectNewerHistory,
@@ -353,7 +353,7 @@ function quickCopyToNew(fields) {
       copyData.discountValue = src.discountValue
     }
   }
-  sessionStorage.setItem('tcm_copy_consult', JSON.stringify(copyData))
+  sessionStorage.setItem('tcm_copy_consult', JSON.stringify(sanitizeCopiedConsultationData(copyData)))
   ElMessage.success(t('patientDetail.copiedToClipboard'))
   router.push(`/patients/${patientId}/consultations/new`)
 }

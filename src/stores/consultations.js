@@ -4,6 +4,7 @@ import { emptyDiff, normalizeDiff } from '../utils/sampleData'
 import { consultationsApi } from '../utils/api'
 import { useInventoryStore } from './inventory'
 import { readStoredJson, writeStoredJson } from '../utils/storage'
+import { todayDate } from '../utils/dateUtils'
 import {
   getOutstandingAmount,
   getPaymentStatus,
@@ -87,7 +88,7 @@ export const useConsultationsStore = defineStore('consultations', () => {
       patientId: data.patientId,
       practitionerId: data.practitionerId,
       parentConsultationId: data.parentConsultationId || null,
-      date: data.date || new Date().toISOString().split('T')[0],
+      date: data.date || todayDate(),
       status: 'draft',
       // Summary
       chiefComplaint: data.chiefComplaint || '',
@@ -262,7 +263,7 @@ export const useConsultationsStore = defineStore('consultations', () => {
   const deletedConsultations = computed(() => consultations.value.filter((c) => c.deletedAt))
 
   const todayConsultations = computed(() => {
-    const today = new Date().toISOString().split('T')[0]
+    const today = todayDate()
     return consultations.value.filter((c) => c.date === today && !c.deletedAt)
   })
 

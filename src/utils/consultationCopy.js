@@ -9,6 +9,53 @@ function buildCopiedPrescriptionId(index = 0) {
   return `rx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${index}`
 }
 
+const COPIED_CONSULTATION_BLOCKED_FIELDS = new Set([
+  'id',
+  'consultationId',
+  'date',
+  'consultDate',
+  'status',
+  'version',
+  'lockedAt',
+  'deletedAt',
+  'createdAt',
+  'updatedAt',
+  'completedAt',
+  'completedBy',
+  'reactivatedAt',
+  'reactivatedBy',
+  'reactivatedFromVersion',
+  'reportVersion',
+  'modifications',
+  'documents',
+  'invoicePdfPath',
+  'invoicePdfUrl',
+  'invoicePdfGeneratedAt',
+  'reportPdfPath',
+  'reportPdfUrl',
+  'reportPdfGeneratedAt',
+  'consultationPdfPath',
+  'consultationPdfUrl',
+  'paymentStatus',
+  'paymentMethod',
+  'paymentRecords',
+  'paidAt',
+  'paidBy',
+  'paidAmount',
+  'outstandingAmount',
+  'totalAmount',
+  'taxAmount',
+  'totalWithoutTax',
+])
+
+export function sanitizeCopiedConsultationData(source = {}) {
+  const copy = cloneJson(source || {}, {})
+  for (const field of COPIED_CONSULTATION_BLOCKED_FIELDS) {
+    delete copy[field]
+  }
+  return copy
+}
+
 export function buildCopiedTreatmentData(source = {}) {
   const sourcePrescriptions = source.prescriptions || []
   const sourceHerbals = source.herbals || []
