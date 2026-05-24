@@ -13,6 +13,15 @@ import { useSettingsStore } from '../../stores/settings'
 import { buildCopiedTreatmentData, sanitizeCopiedConsultationData } from '../../utils/consultationCopy'
 import { getPaymentStatus } from '../../utils/prescriptionWorkflow'
 import {
+  COUNTRY_OPTIONS,
+  DEFAULT_COUNTRY,
+  getCountryLabel,
+  getProvinceLabel,
+  getProvinceOptions,
+  normalizeCountryCode,
+  normalizeProvinceCode,
+} from '../../utils/countryRegionOptions'
+import {
   canSelectNewerHistory,
   canSelectOlderHistory,
   getHistoryDisplayOrder,
@@ -37,6 +46,7 @@ const canCreate = computed(() => hasPermission(roles.value, 'consultation.create
 const canDelete = computed(() => hasPermission(roles.value, 'patient.delete'))
 const isApprenticeReadonly = computed(() => roles.value.includes('apprentice'))
 const isAdmin = computed(() => roles.value.includes('admin'))
+const hidePatientContact = computed(() => roles.value.includes('practitioner') || roles.value.includes('apprentice'))
 
 const patientId = route.params.id
 const patient = computed(() => patientsStore.getPatient(patientId))
@@ -82,7 +92,12 @@ const consultations = computed(() =>
   filterAccessibleConsultations(
     roles.value,
     consultationsStore.getPatientConsultations(patientId),
-    { currentUser: authStore.currentUser },
+    {
+      currentUser: authStore.currentUser,
+      userId: authStore.userId,
+      patient: patient.value,
+      appointments: appointmentsStore.getPatientAppointments(patientId),
+    },
   ),
 )
 const practitioners = computed(() => authStore.getPractitioners())
@@ -205,8 +220,11 @@ const editing = ref(false)
 const editForm = ref({})
 
 function startEdit() {
+  const addressCountry = normalizeCountryCode(patient.value?.addressCountry, DEFAULT_COUNTRY)
   editForm.value = {
     ...patient.value,
+    addressCountry,
+    addressState: normalizeProvinceCode(addressCountry, patient.value?.addressState),
     emails: [...(patient.value.emails || [])],
   }
   editing.value = true
@@ -361,30 +379,26 @@ function quickCopyToNew(fields) {
 // ── 首选联系方式 ──
 const PREFERRED_CONTACT_OPTIONS = ['Any', 'Email', 'Mobile Phone', 'Business Phone', 'Fax']
 
-// ── 地址省份 ──
-const PROVINCE_OPTIONS = [
-  { value: 'BC', label: 'BC (British Columbia)' },
-  { value: 'AB', label: 'AB (Alberta)' },
-  { value: 'ON', label: 'ON (Ontario)' },
-  { value: 'QC', label: 'QC (Quebec)' },
-  { value: 'MB', label: 'MB (Manitoba)' },
-  { value: 'SK', label: 'SK (Saskatchewan)' },
-  { value: 'NS', label: 'NS (Nova Scotia)' },
-  { value: 'NB', label: 'NB (New Brunswick)' },
-  { value: 'NL', label: 'NL (Newfoundland and Labrador)' },
-  { value: 'PE', label: 'PE (Prince Edward Island)' },
-  { value: 'NT', label: 'NT (Northwest Territories)' },
-  { value: 'YT', label: 'YT (Yukon)' },
-  { value: 'NU', label: 'NU (Nunavut)' }
-]
+const countryOptions = COUNTRY_OPTIONS
+const editProvinceOptions = computed(() => getProvinceOptions(editForm.value.addressCountry || DEFAULT_COUNTRY))
+
+function handleEditCountryChange() {
+  editForm.value.addressState = ''
+}
+
+function displayCountry(patientRecord = patient.value) {
+  if (!patientRecord?.addressCountry && !patientRecord?.addressState) return '-'
+  return getCountryLabel(patientRecord?.addressCountry || DEFAULT_COUNTRY) || '-'
+}
+
+function displayProvince(patientRecord = patient.value) {
+  return getProvinceLabel(patientRecord?.addressCountry || DEFAULT_COUNTRY, patientRecord?.addressState) || '-'
+}
 
 // ── 邮件签署同意书 ──
 const sendingConsentEmail = ref(false)
 
 async function sendConsentByEmail() {
-  if (!patient.value?.emails?.[0] && !patient.value?.email) {
-    return ElMessage.warning(t('patientDetail.noEmailForConsent'))
-  }
   sendingConsentEmail.value = true
   try {
     const res = await patientsApi.sendConsentEmail(patientId, {
@@ -411,9 +425,6 @@ async function sendConsentByEmail() {
 const sendingIntakeEmail = ref(false)
 
 async function sendIntakeByEmail() {
-  if (!patient.value?.emails?.[0] && !patient.value?.email) {
-    return ElMessage.warning(t('patientDetail.noEmailForConsent'))
-  }
   sendingIntakeEmail.value = true
   try {
     const res = await patientsApi.sendIntakeEmail(patientId, {
@@ -682,17 +693,20 @@ const fileTree = computed(() => {
                   <el-descriptions-item :label="t('patientDetail.dateOfBirth')">{{ patient.dateOfBirth || '-' }}</el-descriptions-item>
                   <el-descriptions-item :label="t('patientDetail.jobTitle')">{{ patient.jobTitle || '-' }}</el-descriptions-item>
                   <el-descriptions-item :label="t('patientDetail.accountName')" :span="2">{{ patient.accountName || '-' }}</el-descriptions-item>
-                  <el-descriptions-item :label="t('patientDetail.email1')" :span="2">{{ patient.emails?.[0] || '-' }}</el-descriptions-item>
-                  <el-descriptions-item :label="t('patientDetail.email2')" :span="2">{{ patient.email2 || patient.emails?.[1] || '-' }}</el-descriptions-item>
-                  <el-descriptions-item :label="t('patientDetail.email3')" :span="2">{{ patient.email3 || patient.emails?.[2] || '-' }}</el-descriptions-item>
-                  <el-descriptions-item :label="t('patientDetail.mobilePhone')">{{ patient.mobilePhone || '-' }}</el-descriptions-item>
-                  <el-descriptions-item :label="t('patientDetail.businessPhone')">{{ patient.businessPhone || '-' }}</el-descriptions-item>
-                  <el-descriptions-item :label="t('patientDetail.fax')">{{ patient.fax || '-' }}</el-descriptions-item>
-                  <el-descriptions-item :label="t('patientDetail.preferredContact')">{{ patient.preferredContact || '-' }}</el-descriptions-item>
-                  <el-descriptions-item :label="t('patientDetail.streetAddress')" :span="2">{{ patient.addressStreet || patient.address || '-' }}</el-descriptions-item>
-                  <el-descriptions-item :label="t('patientDetail.province')">{{ patient.addressState || '-' }}</el-descriptions-item>
-                  <el-descriptions-item :label="t('patientDetail.city')">{{ patient.addressCity || '-' }}</el-descriptions-item>
-                  <el-descriptions-item :label="t('patientDetail.postalCode')">{{ patient.addressPostal || '-' }}</el-descriptions-item>
+                  <template v-if="!hidePatientContact">
+                    <el-descriptions-item :label="t('patientDetail.email1')" :span="2">{{ patient.emails?.[0] || '-' }}</el-descriptions-item>
+                    <el-descriptions-item :label="t('patientDetail.email2')" :span="2">{{ patient.email2 || patient.emails?.[1] || '-' }}</el-descriptions-item>
+                    <el-descriptions-item :label="t('patientDetail.email3')" :span="2">{{ patient.email3 || patient.emails?.[2] || '-' }}</el-descriptions-item>
+                    <el-descriptions-item :label="t('patientDetail.mobilePhone')">{{ patient.mobilePhone || '-' }}</el-descriptions-item>
+                    <el-descriptions-item :label="t('patientDetail.businessPhone')">{{ patient.businessPhone || '-' }}</el-descriptions-item>
+                    <el-descriptions-item :label="t('patientDetail.fax')">{{ patient.fax || '-' }}</el-descriptions-item>
+                    <el-descriptions-item :label="t('patientDetail.preferredContact')">{{ patient.preferredContact || '-' }}</el-descriptions-item>
+                    <el-descriptions-item :label="t('patientDetail.streetAddress')" :span="2">{{ patient.addressStreet || patient.address || '-' }}</el-descriptions-item>
+                    <el-descriptions-item :label="t('patientDetail.country')">{{ displayCountry(patient) }}</el-descriptions-item>
+                    <el-descriptions-item :label="t('patientDetail.province')">{{ displayProvince(patient) }}</el-descriptions-item>
+                    <el-descriptions-item :label="t('patientDetail.city')">{{ patient.addressCity || '-' }}</el-descriptions-item>
+                    <el-descriptions-item :label="t('patientDetail.postalCode')">{{ patient.addressPostal || '-' }}</el-descriptions-item>
+                  </template>
                   <el-descriptions-item :label="t('patientDetail.primaryPractitioner')">
                     {{ getPractitionerName(patient.practitionerId) }}
                   </el-descriptions-item>
@@ -874,42 +888,42 @@ const fileTree = computed(() => {
                         <el-input v-model="editForm.jobTitle" />
                       </el-form-item>
                     </el-col>
-                    <el-col :span="24">
+                    <el-col v-if="!hidePatientContact" :span="24">
                       <el-form-item :label="t('patientDetail.accountName')">
                         <el-input v-model="editForm.accountName" />
                       </el-form-item>
                     </el-col>
-                    <el-col :span="24">
+                    <el-col v-if="!hidePatientContact" :span="24">
                       <el-form-item :label="t('patientDetail.email1')">
                         <el-input v-model="editForm.emails[0]" />
                       </el-form-item>
                     </el-col>
-                    <el-col :span="24">
+                    <el-col v-if="!hidePatientContact" :span="24">
                       <el-form-item :label="t('patientDetail.email2')">
                         <el-input v-model="editForm.email2" />
                       </el-form-item>
                     </el-col>
-                    <el-col :span="24">
+                    <el-col v-if="!hidePatientContact" :span="24">
                       <el-form-item :label="t('patientDetail.email3')">
                         <el-input v-model="editForm.email3" />
                       </el-form-item>
                     </el-col>
-                    <el-col :span="12">
+                    <el-col v-if="!hidePatientContact" :span="12">
                       <el-form-item :label="t('patientDetail.mobilePhone')">
                         <el-input v-model="editForm.mobilePhone" />
                       </el-form-item>
                     </el-col>
-                    <el-col :span="12">
+                    <el-col v-if="!hidePatientContact" :span="12">
                       <el-form-item :label="t('patientDetail.businessPhone')">
                         <el-input v-model="editForm.businessPhone" />
                       </el-form-item>
                     </el-col>
-                    <el-col :span="12">
+                    <el-col v-if="!hidePatientContact" :span="12">
                       <el-form-item :label="t('patientDetail.fax')">
                         <el-input v-model="editForm.fax" />
                       </el-form-item>
                     </el-col>
-                    <el-col :span="12">
+                    <el-col v-if="!hidePatientContact" :span="12">
                       <el-form-item :label="t('patientDetail.preferredContact')">
                         <el-select v-model="editForm.preferredContact" style="width:100%">
                           <el-option
@@ -921,24 +935,31 @@ const fileTree = computed(() => {
                         </el-select>
                       </el-form-item>
                     </el-col>
-                    <el-col :span="24">
+                    <el-col v-if="!hidePatientContact" :span="24">
                       <el-form-item :label="t('patientDetail.streetAddress')">
                         <el-input v-model="editForm.addressStreet" />
                       </el-form-item>
                     </el-col>
-                    <el-col :span="10">
-                      <el-form-item :label="t('patientDetail.province')">
-                        <el-select v-model="editForm.addressState" style="width:100%">
-                          <el-option v-for="p in PROVINCE_OPTIONS" :key="p.value" :label="p.label" :value="p.value" />
+                    <el-col v-if="!hidePatientContact" :span="6">
+                      <el-form-item :label="t('patientDetail.country')">
+                        <el-select v-model="editForm.addressCountry" filterable style="width:100%" @change="handleEditCountryChange">
+                          <el-option v-for="p in countryOptions" :key="p.value" :label="p.label" :value="p.value" />
                         </el-select>
                       </el-form-item>
                     </el-col>
-                    <el-col :span="7">
+                    <el-col v-if="!hidePatientContact" :span="6">
+                      <el-form-item :label="t('patientDetail.province')">
+                        <el-select v-model="editForm.addressState" filterable style="width:100%">
+                          <el-option v-for="p in editProvinceOptions" :key="p.value" :label="p.label" :value="p.value" />
+                        </el-select>
+                      </el-form-item>
+                    </el-col>
+                    <el-col v-if="!hidePatientContact" :span="6">
                       <el-form-item :label="t('patientDetail.city')">
                         <el-input v-model="editForm.addressCity" />
                       </el-form-item>
                     </el-col>
-                    <el-col :span="7">
+                    <el-col v-if="!hidePatientContact" :span="6">
                       <el-form-item :label="t('patientDetail.postalCode')">
                         <el-input v-model="editForm.addressPostal" />
                       </el-form-item>

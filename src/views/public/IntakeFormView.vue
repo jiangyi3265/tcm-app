@@ -183,6 +183,11 @@ function createIntakeForm() {
 const form = ref(createIntakeForm())
 const chiefComplaintField = ref(null)
 
+const chiefComplaintError = computed(() => (
+  form.value.chiefComplaint.trim() ? '' : copy.value.fillChiefComplaint
+))
+const displayedSubmitError = computed(() => submitError.value || chiefComplaintError.value)
+
 const formattedStartTime = computed(() => {
   const value = appointmentInfo.value?.startTime
   if (!value) return ''
@@ -218,8 +223,8 @@ function isChecked(field, option) {
 }
 
 async function handleSubmit() {
-  if (!form.value.chiefComplaint.trim()) {
-    submitError.value = copy.value.fillChiefComplaint
+  if (chiefComplaintError.value) {
+    submitError.value = chiefComplaintError.value
     await nextTick()
     chiefComplaintField.value?.focus()
     return
@@ -307,6 +312,8 @@ async function handleCancelAppointment() {
                 class="form-textarea"
                 rows="3"
                 :placeholder="copy.chiefComplaintPh"
+                :aria-invalid="Boolean(chiefComplaintError)"
+                required
                 @input="submitError = ''"
               ></textarea>
             </label>
@@ -467,9 +474,9 @@ async function handleCancelAppointment() {
           </div>
         </section>
 
-        <div v-if="submitError" class="submit-error" role="alert">{{ submitError }}</div>
+        <div v-if="displayedSubmitError" class="submit-error" role="alert">{{ displayedSubmitError }}</div>
 
-        <button class="submit-button" :disabled="submitting" @click="handleSubmit">
+        <button class="submit-button" :disabled="submitting || Boolean(chiefComplaintError)" @click="handleSubmit">
           {{ submitting ? copy.submitting : copy.submit }}
         </button>
         <button
@@ -681,6 +688,11 @@ async function handleCancelAppointment() {
 
 .form-textarea {
   resize: vertical;
+}
+
+.form-textarea[aria-invalid='true'] {
+  border-color: #c04242;
+  box-shadow: 0 0 0 2px rgba(192, 66, 66, 0.08);
 }
 
 .check-option,

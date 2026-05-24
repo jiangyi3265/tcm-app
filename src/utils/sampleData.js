@@ -565,9 +565,9 @@ export const DEMO_APPOINTMENTS = [
 // 演示库存数据
 export const DEMO_INVENTORY = [
   // 粉剂
-  { id: 'inv-1', name: '逍遥散', category: 'powder', unit: '包', quantity: 50, pricePerUnit: 35, supplier: '同仁堂', gramsPerPacket: 6, minStockLevel: 10, isActive: true },
-  { id: 'inv-2', name: '六味地黄丸（浓缩粉）', category: 'powder', unit: '包', quantity: 8, pricePerUnit: 40, supplier: '同仁堂', gramsPerPacket: 6, minStockLevel: 10, isActive: true },
-  { id: 'inv-3', name: '补中益气汤', category: 'powder', unit: '包', quantity: 30, pricePerUnit: 38, supplier: '康仁堂', gramsPerPacket: 5, minStockLevel: 10, isActive: true },
+  { id: 'inv-1', name: '逍遥散', category: 'powder', unit: 'bag', quantity: 50, pricePerUnit: 35, supplier: '同仁堂', gramsPerPacket: 6, minStockLevel: 10, isActive: true },
+  { id: 'inv-2', name: '六味地黄丸（浓缩粉）', category: 'powder', unit: 'bag', quantity: 8, pricePerUnit: 40, supplier: '同仁堂', gramsPerPacket: 6, minStockLevel: 10, isActive: true },
+  { id: 'inv-3', name: '补中益气汤', category: 'powder', unit: 'bag', quantity: 30, pricePerUnit: 38, supplier: '康仁堂', gramsPerPacket: 5, minStockLevel: 10, isActive: true },
   // 草药
   { id: 'inv-4', name: '黄芪', category: 'raw_herbs', unit: 'g', quantity: 2000, pricePerUnit: 0.08, supplier: '本草药材', gramsPerPacket: null, minStockLevel: 500, isActive: true },
   { id: 'inv-5', name: '党参', category: 'raw_herbs', unit: 'g', quantity: 1500, pricePerUnit: 0.12, supplier: '本草药材', gramsPerPacket: null, minStockLevel: 300, isActive: true },

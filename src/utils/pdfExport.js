@@ -1,3 +1,5 @@
+import { getCountryLabel, getProvinceLabel } from './countryRegionOptions'
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -38,11 +40,14 @@ function firstValue(...values) {
 }
 
 function buildPatientAddress(patient = {}) {
+  const country = firstValue(patient.addressCountry, patient.country)
+  const province = firstValue(patient.addressState, patient.province)
   const parts = [
     firstValue(patient.addressStreet, patient.street, patient.address),
     firstValue(patient.addressCity, patient.city),
-    firstValue(patient.addressState, patient.province),
+    province === '-' ? '-' : getProvinceLabel(country, province),
     firstValue(patient.addressPostal, patient.postalCode),
+    country === '-' ? '-' : getCountryLabel(country),
   ].filter((item) => item && item !== '-')
   return parts.length ? parts.join(', ') : firstValue(patient.fullAddress, patient.mailingAddress)
 }
@@ -154,11 +159,17 @@ function getPractitionerSignatureUrl(practitioner = {}) {
   return practitioner?.signatureUrl || ''
 }
 
+function getImageAssetUrl(asset) {
+  if (!asset) return ''
+  if (typeof asset === 'object') return asset.url || asset.path || ''
+  return String(asset)
+}
+
 function buildPractitionerSummary(practitioner = {}) {
   const parts = [
-    ['Practitioner', getPractitionerName(practitioner)],
-    ['Organization', getPractitionerOrganization(practitioner)],
-    ['Registration No.', getPractitionerNumber(practitioner)],
+    ['Practitioner Name / 医师姓名', getPractitionerName(practitioner)],
+    ['Organization / 组织', getPractitionerOrganization(practitioner)],
+    ['Organization No. / 组织号码', getPractitionerNumber(practitioner)],
   ]
     .filter(([, value]) => value && value !== '-')
     .map(([label, value]) => `${label}: ${value}`)
@@ -341,10 +352,10 @@ export function printConsultationReport(consultation, patient, practitioner, cli
         <div class="info-item"><span class="info-label">Patient Email</span><span>${escapeHtml(firstValue(patient?.email))}</span></div>
         <div class="info-item"><span class="info-label">Patient Address</span><span>${escapeHtml(buildPatientAddress(patient))}</span></div>
         <div class="info-item"><span class="info-label">Clinic</span><span>${escapeHtml(clinic)}</span></div>
-        <div class="info-item"><span class="info-label">Practitioner</span><span>${escapeHtml(practitionerName)}</span></div>
+        <div class="info-item"><span class="info-label">Practitioner Name / 医师姓名</span><span>${escapeHtml(practitionerName)}</span></div>
         <div class="info-item"><span class="info-label">Title</span><span>${escapeHtml(firstValue(practitioner?.title))}</span></div>
-        <div class="info-item"><span class="info-label">Organization</span><span>${escapeHtml(organization)}</span></div>
-        <div class="info-item"><span class="info-label">Organization No.</span><span>${escapeHtml(organizationNumber)}</span></div>
+        <div class="info-item"><span class="info-label">Organization / 组织</span><span>${escapeHtml(organization)}</span></div>
+        <div class="info-item"><span class="info-label">Organization No. / 组织号码</span><span>${escapeHtml(organizationNumber)}</span></div>
         <div class="info-item"><span class="info-label">Practitioner Phone</span><span>${escapeHtml(firstValue(practitioner?.practitionerPhone, practitioner?.phone, practitioner?.phonenumber))}</span></div>
       </div>
     </div>
@@ -406,8 +417,8 @@ export function printConsultationReport(consultation, patient, practitioner, cli
         <tr><td>Subtotal</td><td>${formatMoney(getSubtotal(consultation), currency)}</td></tr>
         <tr><td>${escapeHtml(hstLabel)}</td><td>${formatMoney(getTaxAmount(consultation), currency)}</td></tr>
         <tr><td>Total</td><td>${formatMoney(totalAmount, currency)}</td></tr>
-        <tr><td>Paid Amount</td><td>${formatMoney(paidAmount, currency)}</td></tr>
-        <tr><td>Balance Amount</td><td>${formatMoney(balanceAmount, currency)}</td></tr>
+        <tr><td>Paid / 已付</td><td>${formatMoney(paidAmount, currency)}</td></tr>
+        <tr><td>Balance / 待付余额</td><td>${formatMoney(balanceAmount, currency)}</td></tr>
       </table>
     </div>
 
@@ -427,7 +438,12 @@ export function printInvoice(consultation, patient, practitioner, clinicName, ta
   const paidAmount = getPaidAmount(consultation)
   const totalAmount = getTotalAmount(consultation)
   const balanceAmount = Math.max(0, totalAmount - paidAmount)
-  const signatureUrl = getPractitionerSignatureUrl(practitioner)
+  const practitionerSignatureUrl = getPractitionerSignatureUrl(practitioner)
+  const clinicSealUrl = getImageAssetUrl(clinicInfo?.clinicSeal || clinicInfo?.seal)
+  const includeThirdParty = consultation?.add3rdParty === true || consultation?.add3rdParty === 'true'
+  const thirdPartyUrl = includeThirdParty
+    ? getImageAssetUrl(clinicInfo?.thirdPartySignature || clinicInfo?.thirdPartyInvoicePng)
+    : ''
   const organization = getPractitionerOrganization(practitioner)
   const organizationNumber = getPractitionerNumber(practitioner)
   const practitionerName = getPractitionerName(practitioner)
@@ -458,10 +474,10 @@ export function printInvoice(consultation, patient, practitioner, clinicName, ta
         <div class="info-item"><span class="info-label">Patient Phone</span><span>${escapeHtml(firstValue(patient?.phone, patient?.phoneNumber, patient?.mobile))}</span></div>
         <div class="info-item"><span class="info-label">Patient Email</span><span>${escapeHtml(firstValue(patient?.email))}</span></div>
         <div class="info-item"><span class="info-label">Patient Address</span><span>${escapeHtml(buildPatientAddress(patient))}</span></div>
-        <div class="info-item"><span class="info-label">Practitioner</span><span>${escapeHtml(practitionerName)}</span></div>
+        <div class="info-item"><span class="info-label">Practitioner Name / 医师姓名</span><span>${escapeHtml(practitionerName)}</span></div>
         <div class="info-item"><span class="info-label">Title</span><span>${escapeHtml(firstValue(practitioner?.title))}</span></div>
-        <div class="info-item"><span class="info-label">Organization</span><span>${escapeHtml(organization)}</span></div>
-        <div class="info-item"><span class="info-label">Organization No.</span><span>${escapeHtml(organizationNumber)}</span></div>
+        <div class="info-item"><span class="info-label">Organization / 组织</span><span>${escapeHtml(organization)}</span></div>
+        <div class="info-item"><span class="info-label">Organization No. / 组织号码</span><span>${escapeHtml(organizationNumber)}</span></div>
         <div class="info-item"><span class="info-label">Practitioner Phone</span><span>${escapeHtml(firstValue(practitioner?.practitionerPhone, practitioner?.phone, practitioner?.phonenumber))}</span></div>
       </div>
     </div>
@@ -481,17 +497,26 @@ export function printInvoice(consultation, patient, practitioner, clinicName, ta
         <tr><td>Subtotal</td><td>${formatMoney(getSubtotal(consultation), currency)}</td></tr>
         <tr><td>${escapeHtml(hstLabel)}</td><td>${formatMoney(getTaxAmount(consultation), currency)}</td></tr>
         <tr><td>Total</td><td>${formatMoney(totalAmount, currency)}</td></tr>
-        <tr><td>Paid Amount</td><td>${formatMoney(paidAmount, currency)}</td></tr>
-        <tr><td>Balance Amount</td><td>${formatMoney(balanceAmount, currency)}</td></tr>
+        <tr><td>Paid / 已付</td><td>${formatMoney(paidAmount, currency)}</td></tr>
+        <tr><td>Balance / 待付余额</td><td>${formatMoney(balanceAmount, currency)}</td></tr>
       </table>
     </div>
 
-    ${signatureUrl ? `<div class="section"><div class="section-title">Practitioner Signature / 医师签名</div><img src="${escapeHtml(signatureUrl)}" alt="Practitioner signature" style="max-width:220px;max-height:82px;object-fit:contain" /></div>` : ''}
+    ${(practitionerSignatureUrl || clinicSealUrl || thirdPartyUrl) ? `<div class="section">
+      <div class="section-title">Signatures</div>
+      <div style="display:flex;gap:24px;align-items:flex-end;flex-wrap:wrap">
+        ${practitionerSignatureUrl ? `<div><img src="${escapeHtml(practitionerSignatureUrl)}" alt="Practitioner signature" style="max-width:220px;max-height:82px;object-fit:contain" /><div class="muted">Practitioner Signature</div></div>` : ''}
+        ${clinicSealUrl ? `<div><img src="${escapeHtml(clinicSealUrl)}" alt="Clinic seal" style="max-width:180px;max-height:82px;object-fit:contain" /><div class="muted">Clinic Seal</div></div>` : ''}
+        ${thirdPartyUrl ? `<div><img src="${escapeHtml(thirdPartyUrl)}" alt="Third party" style="max-width:220px;max-height:90px;object-fit:contain" /><div class="muted">Third Party</div></div>` : ''}
+      </div>
+    </div>` : ''}
 
     <div class="section">
       <div class="section-title">Comments</div>
       <p>${escapeHtml(consultation?.comments || '-')}</p>
     </div>
+
+    <div class="note">Generated by OTCM acupuncture Clinic -</div>
   `
 
   openPrintWindow('Invoice', bodyHtml)

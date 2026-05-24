@@ -26,6 +26,7 @@ import {
 } from '../../utils/workingHours'
 import { bindHerbSelection } from '../../utils/herbBinding'
 import { parseCsvText, rowsToObjects, toNumber } from '../../utils/csvImport'
+import { DEFAULT_COUNTRY, normalizeCountryCode, normalizeProvinceCode } from '../../utils/countryRegionOptions'
 import { EMAIL_TEMPLATE_KEYS, EMAIL_TEMPLATE_REGISTRY, EMAIL_TEMPLATE_VARIABLES, normalizeEmailTemplates } from '../../utils/emailTemplates'
 import { naturalCompareText, naturalSortedUnique } from '../../utils/naturalSort'
 import { compressImageFile } from '../../utils/imageCompress'
@@ -52,6 +53,7 @@ const activeTab = ref('users')
 
 onMounted(() => {
   consultationsStore.refreshDeletedPrescriptions?.().catch(() => {})
+  resetStripeSettingsForm()
 })
 
 const herbOptions = computed(() => herbDictStore.activeHerbs)
@@ -443,10 +445,16 @@ async function handleInternshipToday(user = profileTarget.value) {
   }
 }
 
+function isPngUploadFile(file) {
+  const type = String(file?.type || '').toLowerCase()
+  const name = String(file?.name || '').toLowerCase()
+  return type === 'image/png' || type === 'image/x-png' || name.endsWith('.png')
+}
+
 async function handlePractitionerSignatureUpload(file) {
   const rawFile = file.raw || file
   if (!profileTarget.value?.id) return false
-  if (rawFile.type && rawFile.type !== 'image/png') {
+  if (!isPngUploadFile(rawFile)) {
     ElMessage.warning('请上传 PNG 签名图片')
     return false
   }
@@ -662,6 +670,32 @@ const settingsForm = reactive({
   currency: settingsStore.currency || 'CAD',
 })
 
+const savingStripeSettings = ref(false)
+const stripeSettingsForm = reactive({
+  publishableKey: settingsStore.stripeSettings.publishableKey || '',
+  terminalReaderId: settingsStore.stripeSettings.terminalReaderId || '',
+  secretKey: '',
+  webhookSecret: '',
+})
+
+function resetStripeSettingsForm() {
+  stripeSettingsForm.publishableKey = settingsStore.stripeSettings.publishableKey || ''
+  stripeSettingsForm.terminalReaderId = settingsStore.stripeSettings.terminalReaderId || ''
+  stripeSettingsForm.secretKey = ''
+  stripeSettingsForm.webhookSecret = ''
+}
+
+const stripeSecretStatus = computed(() =>
+  settingsStore.stripeSettings.secretKeyConfigured
+    ? `已设置 ${settingsStore.stripeSettings.secretKeyMasked || ''}`.trim()
+    : '未设置',
+)
+const stripeWebhookStatus = computed(() =>
+  settingsStore.stripeSettings.webhookSecretConfigured
+    ? `已设置 ${settingsStore.stripeSettings.webhookSecretMasked || ''}`.trim()
+    : '未设置',
+)
+
 const emailTemplateDrafts = reactive(normalizeEmailTemplates(settingsStore.emailTemplates))
 const emailTemplateRows = computed(() =>
   EMAIL_TEMPLATE_KEYS.map((key) => ({
@@ -782,10 +816,20 @@ const CSV_IMPORT_HINTS = {
   formulas: 'Name,Formula Source,Formula Category,Description',
   formulaItems: 'Formula,Herb,Quantity,Unit',
   patentMedicines: 'name',
-  inventory: 'name,category,quantity,unit,pricePerUnit,supplier,minStockLevel,branchId',
+  inventory: 'name,category,quantity,unit,quantityPerMainUnit,pricePerUnit,supplier,minStockLevel,branchId',
   differentiation: 'name',
   acupoints: 'name,pinyin,englishName,meridian,location,indication,method',
-  patients: 'firstName,lastName,email,phone,dateOfBirth,gender,address,notes',
+  patients: 'firstName,lastName,email,phone,dateOfBirth,gender,streetAddress,city,postcode,country,province,notes',
+}
+
+function isBagUnit(unit) {
+  const text = String(unit || '').trim().toLowerCase().replace(/\s+/g, '')
+  return text === '包' || text === 'bag' || text === 'bag(包)'
+}
+
+function normalizeInventoryUnit(unit) {
+  if (isBagUnit(unit)) return 'bag'
+  return String(unit || '').trim() || 'g'
 }
 
 const adminListDrafts = reactive({
@@ -897,6 +941,31 @@ async function saveSettings() {
   ElMessage.success(t('admin.settingsSaved'))
 }
 
+async function saveStripeSettings() {
+  const publishableKey = String(stripeSettingsForm.publishableKey || '').trim()
+  const terminalReaderId = String(stripeSettingsForm.terminalReaderId || '').trim()
+  const secretKey = String(stripeSettingsForm.secretKey || '').trim()
+  const webhookSecret = String(stripeSettingsForm.webhookSecret || '').trim()
+  if (!publishableKey) return ElMessage.warning('请输入 Stripe publishable key')
+  if (!terminalReaderId) return ElMessage.warning('请输入 Stripe Reader ID')
+  if (!settingsStore.stripeSettings.secretKeyConfigured && !secretKey) {
+    return ElMessage.warning('请输入 Stripe secret key')
+  }
+  savingStripeSettings.value = true
+  try {
+    const payload = { publishableKey, terminalReaderId }
+    if (secretKey) payload.secretKey = secretKey
+    if (webhookSecret) payload.webhookSecret = webhookSecret
+    await settingsStore.updateStripeSettings(payload)
+    resetStripeSettingsForm()
+    ElMessage.success('Stripe POS 设置已保存')
+  } catch (e) {
+    ElMessage.error(e.message || 'Stripe POS 设置保存失败')
+  } finally {
+    savingStripeSettings.value = false
+  }
+}
+
 async function saveEmailTemplates() {
   const cleaned = normalizeEmailTemplates(emailTemplateDrafts)
   Object.keys(emailTemplateDrafts).forEach((key) => { delete emailTemplateDrafts[key] })
@@ -909,7 +978,7 @@ async function saveEmailTemplates() {
 
 async function handleSignatureUpload(file) {
   const rawFile = file.raw || file
-  if (rawFile.type && rawFile.type !== 'image/png') {
+  if (!isPngUploadFile(rawFile)) {
     ElMessage.warning('请上传 PNG 签名图片')
     return false
   }
@@ -929,7 +998,7 @@ async function handleSignatureUpload(file) {
 
 async function handleClinicSealUpload(file) {
   const rawFile = file.raw || file
-  if (rawFile.type && rawFile.type !== 'image/png') {
+  if (!isPngUploadFile(rawFile)) {
     ElMessage.warning('请上传 PNG 印章图片')
     return false
   }
@@ -1092,20 +1161,28 @@ async function importCsvRows(target, rows) {
       category: ['category', '分类'],
       quantity: ['quantity', '数量', '库存'],
       unit: ['unit', '单位'],
-      pricePerUnit: ['priceperunit', '单价', '成本'],
+      quantityPerMainUnit: ['quantitypermainunit', 'quantity per main unit', 'gramsperpacket', 'grams per packet', 'gramsperbag', 'grams per bag', '每包克数', '每主单位数量'],
+      pricePerUnit: ['priceperunit', 'price per unit', '单价', '成本'],
       supplier: ['supplier', '供应商'],
-      supplierId: ['supplierid', '供应商id'],
-      minStockLevel: ['minstocklevel', '最低库存'],
-      branchId: ['branchid', '分店id'],
-    }, ['name', 'category', 'quantity', 'unit', 'pricePerUnit', 'supplier', 'minStockLevel', 'branchId'])
+      supplierId: ['supplierid', 'supplier id', '供应商id'],
+      minStockLevel: ['minstocklevel', 'min stock level', '最低库存'],
+      branchId: ['branchid', 'branch id', '分店id'],
+    }, ['name', 'category', 'quantity', 'unit', 'quantityPerMainUnit', 'pricePerUnit', 'supplier', 'minStockLevel', 'branchId'])
       .filter((item) => item.name)
-      .map((item) => ({
-        ...item,
-        category: item.category || 'raw_herbs',
-        quantity: toNumber(item.quantity),
-        pricePerUnit: toNumber(item.pricePerUnit),
-        minStockLevel: toNumber(item.minStockLevel, 10),
-      }))
+      .map((item) => {
+        const quantityPerMainUnit = toNumber(item.quantityPerMainUnit || item.gramsPerPacket, null)
+        return {
+          ...item,
+          category: item.category || 'raw_herbs',
+          quantity: toNumber(item.quantity),
+          unit: normalizeInventoryUnit(item.unit),
+          pricePerUnit: toNumber(item.pricePerUnit),
+          minStockLevel: toNumber(item.minStockLevel, 10),
+          quantityPerMainUnit,
+          gramsPerPacket: quantityPerMainUnit,
+          branchId: String(item.branchId || branchesStore.currentBranchId || '').trim() || null,
+        }
+      })
     const result = await inventoryStore.batchImport(items)
     return Number(result?.created || 0) + Number(result?.updated || 0)
   }
@@ -1146,17 +1223,29 @@ async function importCsvRows(target, rows) {
       dateOfBirth: ['dateofbirth', 'dob', '生日'],
       gender: ['gender', '性别'],
       address: ['address', '地址'],
+      addressStreet: ['streetaddress', 'street address', 'addressstreet', 'address street', '街道地址'],
+      addressCity: ['city', 'addresscity', 'address city', '城市'],
+      addressPostal: ['postcode', 'postalcode', 'postal code', 'addresspostal', 'address postal', '邮编'],
+      addressCountry: ['country', 'addresscountry', 'address country', '国家'],
+      addressState: ['province', 'state', 'region', 'addressstate', 'address state', '省份'],
       notes: ['notes', '备注'],
-    }, ['firstName', 'lastName', 'email', 'phone', 'dateOfBirth', 'gender', 'address', 'notes'])
+    }, ['firstName', 'lastName', 'email', 'phone', 'dateOfBirth', 'gender', 'addressStreet', 'addressCity', 'addressPostal', 'addressCountry', 'addressState', 'notes'])
     let created = 0
     for (const item of items) {
       const name = item.name || `${item.lastName || ''} ${item.firstName || ''}`.trim()
       if (!name) continue
+      const addressCountry = normalizeCountryCode(item.addressCountry, DEFAULT_COUNTRY)
+      const addressState = normalizeProvinceCode(addressCountry, item.addressState)
       await patientsStore.addPatient({
         ...item,
         name,
         emails: item.email ? [item.email] : [],
         mobilePhone: item.mobilePhone || item.phone || '',
+        addressStreet: item.addressStreet || item.address || '',
+        addressCity: item.addressCity || '',
+        addressPostal: item.addressPostal || '',
+        addressCountry,
+        addressState,
       })
       created += 1
     }
@@ -2363,6 +2452,64 @@ async function deleteTemplate(tmpl) {
             </el-form-item>
             <el-form-item>
               <el-button type="primary" @click="saveSettings">{{ t('admin.saveSettings') }}</el-button>
+            </el-form-item>
+          </el-form>
+          <el-divider />
+          <h4>Stripe POS 设置</h4>
+          <el-form :model="stripeSettingsForm" label-width="160px">
+            <el-form-item label="Published Key">
+              <el-input
+                v-model="stripeSettingsForm.publishableKey"
+                placeholder="pk_live_..."
+                style="max-width: 520px"
+              />
+            </el-form-item>
+            <el-form-item label="Reader ID">
+              <el-input
+                v-model="stripeSettingsForm.terminalReaderId"
+                placeholder="tmr_..."
+                style="max-width: 320px"
+              />
+            </el-form-item>
+            <el-form-item label="Secret Key">
+              <el-input
+                v-model="stripeSettingsForm.secretKey"
+                type="password"
+                show-password
+                :placeholder="settingsStore.stripeSettings.secretKeyMasked || 'sk_live_...'"
+                style="max-width: 520px"
+                autocomplete="new-password"
+              />
+              <el-tag
+                size="small"
+                :type="settingsStore.stripeSettings.secretKeyConfigured ? 'success' : 'danger'"
+                style="margin-left: 8px"
+              >
+                {{ stripeSecretStatus }}
+              </el-tag>
+              <div style="font-size:12px;color:#888;margin-top:4px">留空会保留当前 secret key；保存后不会在后台显示完整密钥。</div>
+            </el-form-item>
+            <el-form-item label="Webhook Secret">
+              <el-input
+                v-model="stripeSettingsForm.webhookSecret"
+                type="password"
+                show-password
+                :placeholder="settingsStore.stripeSettings.webhookSecretMasked || 'whsec_...（可选）'"
+                style="max-width: 520px"
+                autocomplete="new-password"
+              />
+              <el-tag
+                size="small"
+                :type="settingsStore.stripeSettings.webhookSecretConfigured ? 'success' : 'info'"
+                style="margin-left: 8px"
+              >
+                {{ stripeWebhookStatus }}
+              </el-tag>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="savingStripeSettings" @click="saveStripeSettings">
+                {{ t('common.save') }}
+              </el-button>
             </el-form-item>
           </el-form>
           <el-divider />

@@ -15,6 +15,13 @@ export const useAppointmentsStore = defineStore('appointments', () => {
     writeStoredJson('tcm_appointments', appointments.value)
   }
 
+  async function refreshFromApi() {
+    const list = await appointmentsApi.list()
+    appointments.value = Array.isArray(list) ? list : []
+    saveState()
+    return appointments.value
+  }
+
   function upsertAppointment(appointment) {
     if (!appointment?.id) return appointment
     const idx = appointments.value.findIndex((item) => item.id === appointment.id)
@@ -164,6 +171,7 @@ export const useAppointmentsStore = defineStore('appointments', () => {
     isSlotAvailable,
     getAvailability,
     getBranchAppointments,
+    refreshFromApi,
     createAppointment,
     createTimeBlock,
     updateAppointment,

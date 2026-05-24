@@ -60,15 +60,24 @@ function formatAmount(row) {
 }
 
 const visibleConsultations = computed(() =>
-  filterAccessibleConsultations(
-    authStore.roles,
-    consultationsStore.consultations,
-    { currentUser: authStore.currentUser },
-  )
+  consultationsStore.consultations
     .filter((consultation) => !consultation.deletedAt)
     .filter((consultation) => {
       const patient = patientsStore.getPatient(consultation.patientId)
       if (!patient) return false
+      const appointments = appointmentsStore.getPatientAppointments(consultation.patientId)
+      if (!filterAccessibleConsultations(
+        authStore.roles,
+        [consultation],
+        {
+          currentUser: authStore.currentUser,
+          userId: authStore.userId,
+          patient,
+          appointments,
+        },
+      ).length) {
+        return false
+      }
       return canAccessPatientRecords(
         authStore.roles,
         authStore.userId,
@@ -76,7 +85,7 @@ const visibleConsultations = computed(() =>
         patientConsultationsMap.value.get(consultation.patientId) || [],
         {
           currentUser: authStore.currentUser,
-          appointments: appointmentsStore.getPatientAppointments(consultation.patientId),
+          appointments,
         },
       )
     })

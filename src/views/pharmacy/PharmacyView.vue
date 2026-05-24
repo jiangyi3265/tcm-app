@@ -7,7 +7,7 @@ import { useAuthStore } from '../../stores/auth'
 import { useInventoryStore } from '../../stores/inventory'
 import { useBranchesStore } from '../../stores/branches'
 import { useSettingsStore } from '../../stores/settings'
-import { stripeApi } from '../../utils/api'
+import { runStripeTerminalPayment } from '../../utils/stripeTerminalPayment'
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
 import {
   getActivePrescriptions,
@@ -17,7 +17,7 @@ import {
   getPaymentStatus,
   getPrescriptionStatus,
 } from '../../utils/prescriptionWorkflow'
-import { getPaymentMethodLabel, getPaymentMethodOptions, normalizePaymentMethodValue, requiresStripeCheckout } from '../../utils/paymentMethods'
+import { getPaymentMethodLabel, getPaymentMethodOptions, normalizePaymentMethodValue, requiresStripeTerminal } from '../../utils/paymentMethods'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t, locale } = useI18n()
@@ -159,10 +159,15 @@ function getRequiredQuantity(item, row) {
   return Number(item?.dosage || 0) * Number(row?.quantity || 1)
 }
 
+function displayUnit(unit) {
+  const text = String(unit || '').trim().toLowerCase().replace(/\s+/g, '')
+  return text === '包' || text === 'bag' || text === 'bag(包)' ? 'bag(包)' : unit
+}
+
 function getRequiredUnit(item, prescriptionType) {
-  if (item?.convertedUnit) return item.convertedUnit
-  if (item?.unit) return item.unit
-  return { raw_herbs: 'g', powder: '包', pills: '盒' }[prescriptionType] || 'g'
+  if (item?.convertedUnit) return displayUnit(item.convertedUnit)
+  if (item?.unit) return displayUnit(item.unit)
+  return displayUnit({ raw_herbs: 'g', powder: 'bag', pills: '盒' }[prescriptionType] || 'g')
 }
 
 function formatMedicineAmount(value) {
@@ -186,9 +191,9 @@ function getPerDoseQuantity(item, row) {
 
 function getPerDoseUnit(item, row) {
   if (row?.prescriptionType === 'powder' || row?.prescriptionType === 'pills') {
-    return item?.convertedUnit || getRequiredUnit(item, row?.prescriptionType)
+    return displayUnit(item?.convertedUnit || getRequiredUnit(item, row?.prescriptionType))
   }
-  return item?.unit || getRequiredUnit(item, row?.prescriptionType)
+  return displayUnit(item?.unit || getRequiredUnit(item, row?.prescriptionType))
 }
 
 function formatDispenseDisplay(item, row) {
@@ -242,13 +247,13 @@ async function processPayment(row) {
 
   try {
     const method = normalizePaymentMethodValue(selectedPaymentMethod.value)
-    if (requiresStripeCheckout(method)) {
-      const session = await stripeApi.createCheckoutSession(row.consultationId)
-      if (session?.url) {
-        window.location.href = session.url
-        return
-      }
-      throw new Error('Stripe checkout session was not returned.')
+    if (requiresStripeTerminal(method)) {
+      ElMessage.info(t('consultation.posSimulationWaiting'))
+      await runStripeTerminalPayment(row.consultationId)
+      await consultationsStore.refreshFromApi()
+      refreshSelectedRow(row.consultationId, row.prescriptionId)
+      ElMessage.success(t('cashier.paymentSuccess'))
+      return
     }
     const updated = await consultationsStore.markAsPaid(row.consultationId, {
       paymentMethod: method,

@@ -29,6 +29,12 @@ const router = createRouter({
       meta: { public: true },
     },
     {
+      path: '/booking',
+      name: 'public-booking-wordpress',
+      component: () => import('../views/public/PublicBookingView.vue'),
+      meta: { public: true },
+    },
+    {
       path: '/manage/:token',
       name: 'public-appointment-manage',
       component: () => import('../views/public/PublicAppointmentManageView.vue'),

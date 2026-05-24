@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
+    "country-region-data": "^4.1.0",
     "dayjs": "^1.11.19",
     "element-plus": "^2.13.2",
     "pinia": "^3.0.4",

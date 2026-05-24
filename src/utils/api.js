@@ -54,6 +54,38 @@ async function request(path, { method = 'GET', body, auth = true } = {}) {
   return payload
 }
 
+async function parseResponsePayload(response) {
+  const text = await response.text().catch(() => '')
+  if (!text) return {}
+  try {
+    return JSON.parse(text)
+  } catch {
+    return { message: text.trim() }
+  }
+}
+
+function responseErrorMessage(payload, fallback, status) {
+  const textMessage = String(payload?.msg || payload?.message || '').trim()
+  if (textMessage && !textMessage.startsWith('<')) return textMessage
+  return status ? `${fallback} (${status})` : fallback
+}
+
+async function requestMultipart(path, formData, fallback = 'Upload failed') {
+  const token = getToken()
+  if (!token) throw new Error('Please log in again.')
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  })
+  const payload = await parseResponsePayload(res)
+  if (!res.ok) {
+    if (res.status === 401) clearSession()
+    throw new Error(responseErrorMessage(payload, fallback, res.status))
+  }
+  return payload
+}
+
 export const authApi = {
   login(email, password) {
     return request('/api/auth/login', {
@@ -142,16 +174,7 @@ export const usersApi = {
   async uploadSignaturePng(id, file) {
     const formData = new FormData()
     formData.append('file', file)
-    const token = getToken()
-    if (!token) throw new Error('Please log in again.')
-    const res = await fetch(`/api/users/${id}/signature/upload`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    })
-    const payload = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(payload.msg || payload.message || 'Upload failed')
-    return payload
+    return requestMultipart(`/api/users/${id}/signature/upload`, formData, '医师签名上传失败')
   },
   remove(id) { return request(`/api/users/${id}`, { method: 'DELETE' }) },
 }
@@ -254,6 +277,18 @@ export const stripeApi = {
       body: { consultationId },
     })
   },
+  createTerminalPayment(consultationId) {
+    return request('/api/stripe/terminal-payments', {
+      method: 'POST',
+      body: { consultationId },
+    })
+  },
+  getTerminalPaymentStatus(consultationId, paymentIntentId) {
+    return request('/api/stripe/terminal-payments/status', {
+      method: 'POST',
+      body: { consultationId, paymentIntentId },
+    })
+  },
 }
 
 export const inventoryApi = {
@@ -304,33 +339,17 @@ export const branchesApi = {
 export const settingsApi = {
   getBundle() { return request('/api/settings') },
   updateBase(data) { return request('/api/settings/base', { method: 'PUT', body: data }) },
+  getStripeSettings() { return request('/api/settings/stripe') },
+  updateStripeSettings(data) { return request('/api/settings/stripe', { method: 'PUT', body: data }) },
   async uploadSignaturePng(file) {
     const formData = new FormData()
     formData.append('file', file)
-    const token = getToken()
-    if (!token) throw new Error('Please log in again.')
-    const res = await fetch('/api/settings/signature/upload', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    })
-    const payload = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(payload.msg || payload.message || 'Upload failed')
-    return payload
+    return requestMultipart('/api/settings/signature/upload', formData, '签名上传失败')
   },
   async uploadSealPng(file) {
     const formData = new FormData()
     formData.append('file', file)
-    const token = getToken()
-    if (!token) throw new Error('Please log in again.')
-    const res = await fetch('/api/settings/seal/upload', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    })
-    const payload = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(payload.msg || payload.message || 'Upload failed')
-    return payload
+    return requestMultipart('/api/settings/seal/upload', formData, '印章上传失败')
   },
   addRoom(data) { return request('/api/settings/rooms', { method: 'POST', body: data }) },
   updateRoom(id, data) { return request(`/api/settings/rooms/${id}`, { method: 'PUT', body: data }) },
@@ -447,16 +466,7 @@ export const filesApi = {
     if (patientId) formData.append('patientId', patientId)
     if (consultationId) formData.append('consultationId', consultationId)
     if (fileType) formData.append('fileType', fileType)
-    const token = getToken()
-    return fetch('/api/files/upload', {
-      method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: formData,
-    }).then(async (res) => {
-      const payload = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(payload.msg || payload.message || 'Upload failed')
-      return payload
-    })
+    return requestMultipart('/api/files/upload', formData, 'Upload failed')
   },
   listByPatient(patientId) {
     return request(`/api/files/patient/${patientId}`)

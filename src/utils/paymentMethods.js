@@ -34,6 +34,10 @@ export function requiresPosSimulation(value = '') {
 }
 
 export function requiresStripeCheckout(value = '') {
+  return false
+}
+
+export function requiresStripeTerminal(value = '') {
   return normalizePaymentMethodValue(value) === 'bankcard'
 }
 

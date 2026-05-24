@@ -15,10 +15,12 @@ import { useHerbDictStore } from '../../stores/herbDict'
 import { useTemplatesStore } from '../../stores/templates'
 import { hasPermission, getAuthorizedServiceKeys } from '../../utils/permissions'
 import { formatDate, formatDateTime, todayDate } from '../../utils/dateUtils'
+import { getCountryLabel, getProvinceLabel } from '../../utils/countryRegionOptions'
 import { TCM_OPTIONS, CHIEF_COMPLAINTS, emptyDiff, normalizeDiff } from '../../utils/sampleData'
 import { printPrescription } from '../../utils/pdfExport'
 import { useEmailSimulator } from '../../utils/emailSimulator'
-import { filesApi, consultationsApi, stripeApi } from '../../utils/api'
+import { filesApi, consultationsApi } from '../../utils/api'
+import { runStripeTerminalPayment } from '../../utils/stripeTerminalPayment'
 import { calculatePrescription, recalcWithSupplier } from '../../utils/prescriptionCalc'
 import { rehydrateCopiedPrescriptions, sanitizeCopiedConsultationData } from '../../utils/consultationCopy'
 import { persistCopiedConsultationData } from '../../utils/consultationCopyFlow'
@@ -48,7 +50,7 @@ import {
   getPaymentMethodLabel,
   getPaymentMethodOptions,
   normalizePaymentMethodValue,
-  requiresStripeCheckout,
+  requiresStripeTerminal,
 } from '../../utils/paymentMethods'
 import { resolveInvoicePaymentAfterSave } from '../../utils/invoicePaymentFlow'
 import { compressImageFile } from '../../utils/imageCompress'
@@ -528,22 +530,6 @@ async function refreshTongueImagePreview() {
   }
 }
 
-async function refreshThirdPartyInvoicePng() {
-  thirdPartyInvoicePngUrl.value = ''
-  const signature = settingsStore.thirdPartySignature || {}
-  const resource = signature.path || signature.url || settingsStore.thirdPartyInvoicePng
-  if (!resource) return
-  if (/^(blob:|data:|https?:)/.test(resource)) {
-    thirdPartyInvoicePngUrl.value = resource
-    return
-  }
-  try {
-    thirdPartyInvoicePngUrl.value = await filesApi.resolveUrl(resource)
-  } catch (error) {
-    console.warn('Failed to refresh third party invoice png:', error)
-  }
-}
-
 function normalizeDocumentRow(doc = {}) {
   return {
     id: doc.id || doc.fileId || `${doc.resource || doc.filePath || doc.url || doc.name || doc.fileName}`,
@@ -688,7 +674,6 @@ onMounted(() => {
   }
 
   refreshTongueImagePreview()
-  refreshThirdPartyInvoicePng()
   if (currentConsultationId.value) {
     loadConsultationFiles().catch(() => {})
   }
@@ -835,8 +820,9 @@ function formatStockQuantity(row) {
 }
 
 function getStockUnit(row) {
-  if (rxForm.value.prescriptionType === 'powder') return '包'
-  return row?.convertedUnit || row?.unit || ''
+  const unit = rxForm.value.prescriptionType === 'powder' ? 'bag' : (row?.convertedUnit || row?.unit || '')
+  const text = String(unit || '').trim().toLowerCase().replace(/\s+/g, '')
+  return text === '包' || text === 'bag' || text === 'bag(包)' ? 'bag(包)' : unit
 }
 
 const herbSelectionGuard = new WeakSet()
@@ -1725,7 +1711,13 @@ const invoicePractitioner = computed(() =>
 const patientFullAddress = computed(() => {
   const p = patient.value
   if (!p) return ''
-  const parts = [p.addressStreet || p.address, p.addressCity, p.addressState, p.addressPostal].filter(Boolean)
+  const parts = [
+    p.addressStreet || p.address,
+    p.addressCity,
+    p.addressState ? getProvinceLabel(p.addressCountry, p.addressState) : '',
+    p.addressPostal,
+    p.addressCountry ? getCountryLabel(p.addressCountry) : '',
+  ].filter(Boolean)
   return parts.join(', ')
 })
 const billableRxForInvoice = computed(() => getBillablePrescriptions(form.value))
@@ -1877,7 +1869,7 @@ async function finalizeInvoicePayment(method) {
 
 async function handleStartInvoicePayment() {
   const method = normalizePaymentMethodValue(invoicePaymentMethod.value) || 'bankcard'
-  if (requiresStripeCheckout(method)) {
+  if (requiresStripeTerminal(method)) {
     if (invoicePaymentSubmitting.value) return
     invoicePaymentSubmitting.value = true
     try {
@@ -1889,13 +1881,22 @@ async function handleStartInvoicePayment() {
         return
       }
       const paymentId = savedConsultation?.id || currentConsultationId.value
-      const session = await stripeApi.createCheckoutSession(paymentId)
-      if (session?.url) {
-        window.location.href = session.url
-      } else {
-        throw new Error('Stripe checkout session was not returned.')
+      pendingPosPaymentMethod.value = method
+      showInvoicePaymentDialog.value = false
+      showPosSimulationDialog.value = true
+      await runStripeTerminalPayment(paymentId)
+      await consultStore.refreshFromApi()
+      const updated = consultStore.getConsultation(paymentId)
+      if (updated) {
+        applySavedConsultation(updated)
+        syncSavedSnapshot()
       }
+      showPosSimulationDialog.value = false
+      pendingPosPaymentMethod.value = ''
+      ElMessage.success(t('consultation.paymentRecorded'))
     } catch (e) {
+      showPosSimulationDialog.value = false
+      pendingPosPaymentMethod.value = ''
       ElMessage.error(e.message || t('consultation.paymentFailed'))
     } finally {
       invoicePaymentSubmitting.value = false
@@ -1986,7 +1987,6 @@ async function handleExportPdf() {
 const CURRENCY_SYMBOLS = { CAD: '$', USD: '$' }
 const cs = computed(() => CURRENCY_SYMBOLS[form.value.currency] || `${form.value.currency || settingsStore.currency || 'CAD'} `)
 const currencyLabel = computed(() => form.value.currency || settingsStore.currency || 'CAD')
-const thirdPartyInvoicePngUrl = ref('')
 
 const SIDE_OPTIONS = [
   { label: 'Bilateral', value: 'bilateral' },
@@ -2056,48 +2056,6 @@ function handleDocUpload(file) {
     ElMessage.error(e.message || t('consultation.uploadFailed'))
   })
   return false
-}
-
-async function handleThirdPartyInvoicePngUpload(file) {
-  const rawFile = file.raw || file
-  if (!['image/png', 'image/x-png'].includes(rawFile.type)) {
-    ElMessage.warning('Please upload a PNG file.')
-    return false
-  }
-  let uploadFile
-  try {
-    uploadFile = await compressImageFile(rawFile, {
-      maxBytes: 512 * 1024,
-      maxWidth: 1400,
-      maxHeight: 1400,
-      mimeType: 'image/png',
-    })
-  } catch (e) {
-    ElMessage.error(e.message || t('consultation.uploadFailed'))
-    return false
-  }
-  if (uploadFile.size > 512 * 1024) {
-    ElMessage.warning(t('consultation.imageMaxSize'))
-    return false
-  }
-  settingsStore.uploadSignaturePng(uploadFile).then(async () => {
-    await refreshThirdPartyInvoicePng()
-    ElMessage.success('Third party invoice PNG uploaded.')
-  }).catch((e) => {
-    ElMessage.error(e.message || t('consultation.uploadFailed'))
-  })
-  return false
-}
-
-async function openThirdPartyInvoicePng() {
-  const signature = settingsStore.thirdPartySignature || {}
-  const source = signature.path || signature.url || settingsStore.thirdPartyInvoicePng || thirdPartyInvoicePngUrl.value
-  if (!source) return
-  try {
-    await filesApi.open(source)
-  } catch (e) {
-    ElMessage.error(e.message || t('consultation.uploadFailed'))
-  }
 }
 
 function removeLocalDocumentByRow(row) {
@@ -2189,13 +2147,17 @@ async function handleGeneratePdf() {
 }
 
 async function generateInvoicePdf({ openFile = true } = {}) {
-  const id = consultId || consultation.value?.id
+  let id = currentConsultationId.value || consultId || consultation.value?.id
   if (!id) {
     ElMessage.warning(t('consultation.saveBefore'))
     return null
   }
   invoicePdfGenerating.value = true
   try {
+    if (!isReadOnly.value && hasUnsavedConsultationChanges.value) {
+      const saved = await persistConsultationDraft({ silent: true, syncRoute: false })
+      id = saved?.id || currentConsultationId.value || id
+    }
     const res = await consultationsApi.generateInvoice(id)
     const pdfUrl = res.url || res.pdfUrl || res.filePath
     form.value.invoicePdfUrl = res.url || res.pdfUrl || form.value.invoicePdfUrl
@@ -2225,7 +2187,7 @@ async function handleSendReport() {
   }
   const result = await generateReportPdf({ openFile: false })
   if (!result) return
-  const emailContent = buildConsultationReportEmail(patient.value, form.value, settingsStore.clinicName)
+  const emailContent = buildConsultationReportEmail(patient.value, form.value, settingsStore.clinicName, { pdfResult: result })
   openEmailPreview(emailContent)
 }
 
@@ -2236,7 +2198,7 @@ async function handleSendInvoiceEmail() {
   }
   const result = await generateInvoicePdf({ openFile: false })
   if (!result) return
-  openEmailPreview(buildInvoiceEmail(patient.value, form.value, settingsStore.clinicName))
+  openEmailPreview(buildInvoiceEmail(patient.value, form.value, settingsStore.clinicName, { pdfResult: result }))
 }
 </script>
 
@@ -3152,28 +3114,8 @@ async function handleSendInvoiceEmail() {
                 <el-form-item label="Include Prescription Amount?">
                   <el-switch v-model="form.includeRxAmount" :disabled="isReadOnly" active-text="Yes" inactive-text="No" />
                 </el-form-item>
-                <el-form-item label="3rd Party Invoice PNG">
-                  <div class="third-party-upload">
-                    <el-upload
-                      v-if="!isReadOnly"
-                      :auto-upload="false"
-                      :show-file-list="false"
-                      accept="image/png"
-                      :on-change="handleThirdPartyInvoicePngUpload"
-                    >
-                      <el-button size="small"><el-icon><Upload /></el-icon> Upload PNG</el-button>
-                    </el-upload>
-                    <el-button
-                      v-if="settingsStore.thirdPartyInvoicePng"
-                      size="small"
-                      text
-                      type="primary"
-                      @click="openThirdPartyInvoicePng"
-                    >
-                      Preview
-                    </el-button>
-                    <span v-if="!settingsStore.thirdPartyInvoicePng" class="field-hint">Upload a third party invoice PNG in this setting.</span>
-                  </div>
+                <el-form-item label="Add 3rd Party">
+                  <el-switch v-model="form.add3rdParty" :disabled="isReadOnly" active-text="Yes" inactive-text="No" />
                 </el-form-item>
               </el-form>
             </el-col>
@@ -3408,9 +3350,6 @@ async function handleSendInvoiceEmail() {
       </div>
       <template #footer>
         <el-button :disabled="invoicePaymentSubmitting" @click="handlePosSimulationCancel">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="invoicePaymentSubmitting" @click="handlePosSimulationSuccess">
-          {{ t('consultation.posSimulationSuccess') }}
-        </el-button>
       </template>
     </el-dialog>
 

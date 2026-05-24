@@ -218,6 +218,7 @@ export default {
     addressSection: '地址',
     streetAddress: '街道地址',
     city: '城市',
+    country: '国家',
     province: '省份',
     postalCode: '邮编',
 
@@ -293,6 +294,7 @@ export default {
     preferredContact: '首选联系方式',
     streetAddress: '街道地址',
     city: '城市',
+    country: '国家',
     province: '省份',
     postalCode: '邮编',
     primaryPractitioner: '主治医师',
@@ -834,8 +836,8 @@ export default {
     invoicePaymentDialogTitle: '发票收款',
     currentInvoiceAmount: '当前付款金额',
     startPayment: '开始付费',
-    posSimulationTitle: 'POS 支付中',
-    posSimulationWaiting: '正在通过 POS 终端处理支付，请稍候...',
+    posSimulationTitle: 'Stripe POS 支付中',
+    posSimulationWaiting: '正在把收款发送到 Stripe POS 读卡器，请按读卡器屏幕提示操作...',
     posSimulationSuccess: '支付成功',
 
     // 文档
@@ -902,7 +904,7 @@ export default {
     powder: '粉剂',
     rawHerbs: '草药',
     pillsMed: '成药',
-    unitBag: '包',
+    unitBag: 'bag(包)',
     unitBox: '盒',
 
     // 统计卡片
@@ -967,7 +969,8 @@ export default {
     contraindications: '禁忌',
     contraindicationsPh: '禁忌症...',
     unitLabels: {
-      '包': '包',
+      bag: 'bag(包)',
+      '包': 'bag(包)',
       '盒': '盒',
       g: 'g',
     },
@@ -1032,8 +1035,8 @@ export default {
 
     // 批量导入
     batchImport: '批量导入',
-    batchImportHint: '每行一条数据，字段用逗号或Tab分隔：名称,分类(raw_herbs/powder/pills),单位,数量,单价,供应商。已存在的药材会累加数量。',
-    batchImportPlaceholder: '黄芪,raw_herbs,g,1000,0.5,同仁堂\n当归,raw_herbs,g,500,0.8,\n板蓝根颗粒,powder,包,200,2.5,广州白云山',
+    batchImportHint: 'CSV 字段：name, category, quantity, unit, Quantity Per Main Unit, pricePerUnit, supplier, minStockLevel, branchId。Quantity Per Main Unit 表示一个主包装里有多少数量，比如每 bag(包) 多少 g。branchId 是诊所分店/地点 ID；留空则使用当前分店/共享库存。',
+    batchImportPlaceholder: 'name,category,quantity,unit,quantityPerMainUnit,pricePerUnit,supplier,minStockLevel,branchId\n黄芪,raw_herbs,1000,g,,0.5,同仁堂,100,\n板蓝根颗粒,powder,200,bag(包),5,2.5,广州白云山,10,',
     batchImportEmpty: '请填写导入数据',
     batchImportSuccess: '导入完成：新增 {created} 项，更新 {updated} 项',
     importBtn: '开始导入',

@@ -41,13 +41,15 @@ export const useInventoryStore = defineStore('inventory', () => {
   })
 
   async function addItem(data) {
+    const quantityPerMainUnit = data.quantityPerMainUnit || data.gramsPerPacket || null
     const newItem = {
       ...data,
       quantity: data.quantity || 0,
       pricePerUnit: data.pricePerUnit || 0,
       supplier: data.supplier || '',
       supplierId: data.supplierId || null,
-      gramsPerPacket: data.gramsPerPacket || null,
+      gramsPerPacket: quantityPerMainUnit,
+      quantityPerMainUnit,
       minStockLevel: data.minStockLevel || 10,
       branchId: data.branchId || null,
       isActive: true,

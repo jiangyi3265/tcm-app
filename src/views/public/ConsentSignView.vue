@@ -9,7 +9,8 @@ const { locale } = useI18n()
 const token = route.params.token
 
 const loading = ref(true)
-const error = ref('')
+const pageError = ref('')
+const submitError = ref('')
 const patientName = ref('')
 const documentTitle = ref('')
 const documentVersion = ref('')
@@ -97,7 +98,7 @@ onMounted(async () => {
       signedAt.value = info.consentSignedAt || ''
     }
   } catch (e) {
-    error.value = e.message || text.value.invalidTitle
+    pageError.value = e.message || text.value.invalidTitle
   } finally {
     loading.value = false
   }
@@ -105,22 +106,22 @@ onMounted(async () => {
 
 async function handleSign() {
   if (!signatureName.value.trim()) {
-    error.value = text.value.emptySignature
+    submitError.value = text.value.emptySignature
     return
   }
   if (!allAgreed.value) {
-    error.value = text.value.sectionMissing
+    submitError.value = text.value.sectionMissing
     return
   }
 
   signing.value = true
-  error.value = ''
+  submitError.value = ''
   try {
     const result = await consentPublicApi.sign(token, signatureName.value.trim(), agreements.value)
     signed.value = true
     signedAt.value = result.consentSignedAt || ''
   } catch (e) {
-    error.value = e.message || text.value.invalidTitle
+    submitError.value = e.message || text.value.invalidTitle
   } finally {
     signing.value = false
   }
@@ -146,9 +147,9 @@ async function handleSign() {
         <p>{{ text.loading }}</p>
       </div>
 
-      <div v-else-if="error && !signed" class="state-box error">
+      <div v-else-if="pageError && !signed" class="state-box error">
         <h2>{{ text.invalidTitle }}</h2>
-        <p>{{ error }}</p>
+        <p>{{ pageError }}</p>
       </div>
 
       <div v-else-if="signed" class="state-box success">
@@ -182,7 +183,7 @@ async function handleSign() {
               </p>
             </div>
             <label class="section-agree">
-              <input v-model="agreements[section.key]" type="checkbox" />
+              <input v-model="agreements[section.key]" type="checkbox" @change="submitError = ''" />
               <span>{{ text.sectionAgree }}</span>
             </label>
           </article>
@@ -196,6 +197,7 @@ async function handleSign() {
             class="signature-input"
             type="text"
             :placeholder="text.signaturePlaceholder"
+            @input="submitError = ''"
           />
           <div class="signature-preview-card">
             <span class="meta-label">{{ text.signaturePreview }}</span>
@@ -203,7 +205,7 @@ async function handleSign() {
           </div>
         </div>
 
-        <div v-if="error" class="submit-error">{{ error }}</div>
+        <div v-if="submitError" class="submit-error" role="alert">{{ submitError }}</div>
 
         <button class="submit-button" :disabled="signing || !allAgreed || !signatureName.trim()" @click="handleSign">
           {{ signing ? text.signing : text.signButton }}

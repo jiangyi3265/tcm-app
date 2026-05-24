@@ -33,7 +33,7 @@ const patientsStore = usePatientsStore()
 const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
 const branchesStore = useBranchesStore()
-const { showEmailDialog, emailData, openEmailPreview, sendEmail, sendEmailContent, buildAppointmentConfirmEmail } = useEmailSimulator()
+const { showEmailDialog, emailData, openEmailPreview, sendEmail } = useEmailSimulator()
 
 const roles = computed(() => authStore.roles)
 const canCreate = computed(() => hasPermission(roles.value, 'appointment.create'))
@@ -543,10 +543,6 @@ async function createAppointment() {
       endTime: selectedAvailabilitySlot.value.endTime,
       branchId: branchesStore.currentBranchId || null,
     })
-    const patient = patientsStore.getPatient(created.patientId)
-    const practitioner = authStore.getUserById(created.practitionerId)
-    const emailContent = buildAppointmentConfirmEmail(patient, created, practitioner, getServiceTypeLabel(created.serviceType))
-    if (patient?.emails?.[0] || patient?.email) sendEmailContent(emailContent)
     selectedAppt.value = getAppointmentWithInfo(created)
     ElMessage.success(t('appointments.appointmentCreated'))
     closeCreateDialog()
@@ -635,10 +631,6 @@ async function confirmAppt(id) {
   try {
     const updated = await appointmentsStore.confirmAppointment(id)
     selectedAppt.value = getAppointmentWithInfo(updated)
-    if (selectedAppt.value?.patient && selectedAppt.value?.practitioner) {
-      const emailContent = buildAppointmentConfirmEmail(selectedAppt.value.patient, selectedAppt.value, selectedAppt.value.practitioner, selectedAppt.value.serviceLabel)
-      if (selectedAppt.value.patient?.emails?.[0] || selectedAppt.value.patient?.email) sendEmailContent(emailContent)
-    }
     ElMessage.success(t('appointments.appointmentConfirmed'))
   } catch (error) {
     ElMessage.error(error.message || t('appointments.slotUnavailable'))

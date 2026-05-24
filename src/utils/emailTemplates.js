@@ -8,6 +8,9 @@ export const EMAIL_TEMPLATE_REGISTRY = Object.freeze({
       + '医师：{{practitionerName}}\n'
       + '时间：{{appointmentDate}} {{appointmentTime}}\n'
       + '地址：{{clinicAddress}}\n\n'
+      + '预约管理：{{manageLink}}\n'
+      + '就诊资料表：{{intakeLink}}\n'
+      + '知情同意书：{{consentLink}}\n\n'
       + '如需管理或取消预约，请使用此链接：{{manageLink}}',
   },
   appointmentCancellation: {
@@ -64,7 +67,7 @@ export const EMAIL_TEMPLATE_REGISTRY = Object.freeze({
       + '问诊编号：{{consultationId}}\n'
       + '日期：{{consultationDate}}\n'
       + '金额：{{amount}}\n'
-      + '发票链接：{{invoiceLink}}\n\n'
+      + '发票 PDF 已随邮件附件发送。\n\n'
       + '感谢您的到访。',
   },
   appointmentChange: {
@@ -134,6 +137,7 @@ export const EMAIL_TEMPLATE_VARIABLES = Object.freeze([
   { key: 'clinicAddress', label: '诊所地址' },
   { key: 'clinicPhone', label: '诊所电话' },
   { key: 'clinicEmail', label: '诊所邮箱' },
+  { key: 'patientId', label: '病人ID' },
   { key: 'patientName', label: '病人姓名' },
   { key: 'patientEmail', label: '病人邮箱' },
   { key: 'patientPhone', label: '病人电话' },

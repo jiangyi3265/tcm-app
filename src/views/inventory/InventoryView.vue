@@ -10,6 +10,7 @@ import { useHerbDictStore } from '../../stores/herbDict'
 import { useSettingsStore } from '../../stores/settings'
 import { hasPermission } from '../../utils/permissions'
 import { bindHerbSelection, getInventoryHerbMeta } from '../../utils/herbBinding'
+import { parseCsvText, rowsToObjects, toNumber } from '../../utils/csvImport'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t, te, locale } = useI18n()
@@ -46,7 +47,7 @@ const adjustDelta = ref(0)
 const adjustReason = ref('')
 
 const CATEGORY_CONFIG = computed(() => ({
-  powder: { label: t('inventory.powder'), unit: '包', defaultUnit: '包' },
+  powder: { label: t('inventory.powder'), unit: 'bag', defaultUnit: 'bag' },
   raw_herbs: { label: t('inventory.rawHerbs'), unit: 'g', defaultUnit: 'g' },
   pills: { label: t('inventory.pillsMed'), unit: '盒', defaultUnit: '盒' },
 }))
@@ -72,11 +73,90 @@ function localizeInventoryValue(group, value) {
 }
 
 function getUnitLabel(unit) {
+  if (isBagUnit(unit)) return 'bag(包)'
   return localizeInventoryValue('unitLabels', unit)
 }
 
 function priceLabel(key) {
   return String(t(key)).replace(/\([^)]*\)|（[^）]*）/g, `(${currencyLabel.value})`)
+}
+
+function isBagUnit(unit) {
+  const text = String(unit || '').trim().toLowerCase().replace(/\s+/g, '')
+  return text === '包' || text === 'bag' || text === 'bag(包)'
+}
+
+function normalizeInventoryUnit(unit) {
+  if (isBagUnit(unit)) return 'bag'
+  return String(unit || '').trim() || 'g'
+}
+
+const INVENTORY_IMPORT_ALIASES = {
+  name: ['name', '名称', '库存名'],
+  category: ['category', '分类'],
+  quantity: ['quantity', 'qty', '数量', '库存'],
+  unit: ['unit', '单位'],
+  quantityPerMainUnit: [
+    'quantitypermainunit',
+    'quantity per main unit',
+    'gramsperpacket',
+    'grams per packet',
+    'gramsperbag',
+    'grams per bag',
+    '每包克数',
+    '每主单位数量',
+  ],
+  pricePerUnit: ['priceperunit', 'price per unit', 'price', '单价', '成本'],
+  supplier: ['supplier', '供应商'],
+  supplierId: ['supplierid', 'supplier id', '供应商id'],
+  minStockLevel: ['minstocklevel', 'min stock level', '最低库存'],
+  branchId: ['branchid', 'branch id', '分店id'],
+}
+
+const INVENTORY_IMPORT_HEADERS = [
+  'name',
+  'category',
+  'quantity',
+  'unit',
+  'quantityPerMainUnit',
+  'pricePerUnit',
+  'supplier',
+  'minStockLevel',
+  'branchId',
+]
+const LEGACY_INVENTORY_IMPORT_HEADERS = [
+  'name',
+  'category',
+  'unit',
+  'quantity',
+  'pricePerUnit',
+  'supplier',
+  'minStockLevel',
+  'branchId',
+]
+
+function looksLikeLegacyInventoryRow(row = []) {
+  const third = String(row[2] || '').trim()
+  const fourth = String(row[3] || '').trim()
+  return third && !Number.isFinite(Number(third)) && Number.isFinite(Number(fourth))
+}
+
+function buildInventoryImportItem(item) {
+  const quantityPerMainUnit = toNumber(item.quantityPerMainUnit || item.gramsPerPacket, null)
+  return {
+    ...item,
+    name: String(item.name || '').trim(),
+    category: String(item.category || activeTab.value || 'raw_herbs').trim(),
+    quantity: toNumber(item.quantity),
+    unit: normalizeInventoryUnit(item.unit),
+    pricePerUnit: toNumber(item.pricePerUnit),
+    supplier: String(item.supplier || '').trim(),
+    supplierId: String(item.supplierId || '').trim() || null,
+    minStockLevel: toNumber(item.minStockLevel, 10),
+    quantityPerMainUnit,
+    gramsPerPacket: quantityPerMainUnit,
+    branchId: String(item.branchId || branchesStore.currentBranchId || '').trim() || null,
+  }
 }
 
 function getToxicityTagType(value) {
@@ -144,7 +224,7 @@ const newItem = ref({
   name: '',
   herbDictId: null,
   aliases: '',
-  unit: '包',
+  unit: 'bag',
   quantity: 0,
   purchasePrice: 0, // 购买价格(进价)
   pricePerUnit: 0,   // 售价(自动计算或手动)
@@ -258,7 +338,7 @@ async function handleAddItem() {
 
 function resetNewItem() {
   newItem.value = {
-    name: '', herbDictId: null, aliases: '', unit: CATEGORY_CONFIG.value[activeTab.value]?.defaultUnit || '包', quantity: 0, purchasePrice: 0,
+    name: '', herbDictId: null, aliases: '', unit: CATEGORY_CONFIG.value[activeTab.value]?.defaultUnit || 'bag', quantity: 0, purchasePrice: 0,
     pricePerUnit: 0, supplierId: '', supplier: '', gramsPerPacket: null, minStockLevel: 10,
   }
 }
@@ -356,19 +436,13 @@ async function handleBatchImport() {
   if (!batchImportText.value.trim()) return ElMessage.warning(t('inventory.batchImportEmpty'))
   try {
     batchImporting.value = true
-    const lines = batchImportText.value.trim().split('\n').filter(l => l.trim())
-    const items = lines.map(line => {
-      const parts = line.split(/[,\t，]/).map(s => s.trim())
-      return {
-        name: parts[0] || '',
-        category: parts[1] || 'raw_herbs',
-        unit: parts[2] || 'g',
-        quantity: parseFloat(parts[3]) || 0,
-        pricePerUnit: parseFloat(parts[4]) || 0,
-        supplier: parts[5] || '',
-        branchId: branchesStore.currentBranchId || null,
-      }
-    })
+    const rows = parseCsvText(batchImportText.value)
+    const fallbackHeaders = looksLikeLegacyInventoryRow(rows[0])
+      ? LEGACY_INVENTORY_IMPORT_HEADERS
+      : INVENTORY_IMPORT_HEADERS
+    const items = rowsToObjects(rows, INVENTORY_IMPORT_ALIASES, fallbackHeaders)
+      .map(buildInventoryImportItem)
+      .filter((item) => item.name)
     const result = await inventoryStore.batchImport(items)
     ElMessage.success(t('inventory.batchImportSuccess', {
       created: Number(result.created || 0),

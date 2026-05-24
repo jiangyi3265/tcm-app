@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { patientsApi } from '../utils/api'
 import { readStoredJson, writeStoredJson } from '../utils/storage'
+import { useConsultationsStore } from './consultations'
+import { useAppointmentsStore } from './appointments'
 
 export const usePatientsStore = defineStore('patients', () => {
   const patients = ref([])
@@ -12,6 +14,13 @@ export const usePatientsStore = defineStore('patients', () => {
 
   function saveState() {
     writeStoredJson('tcm_patients', patients.value)
+  }
+
+  async function refreshFromApi() {
+    const list = await patientsApi.list()
+    patients.value = Array.isArray(list) ? list : []
+    saveState()
+    return patients.value
   }
 
   const activePatients = computed(() => patients.value.filter((p) => p.isActive && !p.deletedAt))
@@ -57,6 +66,7 @@ export const usePatientsStore = defineStore('patients', () => {
       addressCity: data.addressCity || '',
       addressState: data.addressState || '',
       addressPostal: data.addressPostal || '',
+      addressCountry: data.addressCountry || '',
       diseaseName: data.diseaseName || '',
       historyAndMedication: data.historyAndMedication || '',
       createdAt: new Date().toISOString(),
@@ -121,15 +131,9 @@ export const usePatientsStore = defineStore('patients', () => {
 
   async function mergePatients(keepId, mergeId) {
     await patientsApi.merge(keepId, mergeId)
-    const keepIdx = patients.value.findIndex((p) => p.id === keepId)
-    const mergeIdx = patients.value.findIndex((p) => p.id === mergeId)
-    if (keepIdx === -1 || mergeIdx === -1) return false
-    const keep = patients.value[keepIdx]
-    const merge = patients.value[mergeIdx]
-    const combinedEmails = [...new Set([...(keep.emails || []), ...(merge.emails || [])])]
-    patients.value[keepIdx] = { ...keep, emails: combinedEmails }
-    patients.value[mergeIdx] = { ...merge, isActive: false, mergedInto: keepId }
-    saveState()
+    await refreshFromApi()
+    await useConsultationsStore().refreshFromApi()
+    await useAppointmentsStore().refreshFromApi()
     return true
   }
 
@@ -194,7 +198,7 @@ export const usePatientsStore = defineStore('patients', () => {
     patients, activePatients, deletedPatients,
     getPatient, searchPatients, addPatient, updatePatient,
     deletePatient, restorePatient, physicalDeletePatient,
-    mergePatients, signConsent, getPatientsByPractitioner,
+    refreshFromApi, mergePatients, signConsent, getPatientsByPractitioner,
     getPatientByStaffUserId, ensureStaffPatient,
   }
 })

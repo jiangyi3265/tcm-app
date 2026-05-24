@@ -6,6 +6,8 @@ import {
   getPaymentMethodOptions,
   normalizePaymentMethodValue,
   requiresPosSimulation,
+  requiresStripeCheckout,
+  requiresStripeTerminal,
 } from '../src/utils/paymentMethods.js'
 
 test('旧支付方式值会被标准化到新三种值', () => {
@@ -30,6 +32,13 @@ test('bankcard 需要 POS 模拟，其它方式不需要', () => {
   assert.equal(requiresPosSimulation('etransfer'), false)
   assert.equal(requiresPosSimulation('unknown'), false)
   assert.equal(requiresPosSimulation(null), false)
+})
+
+test('bankcard 使用 Stripe Terminal 而不是网页 Checkout', () => {
+  assert.equal(requiresStripeTerminal('bankcard'), true)
+  assert.equal(requiresStripeTerminal('card'), true)
+  assert.equal(requiresStripeTerminal('cash'), false)
+  assert.equal(requiresStripeCheckout('bankcard'), false)
 })
 
 test('付款入口仅在已保存且仍有未付金额时显示', () => {

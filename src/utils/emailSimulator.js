@@ -51,6 +51,44 @@ function toAbsoluteUrl(value) {
   return text.startsWith('/') ? `${origin}${text}` : `${origin}/${text}`
 }
 
+function safeFileToken(value) {
+  return String(value || 'consultation')
+    .trim()
+    .replace(/[^A-Za-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'consultation'
+}
+
+function buildInvoicePdfAttachment(consultation, pdfResult = {}) {
+  const resource = pdfResult?.resource
+    || pdfResult?.filePath
+    || consultation?.invoicePdfPath
+    || consultation?.invoicePath
+    || ''
+  if (!resource) return null
+  const consultationNo = consultation?.consultationId || consultation?.id
+  return {
+    resource,
+    fileName: `invoice-${safeFileToken(consultationNo)}.pdf`,
+    contentType: 'application/pdf',
+  }
+}
+
+function buildReportPdfAttachment(consultation, pdfResult = {}) {
+  const resource = pdfResult?.resource
+    || pdfResult?.filePath
+    || consultation?.reportPdfPath
+    || consultation?.consultationPdfPath
+    || consultation?.reportPath
+    || ''
+  if (!resource) return null
+  const consultationNo = consultation?.consultationId || consultation?.id
+  return {
+    resource,
+    fileName: `consultation-report-${safeFileToken(consultationNo)}.pdf`,
+    contentType: 'application/pdf',
+  }
+}
+
 function getCommonVariables({ patient, clinicName, clinicAddress, appointment, consultation, practitioner, serviceLabel, links = {} } = {}) {
   const start = appointment?.startTime || ''
   const [appointmentDate, appointmentTime = ''] = String(start).split(/[T ]/)
@@ -61,6 +99,7 @@ function getCommonVariables({ patient, clinicName, clinicAddress, appointment, c
   return {
     clinicName: resolveClinicName(clinicName || practitioner?.clinicName),
     clinicAddress: clinicAddress || '',
+    patientId: patient?.id || '',
     patientName: resolvePatientName(patient),
     patientEmail: resolvePatientEmail(patient),
     practitionerName: practitioner?.name || practitioner?.nickName || '',
@@ -115,6 +154,8 @@ export function useEmailSimulator() {
       ...entry,
       templateBody: entry.templateKey ? entry.body : undefined,
       variables: entry.variables,
+      attachments: entry.attachments,
+      useTemplate: entry.useTemplate,
     }).catch(() => {})
     showEmailDialog.value = false
     return entry
@@ -197,24 +238,48 @@ export function useEmailSimulator() {
     )
   }
 
-  function buildInvoiceEmail(patient, consultation, clinicName) {
+  function buildInvoiceEmail(patient, consultation, clinicName, options = {}) {
     const clinic = resolveClinicName(clinicName)
-    return buildTemplateEmail(
+    const variables = getCommonVariables({
+      patient,
+      consultation,
+      clinicName: clinic,
+      clinicAddress: settingsStore.clinicAddress,
+    })
+    const attachment = buildInvoicePdfAttachment(consultation, options.pdfResult || options.invoicePdf)
+    const templateVariables = attachment ? { ...variables, invoiceLink: '' } : variables
+    const email = buildTemplateEmail(
       'invoice',
       'invoice',
       resolvePatientEmail(patient),
-      getCommonVariables({ patient, consultation, clinicName: clinic, clinicAddress: settingsStore.clinicAddress }),
+      templateVariables,
     )
+    if (attachment) {
+      email.attachments = [attachment]
+    }
+    return email
   }
 
-  function buildConsultationReportEmail(patient, consultation, clinicName) {
+  function buildConsultationReportEmail(patient, consultation, clinicName, options = {}) {
     const clinic = resolveClinicName(clinicName)
-    return buildTemplateEmail(
+    const variables = getCommonVariables({
+      patient,
+      consultation,
+      clinicName: clinic,
+      clinicAddress: settingsStore.clinicAddress,
+    })
+    const attachment = buildReportPdfAttachment(consultation, options.pdfResult || options.reportPdf)
+    const templateVariables = attachment ? { ...variables, reportLink: '' } : variables
+    const email = buildTemplateEmail(
       'consultationRecord',
       'consultation_report',
       resolvePatientEmail(patient),
-      getCommonVariables({ patient, consultation, clinicName: clinic, clinicAddress: settingsStore.clinicAddress }),
+      templateVariables,
     )
+    if (attachment) {
+      email.attachments = [attachment]
+    }
+    return email
   }
 
   function buildIntakeFormEmail(patient, appointment, token, clinicName) {

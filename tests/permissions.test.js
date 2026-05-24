@@ -1,8 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { canAccessPatientRecords, filterAccessibleConsultations } from '../src/utils/permissions.js'
+import { canAccessPatientRecords, filterAccessibleConsultations, hasPermission } from '../src/utils/permissions.js'
 
-test('主治医师始终可以访问患者记录', () => {
+test('primary practitioner can always access patient records', () => {
   const allowed = canAccessPatientRecords(
     ['practitioner'],
     'u-1',
@@ -13,7 +13,7 @@ test('主治医师始终可以访问患者记录', () => {
   assert.equal(allowed, true)
 })
 
-test('非主治且无近期问诊的 practitioner 不可访问患者记录', () => {
+test('non-primary practitioner cannot access other recent records without appointment', () => {
   const allowed = canAccessPatientRecords(
     ['practitioner'],
     'u-2',
@@ -23,16 +23,86 @@ test('非主治且无近期问诊的 practitioner 不可访问患者记录', () 
         patientId: 'p-1',
         practitionerId: 'u-9',
         status: 'completed',
-        date: '2024-01-01',
+        date: '2026-04-03',
         deletedAt: null,
       },
     ],
+    { now: '2026-04-06' },
   )
 
   assert.equal(allowed, false)
 })
 
-test('pharmacist 对 paid 问诊患者有访问权限', () => {
+test('appointment practitioner can see only recent three months of other records', () => {
+  const patient = { id: 'p-3', practitionerId: 'u-9' }
+  const appointments = [
+    {
+      patientId: 'p-3',
+      practitionerId: 'u-3',
+      status: 'completed',
+      startTime: '2026-04-06 10:00:00',
+      endTime: '2026-04-06 10:30:00',
+    },
+  ]
+  const consultations = [
+    { id: 'recent', patientId: 'p-3', practitionerId: 'u-9', date: '2026-02-06', deletedAt: null },
+    { id: 'old', patientId: 'p-3', practitionerId: 'u-9', date: '2025-12-01', deletedAt: null },
+  ]
+
+  assert.equal(canAccessPatientRecords(
+    ['practitioner'],
+    'u-3',
+    patient,
+    consultations,
+    { currentUser: { id: 'u-3' }, appointments, now: '2026-04-06' },
+  ), true)
+
+  const visible = filterAccessibleConsultations(
+    ['practitioner'],
+    consultations,
+    { currentUser: { id: 'u-3' }, patient, appointments, now: '2026-04-06' },
+  )
+
+  assert.deepEqual(visible.map((consultation) => consultation.id), ['recent'])
+})
+
+test('expired appointment hides other records but own records remain visible', () => {
+  const patient = { id: 'p-4', practitionerId: 'u-9' }
+  const appointments = [
+    {
+      patientId: 'p-4',
+      practitionerId: 'u-4',
+      status: 'completed',
+      startTime: '2026-04-06 10:00:00',
+      endTime: '2026-04-06 10:30:00',
+    },
+  ]
+  const consultations = [
+    { id: 'other', patientId: 'p-4', practitionerId: 'u-9', date: '2026-04-14', deletedAt: null },
+    { id: 'own', patientId: 'p-4', practitionerId: 'u-4', date: '2025-08-01', deletedAt: null },
+  ]
+
+  const visible = filterAccessibleConsultations(
+    ['practitioner'],
+    consultations,
+    { currentUser: { id: 'u-4' }, patient, appointments, now: '2026-04-15' },
+  )
+
+  assert.deepEqual(visible.map((consultation) => consultation.id), ['own'])
+})
+
+test('admin plus practitioner keeps admin patient access and merge permission', () => {
+  assert.equal(canAccessPatientRecords(
+    ['admin', 'practitioner'],
+    'u-5',
+    { id: 'p-5', practitionerId: 'u-9' },
+    [],
+  ), true)
+  assert.equal(hasPermission(['practitioner'], 'patient.merge'), false)
+  assert.equal(hasPermission(['admin', 'practitioner'], 'patient.merge'), true)
+})
+
+test('pharmacist can access patient with paid consultation', () => {
   const allowed = canAccessPatientRecords(
     ['pharmacist'],
     'ph-1',
@@ -51,59 +121,17 @@ test('pharmacist 对 paid 问诊患者有访问权限', () => {
   assert.equal(allowed, true)
 })
 
-test('三天内完成的问诊仍允许访问', () => {
-  const allowed = canAccessPatientRecords(
-    ['practitioner'],
-    'u-3',
-    { id: 'p-3', practitionerId: 'u-9' },
-    [
-      {
-        patientId: 'p-3',
-        practitionerId: 'u-9',
-        status: 'completed',
-        date: '2026-04-03',
-        deletedAt: null,
-      },
-    ],
-    { now: '2026-04-06' },
-  )
-
-  assert.equal(allowed, true)
-})
-
-test('超过三天的近期问诊不再允许非主治 practitioner 访问', () => {
-  const oldDate = new Date()
-  oldDate.setDate(oldDate.getDate() - 4)
-
-  const allowed = canAccessPatientRecords(
-    ['practitioner'],
-    'u-3',
-    { id: 'p-3', practitionerId: 'u-9' },
-    [
-      {
-        patientId: 'p-3',
-        practitionerId: 'u-9',
-        status: 'completed',
-        date: oldDate.toISOString().slice(0, 10),
-        deletedAt: null,
-      },
-    ],
-  )
-
-  assert.equal(allowed, false)
-})
-
-test('实习生在有效实习窗口内可访问该窗口内预约患者', () => {
+test('apprentice can access appointment patient during internship window', () => {
   const allowed = canAccessPatientRecords(
     ['apprentice'],
     'ap-1',
-    { id: 'p-4', practitionerId: 'u-9' },
+    { id: 'p-6', practitionerId: 'u-9' },
     [],
     {
       currentUser: { internshipDates: ['2026-04-04'] },
       appointments: [
         {
-          patientId: 'p-4',
+          patientId: 'p-6',
           startTime: '2026-04-06 10:00:00',
           status: 'booked',
         },
@@ -115,14 +143,14 @@ test('实习生在有效实习窗口内可访问该窗口内预约患者', () =>
   assert.equal(allowed, true)
 })
 
-test('实习生超过三天窗口后不可访问患者记录', () => {
+test('apprentice cannot access records after internship window', () => {
   const allowed = canAccessPatientRecords(
     ['apprentice'],
     'ap-1',
-    { id: 'p-5', practitionerId: 'u-9' },
+    { id: 'p-7', practitionerId: 'u-9' },
     [
       {
-        patientId: 'p-5',
+        patientId: 'p-7',
         practitionerId: 'u-9',
         status: 'completed',
         date: '2026-04-04',
@@ -138,7 +166,7 @@ test('实习生超过三天窗口后不可访问患者记录', () => {
   assert.equal(allowed, false)
 })
 
-test('实习生只可看到实习窗口内的诊疗记录', () => {
+test('apprentice sees only records inside active internship window', () => {
   const visible = filterAccessibleConsultations(
     ['apprentice'],
     [

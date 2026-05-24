@@ -1,11 +1,12 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { usePatientsStore } from '../../stores/patients'
 import { useAuthStore } from '../../stores/auth'
 import { hasPermission } from '../../utils/permissions'
 import { formatDate } from '../../utils/dateUtils'
+import { COUNTRY_OPTIONS, DEFAULT_COUNTRY, getProvinceOptions } from '../../utils/countryRegionOptions'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
@@ -23,6 +24,7 @@ const canCreate = computed(() => hasPermission(roles.value, 'patient.create'))
 const canMerge = computed(() => hasPermission(roles.value, 'patient.merge'))
 const isApprenticeReadonly = computed(() => roles.value.includes('apprentice'))
 const isAdmin = computed(() => roles.value.includes('admin'))
+const hidePatientContact = computed(() => roles.value.includes('practitioner') || roles.value.includes('apprentice'))
 
 const filteredPatients = computed(() => patientsStore.searchPatients(searchQuery.value))
 
@@ -49,27 +51,19 @@ const newPatient = ref({
   addressCity: '',
   addressState: '',
   addressPostal: '',
+  addressCountry: DEFAULT_COUNTRY,
   historyAndMedication: '',
   notes: '',
   practitionerId: resolveDefaultPractitionerId(),
 })
 
 const PREFERRED_CONTACT_OPTIONS = ['Any', 'Email', 'Mobile Phone', 'Business Phone', 'Fax']
-const PROVINCE_OPTIONS = [
-  { value: 'BC', label: 'BC (British Columbia)' },
-  { value: 'AB', label: 'AB (Alberta)' },
-  { value: 'ON', label: 'ON (Ontario)' },
-  { value: 'QC', label: 'QC (Quebec)' },
-  { value: 'MB', label: 'MB (Manitoba)' },
-  { value: 'SK', label: 'SK (Saskatchewan)' },
-  { value: 'NS', label: 'NS (Nova Scotia)' },
-  { value: 'NB', label: 'NB (New Brunswick)' },
-  { value: 'NL', label: 'NL (Newfoundland and Labrador)' },
-  { value: 'PE', label: 'PE (Prince Edward Island)' },
-  { value: 'NT', label: 'NT (Northwest Territories)' },
-  { value: 'YT', label: 'YT (Yukon)' },
-  { value: 'NU', label: 'NU (Nunavut)' }
-]
+const countryOptions = COUNTRY_OPTIONS
+const provinceOptions = computed(() => getProvinceOptions(newPatient.value.addressCountry))
+
+watch(() => newPatient.value.addressCountry, () => {
+  newPatient.value.addressState = ''
+})
 
 function addEmail() { newPatient.value.emails.push('') }
 function removeEmail(idx) { newPatient.value.emails.splice(idx, 1) }
@@ -112,7 +106,7 @@ function resetForm() {
     firstName: '', lastName: '', middleName: '', jobTitle: '', accountName: '',
     emails: [''], email2: '', mobilePhone: '', businessPhone: '', fax: '',
     preferredContact: 'Any', dateOfBirth: '', gender: '',
-    addressStreet: '', addressCity: '', addressState: '', addressPostal: '',
+    addressStreet: '', addressCity: '', addressState: '', addressPostal: '', addressCountry: DEFAULT_COUNTRY,
     historyAndMedication: '', notes: '', practitionerId: resolveDefaultPractitionerId(),
   }
 }
@@ -136,6 +130,11 @@ async function handleMerge() {
     mergeFrom.value = ''
     mergeTo.value = ''
   }
+}
+
+function patientOptionLabel(patient) {
+  if (hidePatientContact.value) return patient.name
+  return `${patient.name} (${patient.emails?.[0] || ''})`
 }
 
 function goToPatient(patient) {
@@ -192,7 +191,7 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
               </el-avatar>
               <div>
                 <div style="font-weight: 600">{{ row.name }}</div>
-                <div v-if="!isApprenticeReadonly" style="font-size: 12px; color: #888">{{ row.emails?.[0] }}</div>
+                <div v-if="!hidePatientContact" style="font-size: 12px; color: #888">{{ row.emails?.[0] }}</div>
               </div>
             </div>
           </template>
@@ -202,7 +201,7 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
             <el-tag v-if="row.gender" :type="GENDER_MAP[row.gender]" size="small">{{ row.gender }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isApprenticeReadonly" prop="phone" :label="t('patients.phone')" width="130" />
+        <el-table-column v-if="!hidePatientContact" prop="phone" :label="t('patients.phone')" width="130" />
         <el-table-column v-if="!isApprenticeReadonly" :label="t('patients.dateOfBirth')" width="120">
           <template #default="{ row }">{{ row.dateOfBirth || '-' }}</template>
         </el-table-column>
@@ -333,19 +332,26 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
               <el-input v-model="newPatient.addressStreet" placeholder="Street Address" />
             </el-form-item>
           </el-col>
-          <el-col :span="10">
-            <el-form-item :label="t('patients.province')">
-              <el-select v-model="newPatient.addressState" style="width:100%">
-                <el-option v-for="p in PROVINCE_OPTIONS" :key="p.value" :label="p.label" :value="p.value" />
+          <el-col :span="6">
+            <el-form-item :label="t('patients.country')">
+              <el-select v-model="newPatient.addressCountry" filterable style="width:100%">
+                <el-option v-for="p in countryOptions" :key="p.value" :label="p.label" :value="p.value" />
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="7">
+          <el-col :span="6">
+            <el-form-item :label="t('patients.province')">
+              <el-select v-model="newPatient.addressState" filterable style="width:100%">
+                <el-option v-for="p in provinceOptions" :key="p.value" :label="p.label" :value="p.value" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="6">
             <el-form-item :label="t('patients.city')">
               <el-input v-model="newPatient.addressCity" placeholder="City" />
             </el-form-item>
           </el-col>
-          <el-col :span="7">
+          <el-col :span="6">
             <el-form-item :label="t('patients.postalCode')">
               <el-input v-model="newPatient.addressPostal" placeholder="Postal Code" />
             </el-form-item>
@@ -407,12 +413,12 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
       <el-form label-width="90px">
         <el-form-item :label="t('patients.keepRecord')">
           <el-select v-model="mergeTo" filterable :placeholder="t('patients.selectKeep')" style="width: 100%">
-            <el-option v-for="p in patientsStore.activePatients" :key="p.id" :label="p.name + ' (' + (p.emails?.[0] || '') + ')'" :value="p.id" />
+            <el-option v-for="p in patientsStore.activePatients" :key="p.id" :label="patientOptionLabel(p)" :value="p.id" />
           </el-select>
         </el-form-item>
         <el-form-item :label="t('patients.mergeSource')">
           <el-select v-model="mergeFrom" filterable :placeholder="t('patients.selectDeactivate')" style="width: 100%">
-            <el-option v-for="p in patientsStore.activePatients" :key="p.id" :label="p.name + ' (' + (p.emails?.[0] || '') + ')'" :value="p.id" />
+            <el-option v-for="p in patientsStore.activePatients" :key="p.id" :label="patientOptionLabel(p)" :value="p.id" />
           </el-select>
         </el-form-item>
       </el-form>

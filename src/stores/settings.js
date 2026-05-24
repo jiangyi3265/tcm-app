@@ -178,6 +178,17 @@ function normalizeConsentTemplate(value) {
   }
 }
 
+function normalizeStripeSettings(value = {}) {
+  return {
+    publishableKey: String(value?.publishableKey || value?.stripePublishableKey || '').trim(),
+    terminalReaderId: String(value?.terminalReaderId || value?.stripeTerminalReaderId || '').trim(),
+    secretKeyConfigured: Boolean(value?.secretKeyConfigured),
+    secretKeyMasked: String(value?.secretKeyMasked || '').trim(),
+    webhookSecretConfigured: Boolean(value?.webhookSecretConfigured),
+    webhookSecretMasked: String(value?.webhookSecretMasked || '').trim(),
+  }
+}
+
 function normalizeRoom(room = {}) {
   return {
     ...room,
@@ -246,6 +257,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const thirdPartySignature = ref({ path: '', url: '', uploadedAt: '' })
   const clinicSeal = ref({ path: '', url: '', uploadedAt: '' })
   const practitionerProfile = ref({ practitionerName: '', organization: '', organizationNumber: '' })
+  const stripeSettings = ref(normalizeStripeSettings())
   // 每个医师的预约间隔: { [practitionerId]: minutes }
   const practitionerIntervals = ref({})
 
@@ -286,6 +298,7 @@ export const useSettingsStore = defineStore('settings', () => {
       organization: data?.practitionerProfile?.organization || data?.practitionerOrganization || '',
       organizationNumber: data?.practitionerProfile?.organizationNumber || data?.practitionerOrganizationNumber || '',
     }
+    stripeSettings.value = normalizeStripeSettings(data?.stripeSettings)
     practitionerIntervals.value = data?.practitionerIntervals || {}
   }
 
@@ -314,6 +327,7 @@ export const useSettingsStore = defineStore('settings', () => {
       thirdPartySignature: thirdPartySignature.value,
       clinicSeal: clinicSeal.value,
       practitionerProfile: practitionerProfile.value,
+      stripeSettings: stripeSettings.value,
       practitionerIntervals: practitionerIntervals.value,
     })
   }
@@ -427,13 +441,25 @@ export const useSettingsStore = defineStore('settings', () => {
     if (updates.thirdPartySignature !== undefined) thirdPartySignature.value = { ...thirdPartySignature.value, ...updates.thirdPartySignature }
     if (updates.clinicSeal !== undefined) clinicSeal.value = { ...clinicSeal.value, ...updates.clinicSeal }
     if (updates.practitionerProfile !== undefined) practitionerProfile.value = { ...practitionerProfile.value, ...updates.practitionerProfile }
+    if (updates.stripeSettings !== undefined) {
+      stripeSettings.value = normalizeStripeSettings(updates.stripeSettings)
+      delete payload.stripeSettings
+    }
     const updated = await settingsApi.updateBase(payload)
     if (updated?.emailTemplates) emailTemplates.value = normalizeEmailTemplates(updated.emailTemplates)
     if (updated?.consentTemplate) consentTemplate.value = normalizeConsentTemplate(updated.consentTemplate)
     if (updated?.thirdPartySignature) thirdPartySignature.value = { ...thirdPartySignature.value, ...updated.thirdPartySignature }
     if (updated?.clinicSeal) clinicSeal.value = { ...clinicSeal.value, ...updated.clinicSeal }
     if (updated?.practitionerProfile) practitionerProfile.value = { ...practitionerProfile.value, ...updated.practitionerProfile }
+    if (updated?.stripeSettings) stripeSettings.value = normalizeStripeSettings(updated.stripeSettings)
     saveState()
+  }
+
+  async function updateStripeSettings(updates) {
+    const updated = await settingsApi.updateStripeSettings(updates)
+    stripeSettings.value = normalizeStripeSettings(updated)
+    saveState()
+    return stripeSettings.value
   }
 
   async function uploadSignaturePng(file) {
@@ -522,6 +548,7 @@ export const useSettingsStore = defineStore('settings', () => {
     thirdPartySignature,
     clinicSeal,
     practitionerProfile,
+    stripeSettings,
     updateTaxRate,
     addRoom,
     updateRoom,
@@ -538,5 +565,6 @@ export const useSettingsStore = defineStore('settings', () => {
     setPractitionerInterval,
     uploadSignaturePng,
     uploadClinicSealPng,
+    updateStripeSettings,
   }
 })

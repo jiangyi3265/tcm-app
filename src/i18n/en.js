@@ -218,6 +218,7 @@ export default {
     addressSection: 'Address',
     streetAddress: 'Street Address',
     city: 'City',
+    country: 'Country',
     province: 'Province',
     postalCode: 'Postal Code',
 
@@ -292,6 +293,7 @@ export default {
     preferredContact: 'Preferred Contact',
     streetAddress: 'Street Address',
     city: 'City',
+    country: 'Country',
     province: 'Province',
     postalCode: 'Postal Code',
     primaryPractitioner: 'Primary Practitioner',
@@ -833,8 +835,8 @@ export default {
     invoicePaymentDialogTitle: 'Invoice Payment',
     currentInvoiceAmount: 'Current payment amount',
     startPayment: 'Start payment',
-    posSimulationTitle: 'POS Payment',
-    posSimulationWaiting: 'Processing payment on POS, please wait...',
+    posSimulationTitle: 'Stripe POS Payment',
+    posSimulationWaiting: 'Sending payment to the Stripe POS reader. Please follow the reader screen...',
     posSimulationSuccess: 'Payment success',
 
     // Documents
@@ -901,7 +903,7 @@ export default {
     powder: 'Powder',
     rawHerbs: 'Raw Herbs',
     pillsMed: 'Pills',
-    unitBag: 'bag',
+    unitBag: 'bag(包)',
     unitBox: 'box',
 
     // Stat cards
@@ -966,7 +968,8 @@ export default {
     contraindications: 'Contraindications',
     contraindicationsPh: 'Contraindications...',
     unitLabels: {
-      '包': 'bag',
+      bag: 'bag(包)',
+      '包': 'bag(包)',
       '盒': 'box',
       g: 'g',
     },
@@ -1031,8 +1034,8 @@ export default {
 
     // Batch import
     batchImport: 'Batch Import',
-    batchImportHint: 'One item per line, fields separated by comma or tab: Name, Category (raw_herbs/powder/pills), Unit, Quantity, Price, Supplier. Existing items will have quantity added.',
-    batchImportPlaceholder: 'Astragalus,raw_herbs,g,1000,0.5,Supplier A\nAngelica,raw_herbs,g,500,0.8,\nBanlangen Granules,powder,bag,200,2.5,Supplier B',
+    batchImportHint: 'CSV fields: name, category, quantity, unit, Quantity Per Main Unit, pricePerUnit, supplier, minStockLevel, branchId. Quantity Per Main Unit is the amount inside one main package, for example grams per bag. branchId is the clinic branch/location ID; leave it blank to use the current branch/shared stock.',
+    batchImportPlaceholder: 'name,category,quantity,unit,quantityPerMainUnit,pricePerUnit,supplier,minStockLevel,branchId\nAstragalus,raw_herbs,1000,g,,0.5,Supplier A,100,\nBanlangen Granules,powder,200,bag(包),5,2.5,Supplier B,10,',
     batchImportEmpty: 'Please enter import data',
     batchImportSuccess: 'Import complete: {created} created, {updated} updated',
     importBtn: 'Start Import',

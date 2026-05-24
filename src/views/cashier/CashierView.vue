@@ -8,9 +8,11 @@ import { useAuthStore } from '../../stores/auth'
 import { useSettingsStore } from '../../stores/settings'
 import { useBranchesStore } from '../../stores/branches'
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
+import { getCountryLabel, getProvinceLabel } from '../../utils/countryRegionOptions'
 import { printInvoice } from '../../utils/pdfExport'
 import { useEmailSimulator } from '../../utils/emailSimulator'
-import { consultationsApi, filesApi, stripeApi } from '../../utils/api'
+import { consultationsApi, filesApi } from '../../utils/api'
+import { runStripeTerminalPayment } from '../../utils/stripeTerminalPayment'
 import {
   getLatestPaymentTime,
   getOutstandingAmount,
@@ -18,7 +20,7 @@ import {
   getPaymentRecords,
   getPaymentStatus,
 } from '../../utils/prescriptionWorkflow'
-import { getPaymentMethodLabel, getPaymentMethodOptions, normalizePaymentMethodValue, requiresStripeCheckout } from '../../utils/paymentMethods'
+import { getPaymentMethodLabel, getPaymentMethodOptions, normalizePaymentMethodValue, requiresStripeTerminal } from '../../utils/paymentMethods'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
@@ -35,6 +37,17 @@ const activeTab = ref('pending')
 const selectedConsult = ref(null)
 const showInvoiceDialog = ref(false)
 const selectedPaymentMethod = ref('cash')
+
+function formatPatientAddress(patient = {}) {
+  const parts = [
+    patient.addressStreet || patient.address,
+    patient.addressCity,
+    patient.addressState ? getProvinceLabel(patient.addressCountry, patient.addressState) : '',
+    patient.addressPostal,
+    patient.addressCountry ? getCountryLabel(patient.addressCountry) : '',
+  ].filter(Boolean)
+  return parts.join(', ') || '-'
+}
 
 onMounted(async () => {
   await consultationsStore.refreshFromApi().catch((error) => {
@@ -108,6 +121,19 @@ function enrichConsultation(consultation) {
   }
 }
 
+function applyInvoicePdfResult(consultation, result) {
+  if (!consultation || !result) return
+  consultation.invoicePdfUrl = result.url || result.pdfUrl || consultation.invoicePdfUrl
+  consultation.invoicePdfPath = result.filePath || result.resource || consultation.invoicePdfPath
+}
+
+async function generateInvoicePdfForEmail(consultation) {
+  if (!consultation?.id) return null
+  const result = await consultationsApi.generateInvoice(consultation.id)
+  applyInvoicePdfResult(consultation, result)
+  return result
+}
+
 const pendingPayments = computed(() => {
   const branchId = branchesStore.currentBranchId
   return consultationsStore.pendingPayments
@@ -173,13 +199,13 @@ async function processPayment(consultation) {
 
   try {
     const method = normalizePaymentMethodValue(selectedPaymentMethod.value)
-    if (requiresStripeCheckout(method)) {
-      const session = await stripeApi.createCheckoutSession(consult.id)
-      if (session?.url) {
-        window.location.href = session.url
-        return
-      }
-      throw new Error('Stripe checkout session was not returned.')
+    if (requiresStripeTerminal(method)) {
+      ElMessage.info(t('consultation.posSimulationWaiting'))
+      await runStripeTerminalPayment(consult.id)
+      await consultationsStore.refreshFromApi()
+      selectedConsult.value = enrichConsultation(consultationsStore.getConsultation(consult.id) || consult)
+      ElMessage.success(t('cashier.paymentSuccess'))
+      return
     }
     const updated = await consultationsStore.markAsPaid(consult.id, {
       paymentMethod: method,
@@ -189,8 +215,15 @@ async function processPayment(consultation) {
     selectedConsult.value = refreshed
     ElMessage.success(t('cashier.paymentSuccess'))
 
-    const emailContent = buildInvoiceEmail(refreshed.patient, refreshed, settingsStore.clinicName)
     if (refreshed.patient?.emails?.[0] || refreshed.patient?.email) {
+      let invoiceResult = null
+      try {
+        invoiceResult = await generateInvoicePdfForEmail(refreshed)
+      } catch (error) {
+        ElMessage.warning((error.message || t('consultation.pdfFailed')))
+        return
+      }
+      const emailContent = buildInvoiceEmail(refreshed.patient, refreshed, settingsStore.clinicName, { pdfResult: invoiceResult })
       sendEmailContent(emailContent)
     }
   } catch (error) {
@@ -215,17 +248,26 @@ async function handlePrintInvoice(consultation) {
   printInvoice(consultation, consultation.patient, consultation.practitioner, settingsStore.clinicName, consultationTaxRate(consultation), {
     address: settingsStore.clinicAddress,
     phone: settingsStore.clinicPhone,
+    clinicSeal: settingsStore.clinicSeal,
+    thirdPartySignature: settingsStore.thirdPartySignature,
   })
 }
 
-function handleSendInvoiceEmail(consultation) {
+async function handleSendInvoiceEmail(consultation) {
   if (!consultation) return
   const consult = enrichConsultation(consultation)
   if (!consult.patient?.emails?.[0] && !consult.patient?.email) {
     ElMessage.warning(t('patientDetail.noEmailForConsent'))
     return
   }
-  openEmailPreview(buildInvoiceEmail(consult.patient, consult, settingsStore.clinicName))
+  let invoiceResult = null
+  try {
+    invoiceResult = await generateInvoicePdfForEmail(consult)
+  } catch (error) {
+    ElMessage.warning(error.message || t('consultation.pdfFailed'))
+    return
+  }
+  openEmailPreview(buildInvoiceEmail(consult.patient, consult, settingsStore.clinicName, { pdfResult: invoiceResult }))
 }
 </script>
 
@@ -347,7 +389,7 @@ function handleSendInvoiceEmail(consultation) {
           <span><strong>{{ t('cashier.dateLabel') }}</strong>{{ formatDate(selectedConsult.date) }}</span>
         </div>
         <div class="inv-patient-row">
-          <span><strong>地址：</strong>{{ [selectedConsult.patient?.addressStreet, selectedConsult.patient?.addressCity, selectedConsult.patient?.addressState, selectedConsult.patient?.addressPostal].filter(Boolean).join(', ') || selectedConsult.patient?.address || '-' }}</span>
+          <span><strong>地址：</strong>{{ formatPatientAddress(selectedConsult.patient) }}</span>
         </div>
         <div class="inv-patient-row">
           <span><strong>针灸师：</strong>{{ selectedConsult.practitioner?.name || '-' }}</span>

@@ -19,6 +19,7 @@ test('邮件模板读取时过滤坏 key 并补齐默认模板', () => {
   assert.equal(templates[0], undefined)
   assert.equal(templates.invoice.subject, 'Paid {{patientName}}')
   assert.match(templates.invoice.body, /发票/)
+  assert.doesNotMatch(templates.invoice.body, /invoiceLink/)
   assert.equal(templates.consultationRecord.body, 'Report {{patientName}}')
 })
 
