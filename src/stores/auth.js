@@ -152,11 +152,11 @@ export const useAuthStore = defineStore('auth', () => {
         merged[key] = updates[key]
       }
     })
-    const idx = users.value.findIndex((u) => u.id === id)
+    const idx = users.value.findIndex((u) => String(u.id) === String(id))
     if (idx !== -1) {
       users.value[idx] = merged
       saveUsers()
-      if (currentUser.value?.id === id) {
+      if (String(currentUser.value?.id) === String(id)) {
         currentUser.value = { ...currentUser.value, ...merged }
         saveState()
       }
@@ -173,7 +173,7 @@ export const useAuthStore = defineStore('auth', () => {
       users.value[idx] = user
     }
     saveUsers()
-    if (currentUser.value?.id === user.id) {
+    if (String(currentUser.value?.id) === String(user.id)) {
       currentUser.value = { ...currentUser.value, ...user }
       saveState()
     }
