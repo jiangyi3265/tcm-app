@@ -6,7 +6,8 @@ import { setLocale, getLocale } from '../../i18n'
 import { useAuthStore } from '../../stores/auth'
 import { useInventoryStore } from '../../stores/inventory'
 import { useBranchesStore } from '../../stores/branches'
-import { authApi } from '../../utils/api'
+import { authApi, usersApi } from '../../utils/api'
+import { compressImageFile } from '../../utils/imageCompress'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
@@ -20,6 +21,10 @@ const sidebarCollapsed = inject('sidebarCollapsed', ref(false))
 const isMobile = inject('isMobile', ref(false))
 
 const lowStockCount = computed(() => inventoryStore.lowStockItems.length)
+const canUploadOwnSignature = computed(() => {
+  const roles = authStore.roles || []
+  return roles.some((role) => ['practitioner', 'doctor'].includes(String(role).toLowerCase()))
+})
 
 const breadcrumbKeys = {
   '/dashboard': 'nav.dashboard',
@@ -42,6 +47,10 @@ const changingPwd = ref(false)
 const showPreferenceDialog = ref(false)
 const preferenceForm = ref({ prescriptionPreference: '' })
 
+// Practitioner signature
+const showSignatureDialog = ref(false)
+const uploadingSignature = ref(false)
+
 function openPreferenceDialog() {
   preferenceForm.value.prescriptionPreference = authStore.currentUser?.prescriptionPreference || ''
   showPreferenceDialog.value = true
@@ -57,6 +66,41 @@ async function savePreference() {
   } catch (e) {
     ElMessage.error(e?.message || t('header.preferenceSaveFailed'))
   }
+}
+
+function isPngUploadFile(file) {
+  const type = String(file?.type || '').toLowerCase()
+  const name = String(file?.name || '').toLowerCase()
+  return type === 'image/png' || type === 'image/x-png' || name.endsWith('.png')
+}
+
+async function handleOwnSignatureUpload(file) {
+  const rawFile = file.raw || file
+  if (!isPngUploadFile(rawFile)) {
+    ElMessage.warning(t('header.signaturePngOnly'))
+    return false
+  }
+  if (!authStore.currentUser?.id) {
+    ElMessage.error(t('header.signatureUploadFailed'))
+    return false
+  }
+  uploadingSignature.value = true
+  try {
+    const uploadFile = await compressImageFile(rawFile, {
+      maxBytes: 512 * 1024,
+      maxWidth: 1200,
+      maxHeight: 1200,
+      mimeType: 'image/png',
+    })
+    const updated = await usersApi.uploadSignaturePng(authStore.currentUser.id, uploadFile)
+    authStore.syncUser(updated)
+    ElMessage.success(t('header.signatureUploaded'))
+  } catch (e) {
+    ElMessage.error(e?.message || t('header.signatureUploadFailed'))
+  } finally {
+    uploadingSignature.value = false
+  }
+  return false
 }
 
 async function handleChangePassword() {
@@ -114,6 +158,7 @@ function handleCommand(command) {
   if (command === 'logout') handleLogout()
   if (command === 'change-password') showPasswordDialog.value = true
   if (command === 'preference') openPreferenceDialog()
+  if (command === 'signature') showSignatureDialog.value = true
 }
 </script>
 
@@ -179,6 +224,9 @@ function handleCommand(command) {
             <el-dropdown-item command="preference">
               <el-icon><Setting /></el-icon> {{ t('header.rxPreference') }}
             </el-dropdown-item>
+            <el-dropdown-item v-if="canUploadOwnSignature" command="signature">
+              <el-icon><Upload /></el-icon> {{ t('header.practitionerSignature') }}
+            </el-dropdown-item>
             <el-dropdown-item command="change-password">
               <el-icon><Lock /></el-icon> {{ t('header.changePassword') }}
             </el-dropdown-item>
@@ -222,6 +270,28 @@ function handleCommand(command) {
         <template #footer>
           <el-button @click="showPreferenceDialog = false">{{ t('common.cancel') }}</el-button>
           <el-button type="primary" @click="savePreference">{{ t('common.save') }}</el-button>
+        </template>
+      </el-dialog>
+
+      <!-- 医师签名上传对话框 -->
+      <el-dialog v-model="showSignatureDialog" :title="t('header.signatureTitle')" width="420px" :close-on-click-modal="false">
+        <el-form label-width="110px">
+          <el-form-item :label="t('header.signatureUpload')">
+            <el-upload :auto-upload="false" :show-file-list="false" accept="image/png,.png" :on-change="handleOwnSignatureUpload">
+              <el-button :loading="uploadingSignature">
+                <el-icon><Upload /></el-icon> {{ t('header.uploadPng') }}
+              </el-button>
+            </el-upload>
+          </el-form-item>
+          <el-form-item v-if="authStore.currentUser?.signature?.url || authStore.currentUser?.signature?.path" :label="t('header.signaturePreview')">
+            <div class="signature-preview">
+              <img v-if="authStore.currentUser?.signature?.url" :src="authStore.currentUser.signature.url" alt="practitioner signature" />
+              <span v-else>{{ authStore.currentUser.signature.path }}</span>
+            </div>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="showSignatureDialog = false">{{ t('common.close') }}</el-button>
         </template>
       </el-dialog>
     </div>
@@ -291,6 +361,25 @@ function handleCommand(command) {
 .hamburger-btn {
   padding: 4px;
   margin-right: 4px;
+}
+
+.signature-preview {
+  width: 220px;
+  min-height: 76px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+
+.signature-preview img {
+  max-width: 100%;
+  max-height: 80px;
+  object-fit: contain;
 }
 
 @media (max-width: 767px) {

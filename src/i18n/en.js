@@ -101,6 +101,14 @@ export default {
     defaultRxType: 'Default Type',
     preferenceSaved: 'Preference saved',
     preferenceSaveFailed: 'Failed to save preference',
+    practitionerSignature: 'Practitioner Signature',
+    signatureTitle: 'Practitioner Signature PNG',
+    signatureUpload: 'Upload Signature',
+    signaturePreview: 'Preview',
+    uploadPng: 'Upload PNG',
+    signaturePngOnly: 'Please upload a PNG signature image',
+    signatureUploaded: 'Practitioner signature uploaded',
+    signatureUploadFailed: 'Failed to upload practitioner signature',
   },
 
   // ── Login ──

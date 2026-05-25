@@ -101,6 +101,14 @@ export default {
     defaultRxType: '默认类型',
     preferenceSaved: '偏好设置已保存',
     preferenceSaveFailed: '偏好保存失败',
+    practitionerSignature: '医师签名',
+    signatureTitle: '医师签名 PNG',
+    signatureUpload: '上传签名',
+    signaturePreview: '预览',
+    uploadPng: '上传 PNG',
+    signaturePngOnly: '请上传 PNG 签名图片',
+    signatureUploaded: '医师签名已上传',
+    signatureUploadFailed: '医师签名上传失败',
   },
 
   // ── 登录 ──
