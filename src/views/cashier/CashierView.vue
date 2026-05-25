@@ -37,6 +37,7 @@ const activeTab = ref('pending')
 const selectedConsult = ref(null)
 const showInvoiceDialog = ref(false)
 const selectedPaymentMethod = ref('cash')
+const emailSending = ref(false)
 
 function formatPatientAddress(patient = {}) {
   const parts = [
@@ -224,7 +225,12 @@ async function processPayment(consultation) {
         return
       }
       const emailContent = buildInvoiceEmail(refreshed.patient, refreshed, settingsStore.clinicName, { pdfResult: invoiceResult })
-      sendEmailContent(emailContent)
+      try {
+        await sendEmailContent(emailContent)
+        ElMessage.success(t('common.emailSent'))
+      } catch (error) {
+        ElMessage.error(error.message || '邮件发送失败')
+      }
     }
   } catch (error) {
     ElMessage.error(error.message || t('cashier.paymentFailed'))
@@ -268,6 +274,18 @@ async function handleSendInvoiceEmail(consultation) {
     return
   }
   openEmailPreview(buildInvoiceEmail(consult.patient, consult, settingsStore.clinicName, { pdfResult: invoiceResult }))
+}
+
+async function handleSendPreviewEmail() {
+  emailSending.value = true
+  try {
+    await sendEmail()
+    ElMessage.success(t('common.emailSent'))
+  } catch (error) {
+    ElMessage.error(error.message || '邮件发送失败')
+  } finally {
+    emailSending.value = false
+  }
 }
 </script>
 
@@ -473,7 +491,7 @@ async function handleSendInvoiceEmail(consultation) {
       </el-form>
       <template #footer>
         <el-button @click="showEmailDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="sendEmail(); ElMessage.success(t('common.emailSent'))">{{ t('common.sendEmail') }}</el-button>
+        <el-button type="primary" :loading="emailSending" @click="handleSendPreviewEmail">{{ t('common.sendEmail') }}</el-button>
       </template>
     </el-drawer>
   </div>

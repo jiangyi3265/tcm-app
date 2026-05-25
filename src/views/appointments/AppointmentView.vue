@@ -34,6 +34,7 @@ const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
 const branchesStore = useBranchesStore()
 const { showEmailDialog, emailData, openEmailPreview, sendEmail } = useEmailSimulator()
+const emailSending = ref(false)
 
 const roles = computed(() => authStore.roles)
 const canCreate = computed(() => hasPermission(roles.value, 'appointment.create'))
@@ -748,6 +749,18 @@ function getAppointmentBlockStyle(block) {
     '--block-footer': isBlock ? '#4b5563' : statusFooter,
   }
 }
+
+async function handleSendPreviewEmail() {
+  emailSending.value = true
+  try {
+    await sendEmail()
+    ElMessage.success(t('common.emailSent'))
+  } catch (error) {
+    ElMessage.error(error.message || '邮件发送失败')
+  } finally {
+    emailSending.value = false
+  }
+}
 </script>
 
 <template>
@@ -1166,7 +1179,7 @@ function getAppointmentBlockStyle(block) {
       </el-form>
       <template #footer>
         <el-button @click="showEmailDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="sendEmail(); ElMessage.success(t('common.emailSent'))">{{ t('common.sendEmail') }}</el-button>
+        <el-button type="primary" :loading="emailSending" @click="handleSendPreviewEmail">{{ t('common.sendEmail') }}</el-button>
       </template>
     </el-drawer>
   </div>

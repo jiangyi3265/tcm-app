@@ -469,7 +469,9 @@ export const useSettingsStore = defineStore('settings', () => {
       url: uploaded.url || '',
       uploadedAt: uploaded.uploadedAt || new Date().toISOString(),
     }
-    await updateSettings({ thirdPartySignature: nextSignature, thirdPartyInvoicePng: nextSignature.path })
+    thirdPartySignature.value = nextSignature
+    thirdPartyInvoicePng.value = nextSignature.path
+    saveState()
     return nextSignature
   }
 
@@ -480,7 +482,8 @@ export const useSettingsStore = defineStore('settings', () => {
       url: uploaded.url || '',
       uploadedAt: uploaded.uploadedAt || new Date().toISOString(),
     }
-    await updateSettings({ clinicSeal: nextSeal })
+    clinicSeal.value = nextSeal
+    saveState()
     return nextSeal
   }
 

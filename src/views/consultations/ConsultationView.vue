@@ -186,6 +186,7 @@ const pendingPosPaymentMethod = ref('')
 const invoicePaymentSubmitting = ref(false)
 const reportPdfGenerating = ref(false)
 const invoicePdfGenerating = ref(false)
+const emailSending = ref(false)
 const serverDocuments = ref([])
 const documentsLoading = ref(false)
 
@@ -2200,6 +2201,18 @@ async function handleSendInvoiceEmail() {
   if (!result) return
   openEmailPreview(buildInvoiceEmail(patient.value, form.value, settingsStore.clinicName, { pdfResult: result }))
 }
+
+async function handleSendPreviewEmail() {
+  emailSending.value = true
+  try {
+    await sendEmail()
+    ElMessage.success(t('common.emailSent'))
+  } catch (error) {
+    ElMessage.error(error.message || '邮件发送失败')
+  } finally {
+    emailSending.value = false
+  }
+}
 </script>
 
 <template>
@@ -3539,7 +3552,7 @@ async function handleSendInvoiceEmail() {
       </el-form>
       <template #footer>
         <el-button @click="showEmailDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="sendEmail(); ElMessage.success(t('common.emailSent'))">{{ t('common.sendEmail') }}</el-button>
+        <el-button type="primary" :loading="emailSending" @click="handleSendPreviewEmail">{{ t('common.sendEmail') }}</el-button>
       </template>
     </el-drawer>
 

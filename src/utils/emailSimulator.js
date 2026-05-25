@@ -139,29 +139,33 @@ export function useEmailSimulator() {
     showEmailDialog.value = true
   }
 
-  function sendEmail() {
+  async function sendEmail() {
     const entry = {
       id: `email-${Date.now()}`,
       ...emailData.value,
       sentAt: new Date().toISOString(),
     }
-    emailLog.value.unshift(entry)
-    if (emailLog.value.length > 100) {
-      emailLog.value = emailLog.value.slice(0, 100)
-    }
-    saveEmailLog(emailLog.value)
-    void emailLogsApi.create({
+    const response = await emailLogsApi.create({
       ...entry,
       templateBody: entry.templateKey ? entry.body : undefined,
       variables: entry.variables,
       attachments: entry.attachments,
       useTemplate: entry.useTemplate,
-    }).catch(() => {})
+    })
+    if (response?.success === false) {
+      throw new Error('邮件未发送，请检查 SMTP 设置或发票 PDF 附件。')
+    }
+    entry.serverResult = response
+    emailLog.value.unshift(entry)
+    if (emailLog.value.length > 100) {
+      emailLog.value = emailLog.value.slice(0, 100)
+    }
+    saveEmailLog(emailLog.value)
     showEmailDialog.value = false
     return entry
   }
 
-  function sendEmailContent(email) {
+  async function sendEmailContent(email) {
     emailData.value = { ...email }
     return sendEmail()
   }
