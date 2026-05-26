@@ -946,14 +946,14 @@ async function saveStripeSettings() {
   const terminalReaderId = String(stripeSettingsForm.terminalReaderId || '').trim()
   const secretKey = String(stripeSettingsForm.secretKey || '').trim()
   const webhookSecret = String(stripeSettingsForm.webhookSecret || '').trim()
-  if (!publishableKey) return ElMessage.warning('请输入 Stripe publishable key')
   if (!terminalReaderId) return ElMessage.warning('请输入 Stripe Reader ID')
   if (!settingsStore.stripeSettings.secretKeyConfigured && !secretKey) {
     return ElMessage.warning('请输入 Stripe secret key')
   }
   savingStripeSettings.value = true
   try {
-    const payload = { publishableKey, terminalReaderId }
+    const payload = { terminalReaderId }
+    if (publishableKey) payload.publishableKey = publishableKey
     if (secretKey) payload.secretKey = secretKey
     if (webhookSecret) payload.webhookSecret = webhookSecret
     await settingsStore.updateStripeSettings(payload)
@@ -1972,10 +1972,71 @@ const showAddTemplateDialog = ref(false)
 const newTemplate = ref({ name: '', disease: '', category: '', description: '', acupoints: [], formulaIds: [], advice: '', notes: '' })
 const newTemplateAcupoint = ref({ acupointId: '', name: '', method: '' })
 
+function normalizeAcuMatchKey(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[，,、;；\s]+/g, '')
+    .replace(/[（）()]/g, '')
+}
+
+function acuTextVariants(value) {
+  const text = String(value || '').trim()
+  if (!text) return []
+  const variants = [text]
+  const beforeParen = text.replace(/[（(].*?[）)]/g, '').trim()
+  const withoutParenMarks = text.replace(/[（）()]/g, ' ').trim()
+  const parenMatches = [...text.matchAll(/[（(]([^）)]+)[）)]/g)].map((match) => match[1].trim())
+  if (beforeParen && beforeParen !== text) variants.push(beforeParen)
+  if (withoutParenMarks && withoutParenMarks !== text) variants.push(withoutParenMarks)
+  variants.push(...parenMatches)
+  return uniqueOptions(variants.map(normalizeAcuMatchKey).filter(Boolean))
+}
+
+function getTemplateAcuName(value) {
+  if (!value) return ''
+  if (typeof value === 'object') return value.name || value.point || value.pointName || value.label || ''
+  return String(value)
+}
+
+function resolveTemplateAcupoint(value) {
+  const source = value && typeof value === 'object' ? value : {}
+  const sourceId = source.acupointId || source.id || source.pointId
+  if (sourceId) {
+    const byId = acupointsStore.activeAcupoints.find((item) => String(item.id) === String(sourceId))
+    if (byId) return byId
+  }
+  const keys = new Set(acuTextVariants(getTemplateAcuName(value)))
+  if (!keys.size) return null
+  return acupointsStore.activeAcupoints.find((item) =>
+    acuTextVariants(item.name).some((key) => keys.has(key)),
+  ) || null
+}
+
+function sanitizeTemplateAcupoints(rows = []) {
+  const result = []
+  const seen = new Set()
+  for (const row of rows || []) {
+    const resolved = resolveTemplateAcupoint(row)
+    if (!resolved) continue
+    const method = String(row?.method || row?.notes || '').trim()
+    const key = `${resolved.id || normalizeAcuMatchKey(resolved.name)}::${normalizeAcuMatchKey(method)}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push({
+      acupointId: resolved.id,
+      name: resolved.name,
+      method,
+    })
+  }
+  return result
+}
+
 function formatTemplateAcupoint(acu) {
-  if (typeof acu === 'string') return acu
-  if (!acu || typeof acu !== 'object') return ''
-  return `${acu.name || ''}${acu.method ? '(' + acu.method + ')' : ''}`.trim()
+  const resolved = resolveTemplateAcupoint(acu)
+  if (!resolved) return ''
+  const method = typeof acu === 'object' ? acu.method : ''
+  return `${resolved.name || ''}${method ? '(' + method + ')' : ''}`.trim()
 }
 
 function handleTemplateAcupointSelection(target, acupointId) {
@@ -1986,9 +2047,11 @@ function handleTemplateAcupointSelection(target, acupointId) {
 }
 
 function addTemplateAcupoint() {
-  if (!newTemplateAcupoint.value.name) return
+  const resolved = resolveTemplateAcupoint(newTemplateAcupoint.value)
+  if (!resolved) return
   newTemplate.value.acupoints.push({
-    name: newTemplateAcupoint.value.name,
+    acupointId: resolved.id,
+    name: resolved.name,
     method: newTemplateAcupoint.value.method || '',
   })
   newTemplateAcupoint.value = { acupointId: '', name: '', method: '' }
@@ -1997,7 +2060,7 @@ function removeTemplateAcupoint(idx) { newTemplate.value.acupoints.splice(idx, 1
 
 async function handleAddTemplate() {
   if (!newTemplate.value.name) return ElMessage.warning(t('admin.fillTemplateName'))
-  await templatesStore.addTemplate({ ...newTemplate.value })
+  await templatesStore.addTemplate({ ...newTemplate.value, acupoints: sanitizeTemplateAcupoints(newTemplate.value.acupoints) })
   ElMessage.success(t('admin.templateCreated'))
   showAddTemplateDialog.value = false
   newTemplate.value = { name: '', disease: '', category: '', description: '', acupoints: [], formulaIds: [], advice: '', notes: '' }
@@ -2010,12 +2073,14 @@ const editTemplateAcupoint = ref({ acupointId: '', name: '', method: '' })
 
 function startEditTemplate(t) {
   editingTemplateId.value = t.id
-  editTemplateForm.value = { ...t, acupoints: [...(t.acupoints || [])], formulaIds: [...(t.formulaIds || [])] }
+  editTemplateForm.value = { ...t, acupoints: sanitizeTemplateAcupoints(t.acupoints || []), formulaIds: [...(t.formulaIds || [])] }
 }
 function addEditTemplateAcupoint() {
-  if (!editTemplateAcupoint.value.name) return
+  const resolved = resolveTemplateAcupoint(editTemplateAcupoint.value)
+  if (!resolved) return
   editTemplateForm.value.acupoints.push({
-    name: editTemplateAcupoint.value.name,
+    acupointId: resolved.id,
+    name: resolved.name,
     method: editTemplateAcupoint.value.method || '',
   })
   editTemplateAcupoint.value = { acupointId: '', name: '', method: '' }
@@ -2023,7 +2088,10 @@ function addEditTemplateAcupoint() {
 function removeEditTemplateAcupoint(idx) { editTemplateForm.value.acupoints.splice(idx, 1) }
 
 async function saveEditTemplate() {
-  await templatesStore.updateTemplate(editingTemplateId.value, editTemplateForm.value)
+  await templatesStore.updateTemplate(editingTemplateId.value, {
+    ...editTemplateForm.value,
+    acupoints: sanitizeTemplateAcupoints(editTemplateForm.value.acupoints || []),
+  })
   editingTemplateId.value = null; ElMessage.success(t('admin.templateUpdated'))
 }
 async function deleteTemplate(tmpl) {
@@ -3444,8 +3512,8 @@ async function deleteTemplate(tmpl) {
           <el-table-column :label="t('admin.templateCategory')" width="80" prop="category" />
           <el-table-column :label="t('admin.templateAcupoints')" min-width="200">
             <template #default="{ row }">
-              <el-tag v-for="(acu, idx) in (row.acupoints || [])" :key="idx" size="small" style="margin:2px 4px 2px 0">{{ formatTemplateAcupoint(acu) }}</el-tag>
-              <span v-if="!row.acupoints || row.acupoints.length === 0" style="color:#bbb">{{ t('admin.templateNone') }}</span>
+              <el-tag v-for="(acu, idx) in sanitizeTemplateAcupoints(row.acupoints || [])" :key="idx" size="small" style="margin:2px 4px 2px 0">{{ formatTemplateAcupoint(acu) }}</el-tag>
+              <span v-if="sanitizeTemplateAcupoints(row.acupoints || []).length === 0" style="color:#bbb">{{ t('admin.templateNone') }}</span>
             </template>
           </el-table-column>
           <el-table-column :label="t('admin.templateAdvice')" min-width="180"><template #default="{ row }"><span style="font-size:12px; color:#555">{{ row.advice || '-' }}</span></template></el-table-column>

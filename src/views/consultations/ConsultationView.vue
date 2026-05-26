@@ -198,12 +198,75 @@ function cloneJson(value, fallback = null) {
   return JSON.parse(JSON.stringify(value))
 }
 
+function normalizeAcuMatchKey(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[，,、;；\s]+/g, '')
+    .replace(/[（）()]/g, '')
+}
+
+function acuTextVariants(value) {
+  const text = String(value || '').trim()
+  if (!text) return []
+  const variants = [text]
+  const beforeParen = text.replace(/[（(].*?[）)]/g, '').trim()
+  const withoutParenMarks = text.replace(/[（）()]/g, ' ').trim()
+  const parenMatches = [...text.matchAll(/[（(]([^）)]+)[）)]/g)].map((match) => match[1].trim())
+  if (beforeParen && beforeParen !== text) variants.push(beforeParen)
+  if (withoutParenMarks && withoutParenMarks !== text) variants.push(withoutParenMarks)
+  variants.push(...parenMatches)
+  return [...new Set(variants.map(normalizeAcuMatchKey).filter(Boolean))]
+}
+
+function getAcuSourceName(value) {
+  if (!value) return ''
+  if (typeof value === 'object') {
+    return value.name || value.point || value.pointName || value.label || ''
+  }
+  return String(value)
+}
+
+function resolveAcuPoint(value) {
+  const source = value && typeof value === 'object' ? value : {}
+  const sourceId = source.acupointId || source.id || source.pointId
+  if (sourceId) {
+    const byId = acupointsStore.activeAcupoints.find((item) => String(item.id) === String(sourceId))
+    if (byId) return byId
+  }
+  const keys = new Set(acuTextVariants(getAcuSourceName(value)))
+  if (!keys.size) return null
+  return acupointsStore.activeAcupoints.find((item) =>
+    acuTextVariants(item.name).some((key) => keys.has(key)),
+  ) || null
+}
+
+function normalizeAcuRows(rows = []) {
+  const result = []
+  const seen = new Set()
+  for (const row of rows || []) {
+    const resolved = resolveAcuPoint(row?.point ?? row?.name ?? row?.pointName ?? row)
+    if (!resolved) continue
+    const notes = String(row?.notes || row?.method || '').trim()
+    const next = {
+      point: resolved.name,
+      side: row?.side || 'bilateral',
+      notes,
+    }
+    const key = `${normalizeAcuMatchKey(next.point)}::${next.side}::${normalizeAcuMatchKey(notes)}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(next)
+  }
+  return result
+}
+
 function buildFormFromConsultation(record = {}) {
   const nextForm = {
     ...defaultForm(),
     ...record,
     diff: normalizeDiff(record.diff || {}),
-    acupuncture: [...(record.acupuncture || [])],
+    acupuncture: normalizeAcuRows(record.acupuncture || []),
     prescriptions: (record.prescriptions || []).map((rx) => ({
       ...rx,
       items: (rx.items || []).map((item) => ({ ...item })),
@@ -236,6 +299,7 @@ function buildPersistPayload(source = form.value) {
   return cloneJson({
     ...source,
     diff: nextDiff,
+    acupuncture: normalizeAcuRows(source.acupuncture || []),
     consultationFeeTaxable: false,
     summary: source.chiefComplaintDescription || source.summary,
     totalWithoutTax: totalWithoutTax.value,
@@ -656,7 +720,7 @@ onMounted(() => {
         Object.assign(form.value, copyData)
         form.value.date = todayDate()
         if (copyData.diff) form.value.diff = normalizeDiff(copyData.diff)
-        if (copyData.acupuncture) form.value.acupuncture = [...copyData.acupuncture]
+        if (copyData.acupuncture) form.value.acupuncture = normalizeAcuRows(copyData.acupuncture)
         if (copyData.prescriptions) {
           applyCopiedPrescriptions(copyData.prescriptions)
           persistCopiedPrescriptions(form.value.prescriptions).catch((error) => {
@@ -1640,9 +1704,24 @@ function removeAcu(i) { form.value.acupuncture.splice(i, 1) }
 function applyAcuTemplate(templateId) {
   const tpl = templatesStore.getTemplate(templateId)
   if (!tpl || !tpl.acupoints || tpl.acupoints.length === 0) return
-  tpl.acupoints.forEach(name => {
-    form.value.acupuncture.push({ point: name, side: 'bilateral', notes: '' })
-  })
+  const templateRows = normalizeAcuRows((tpl.acupoints || []).map((acu) => ({
+    point: acu,
+    side: 'bilateral',
+    notes: typeof acu === 'object' ? (acu.method || acu.notes || '') : '',
+  })))
+  if (!templateRows.length) {
+    ElMessage.warning('Template acupoints are not in the acupoint dictionary')
+    return
+  }
+  form.value.acupuncture = normalizeAcuRows([...form.value.acupuncture, ...templateRows])
+}
+
+function validTemplateAcupointCount(template) {
+  return normalizeAcuRows((template?.acupoints || []).map((acu) => ({
+    point: acu,
+    side: 'bilateral',
+    notes: typeof acu === 'object' ? (acu.method || acu.notes || '') : '',
+  }))).length
 }
 
 // ============ Services ============
@@ -2900,7 +2979,7 @@ async function handleSendPreviewEmail() {
                   <el-option
                     v-for="tpl in templatesStore.activeTemplates"
                     :key="tpl.id"
-                    :label="`${tpl.name} (${(tpl.acupoints||[]).length})`"
+                    :label="`${tpl.name} (${validTemplateAcupointCount(tpl)})`"
                     :value="tpl.id"
                   />
                 </el-select>
@@ -2913,7 +2992,7 @@ async function handleSendPreviewEmail() {
           <el-table :data="form.acupuncture" size="small" empty-text="We didn't find anything to show here">
             <el-table-column label="Name" min-width="160">
               <template #default="{ row }">
-                <el-select v-if="!isReadOnly" v-model="row.point" filterable allow-create size="small" style="width:100%">
+                <el-select v-if="!isReadOnly" v-model="row.point" filterable clearable size="small" style="width:100%">
                   <el-option v-for="pt in acupointsStore.acupointNames" :key="pt" :label="pt" :value="pt" />
                 </el-select>
                 <span v-else>{{ row.point }}</span>

@@ -6,6 +6,46 @@ import { readStoredJson, writeStoredJson } from '../utils/storage'
 export const useInventoryStore = defineStore('inventory', () => {
   const items = ref([])
 
+  function normalizeInventoryCategory(category) {
+    const text = String(category || '').trim().toLowerCase().replace(/[-\s]+/g, '_')
+    const compact = text.replace(/_/g, '')
+    if (
+      text === 'raw_herbs'
+      || compact === 'rawherbs'
+      || compact === 'rawherb'
+      || compact === 'herbs'
+      || compact === 'herb'
+      || text.includes('草药')
+      || text.includes('中药')
+      || text.includes('饮片')
+    ) return 'raw_herbs'
+    if (
+      text === 'powder'
+      || compact === 'powders'
+      || compact === 'granule'
+      || compact === 'granules'
+      || text.includes('颗粒')
+      || text.includes('粉')
+    ) return 'powder'
+    if (
+      text === 'pills'
+      || compact === 'pill'
+      || compact === 'patentmedicine'
+      || compact === 'patentmedicines'
+      || text.includes('成药')
+      || text.includes('丸')
+      || text.includes('片')
+    ) return 'pills'
+    return text || 'raw_herbs'
+  }
+
+  function normalizeInventoryItem(item = {}) {
+    return {
+      ...item,
+      category: normalizeInventoryCategory(item.category),
+    }
+  }
+
   function init() {
     items.value = readStoredJson('tcm_inventory', []) || []
   }
@@ -34,9 +74,9 @@ export const useInventoryStore = defineStore('inventory', () => {
 
   const itemsByCategory = computed(() => {
     return {
-      powder: items.value.filter((i) => i.isActive && !i.deletedAt && i.category === 'powder'),
-      raw_herbs: items.value.filter((i) => i.isActive && !i.deletedAt && i.category === 'raw_herbs'),
-      pills: items.value.filter((i) => i.isActive && !i.deletedAt && i.category === 'pills'),
+      powder: items.value.filter((i) => i.isActive && !i.deletedAt && normalizeInventoryCategory(i.category) === 'powder'),
+      raw_herbs: items.value.filter((i) => i.isActive && !i.deletedAt && normalizeInventoryCategory(i.category) === 'raw_herbs'),
+      pills: items.value.filter((i) => i.isActive && !i.deletedAt && normalizeInventoryCategory(i.category) === 'pills'),
     }
   })
 
@@ -54,7 +94,7 @@ export const useInventoryStore = defineStore('inventory', () => {
       branchId: data.branchId || null,
       isActive: true,
     }
-    const created = await inventoryApi.create(newItem)
+    const created = normalizeInventoryItem(await inventoryApi.create(newItem))
     items.value.push(created)
     saveState()
     // 从后端重新刷新确保数据一致性
@@ -65,7 +105,7 @@ export const useInventoryStore = defineStore('inventory', () => {
   async function updateItem(id, updates) {
     const idx = items.value.findIndex((i) => i.id === id)
     if (idx !== -1) {
-      const updated = await inventoryApi.update(id, updates)
+      const updated = normalizeInventoryItem(await inventoryApi.update(id, updates))
       items.value[idx] = updated
       saveState()
       // 从后端重新刷新确保数据一致性
@@ -76,7 +116,7 @@ export const useInventoryStore = defineStore('inventory', () => {
   }
 
   async function deleteItem(id) {
-    const updated = await inventoryApi.softDelete(id)
+    const updated = normalizeInventoryItem(await inventoryApi.softDelete(id))
     const idx = items.value.findIndex((i) => i.id === id)
     if (idx !== -1) items.value[idx] = updated
     saveState()
@@ -84,7 +124,7 @@ export const useInventoryStore = defineStore('inventory', () => {
   }
 
   async function restoreItem(id) {
-    const updated = await inventoryApi.restore(id)
+    const updated = normalizeInventoryItem(await inventoryApi.restore(id))
     const idx = items.value.findIndex((i) => i.id === id)
     if (idx !== -1) items.value[idx] = updated
     saveState()
@@ -108,7 +148,7 @@ export const useInventoryStore = defineStore('inventory', () => {
   async function adjustStock(id, delta, reason = '') {
     const idx = items.value.findIndex((i) => i.id === id)
     if (idx === -1) return false
-    const updated = await inventoryApi.adjust(id, delta, reason)
+    const updated = normalizeInventoryItem(await inventoryApi.adjust(id, delta, reason))
     items.value[idx] = updated
     saveState()
     await refreshFromApi()
@@ -118,7 +158,7 @@ export const useInventoryStore = defineStore('inventory', () => {
   async function refreshFromApi() {
     try {
       const list = await inventoryApi.list({ includeDeleted: true })
-      items.value = list
+      items.value = list.map(normalizeInventoryItem)
       saveState()
     } catch (e) {
       console.warn('库存刷新失败:', e.message)

@@ -91,6 +91,39 @@ function normalizeInventoryUnit(unit) {
   return String(unit || '').trim() || 'g'
 }
 
+function normalizeInventoryCategory(category) {
+  const text = String(category || activeTab.value || 'raw_herbs').trim().toLowerCase().replace(/[-\s]+/g, '_')
+  const compact = text.replace(/_/g, '')
+  if (
+    text === 'raw_herbs'
+    || compact === 'rawherbs'
+    || compact === 'rawherb'
+    || compact === 'herbs'
+    || compact === 'herb'
+    || text.includes('草药')
+    || text.includes('中药')
+    || text.includes('饮片')
+  ) return 'raw_herbs'
+  if (
+    text === 'powder'
+    || compact === 'powders'
+    || compact === 'granule'
+    || compact === 'granules'
+    || text.includes('颗粒')
+    || text.includes('粉')
+  ) return 'powder'
+  if (
+    text === 'pills'
+    || compact === 'pill'
+    || compact === 'patentmedicine'
+    || compact === 'patentmedicines'
+    || text.includes('成药')
+    || text.includes('丸')
+    || text.includes('片')
+  ) return 'pills'
+  return text || 'raw_herbs'
+}
+
 const INVENTORY_IMPORT_ALIASES = {
   name: ['name', '名称', '库存名'],
   category: ['category', '分类'],
@@ -146,7 +179,7 @@ function buildInventoryImportItem(item) {
   return {
     ...item,
     name: String(item.name || '').trim(),
-    category: String(item.category || activeTab.value || 'raw_herbs').trim(),
+    category: normalizeInventoryCategory(item.category),
     quantity: toNumber(item.quantity),
     unit: normalizeInventoryUnit(item.unit),
     pricePerUnit: toNumber(item.pricePerUnit),
@@ -193,7 +226,7 @@ function syncHerbBinding(target, herbId) {
 }
 
 function handlePatentMedicineSelection(target, name) {
-  target.herbDictId = null
+  target.herbDictId = name || null
   target.name = name || ''
   target.aliases = ''
   target.taste = []
