@@ -22,9 +22,15 @@ export async function compressImageFile(file, options = {}) {
     blob = await renderImage(image, width, height, mimeType, quality)
   }
 
-  while (blob.size > maxBytes && width > 480 && height > 480) {
-    width = Math.round(width * 0.85)
-    height = Math.round(height * 0.85)
+  while (blob.size > maxBytes && Math.max(width, height) > 96) {
+    const maxSide = Math.max(width, height)
+    const nextMaxSide = Math.max(96, Math.round(maxSide * 0.85))
+    const ratio = nextMaxSide / maxSide
+    const nextWidth = Math.max(1, Math.round(width * ratio))
+    const nextHeight = Math.max(1, Math.round(height * ratio))
+    if (nextWidth === width && nextHeight === height) break
+    width = nextWidth
+    height = nextHeight
     blob = await renderImage(image, width, height, mimeType, quality)
   }
 
