@@ -10,9 +10,19 @@ const TOKEN_KEY = 'tcm_token'
 
 function normalizeUserRoles(user) {
   if (!user) return []
-  if (Array.isArray(user.roles) && user.roles.length > 0) return user.roles.filter(Boolean)
-  if (user.role) return [user.role]
-  return []
+  const rawRoles = Array.isArray(user.roles) && user.roles.length > 0
+    ? user.roles
+    : user.role ? [user.role] : []
+  const priority = ['admin', 'practitioner', 'doctor', 'cashier', 'pharmacist', 'apprentice']
+  return [...new Set(rawRoles
+    .map((role) => String(role || '').trim().toLowerCase())
+    .filter(Boolean))]
+    .sort((left, right) => {
+      const leftIndex = priority.includes(left) ? priority.indexOf(left) : priority.length
+      const rightIndex = priority.includes(right) ? priority.indexOf(right) : priority.length
+      if (leftIndex !== rightIndex) return leftIndex - rightIndex
+      return left.localeCompare(right)
+    })
 }
 
 function hasUserRole(user, roleKey) {

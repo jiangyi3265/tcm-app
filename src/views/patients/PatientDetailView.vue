@@ -46,7 +46,9 @@ const canCreate = computed(() => hasPermission(roles.value, 'consultation.create
 const canDelete = computed(() => hasPermission(roles.value, 'patient.delete'))
 const isApprenticeReadonly = computed(() => roles.value.includes('apprentice'))
 const isAdmin = computed(() => roles.value.includes('admin'))
-const hidePatientContact = computed(() => roles.value.includes('practitioner') || roles.value.includes('apprentice'))
+const hidePatientContact = computed(() =>
+  !isAdmin.value && (roles.value.includes('practitioner') || roles.value.includes('apprentice')),
+)
 
 const patientId = route.params.id
 const patient = computed(() => patientsStore.getPatient(patientId))

@@ -24,7 +24,9 @@ const canCreate = computed(() => hasPermission(roles.value, 'patient.create'))
 const canMerge = computed(() => hasPermission(roles.value, 'patient.merge'))
 const isApprenticeReadonly = computed(() => roles.value.includes('apprentice'))
 const isAdmin = computed(() => roles.value.includes('admin'))
-const hidePatientContact = computed(() => roles.value.includes('practitioner') || roles.value.includes('apprentice'))
+const hidePatientContact = computed(() =>
+  !isAdmin.value && (roles.value.includes('practitioner') || roles.value.includes('apprentice')),
+)
 
 const filteredPatients = computed(() => patientsStore.searchPatients(searchQuery.value))
 
