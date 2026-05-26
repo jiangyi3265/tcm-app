@@ -27,8 +27,38 @@ const isAdmin = computed(() => roles.value.includes('admin'))
 const hidePatientContact = computed(() =>
   !isAdmin.value && (roles.value.includes('practitioner') || roles.value.includes('apprentice')),
 )
-
+const patientSortState = ref({ prop: 'name', order: 'ascending' })
 const filteredPatients = computed(() => patientsStore.searchPatients(searchQuery.value))
+const sortedPatients = computed(() => {
+  const list = [...filteredPatients.value]
+  if (patientSortState.value.prop !== 'name') return list
+  const direction = patientSortState.value.order === 'descending' ? -1 : 1
+  return list.sort((a, b) => direction * comparePatientNames(a, b))
+})
+
+function patientNameKey(patient) {
+  const structuredName = [patient?.lastName, patient?.firstName]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+    .join(' ')
+  return structuredName || String(patient?.name || '').trim()
+}
+
+function comparePatientNames(a, b) {
+  const nameCompare = patientNameKey(a).localeCompare(patientNameKey(b), undefined, {
+    sensitivity: 'base',
+    numeric: true,
+  })
+  if (nameCompare !== 0) return nameCompare
+  return String(a?.id || '').localeCompare(String(b?.id || ''))
+}
+
+function handlePatientSortChange({ prop, order }) {
+  patientSortState.value = {
+    prop: prop || 'name',
+    order: order || 'ascending',
+  }
+}
 
 function resolveDefaultPractitionerId() {
   return isAdmin.value ? '' : String(authStore.userId || '')
@@ -179,13 +209,21 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
     <!-- 病人列表 -->
     <el-card class="list-card">
       <el-table
-        :data="filteredPatients"
+        :data="sortedPatients"
         row-key="id"
         stripe
+        :default-sort="{ prop: 'name', order: 'ascending' }"
+        @sort-change="handlePatientSortChange"
         @row-click="goToPatient"
         style="cursor: pointer"
       >
-        <el-table-column :label="t('patients.name')" min-width="100">
+        <el-table-column
+          prop="name"
+          :label="t('patients.name')"
+          min-width="100"
+          sortable="custom"
+          :sort-orders="['ascending', 'descending']"
+        >
           <template #default="{ row }">
             <div class="patient-name-cell">
               <el-avatar :size="32" style="background: var(--color-primary); flex-shrink:0">
@@ -225,7 +263,7 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
           </template>
         </el-table-column>
       </el-table>
-      <div class="table-footer">{{ t('patients.totalCount', { count: filteredPatients.length }) }}</div>
+      <div class="table-footer">{{ t('patients.totalCount', { count: sortedPatients.length }) }}</div>
     </el-card>
 
     <!-- 新建病人对话框 -->

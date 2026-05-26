@@ -8,6 +8,27 @@ import { useAppointmentsStore } from './appointments'
 export const usePatientsStore = defineStore('patients', () => {
   const patients = ref([])
 
+  function patientNameKey(patient) {
+    const structuredName = [patient?.lastName, patient?.firstName]
+      .map((part) => String(part || '').trim())
+      .filter(Boolean)
+      .join(' ')
+    return structuredName || String(patient?.name || '').trim()
+  }
+
+  function comparePatientNames(a, b) {
+    const nameCompare = patientNameKey(a).localeCompare(patientNameKey(b), undefined, {
+      sensitivity: 'base',
+      numeric: true,
+    })
+    if (nameCompare !== 0) return nameCompare
+    return String(a?.id || '').localeCompare(String(b?.id || ''))
+  }
+
+  function sortPatientsByName(list) {
+    return [...list].sort(comparePatientNames)
+  }
+
   function init() {
     patients.value = readStoredJson('tcm_patients', []) || []
   }
@@ -23,7 +44,7 @@ export const usePatientsStore = defineStore('patients', () => {
     return patients.value
   }
 
-  const activePatients = computed(() => patients.value.filter((p) => p.isActive && !p.deletedAt))
+  const activePatients = computed(() => sortPatientsByName(patients.value.filter((p) => p.isActive && !p.deletedAt)))
 
   function getPatient(id) {
     return patients.value.find((p) => p.id === id) || null
