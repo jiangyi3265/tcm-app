@@ -222,6 +222,9 @@ export const consultationsApi = {
   get(id) { return request(`/api/consultations/${id}`) },
   create(data) { return request('/api/consultations', { method: 'POST', body: data }) },
   update(id, data) { return request(`/api/consultations/${id}`, { method: 'PUT', body: data }) },
+  updateInvoicePricing(id, data) {
+    return request(`/api/consultations/${id}/invoice-pricing`, { method: 'PATCH', body: data })
+  },
   complete(id) { return request(`/api/consultations/${id}/complete`, { method: 'PATCH' }) },
   reactivate(id) { return request(`/api/consultations/${id}/reactivate`, { method: 'PATCH' }) },
   paid(id, data = {}) {

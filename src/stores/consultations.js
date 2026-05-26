@@ -207,6 +207,14 @@ export const useConsultationsStore = defineStore('consultations', () => {
     return updated
   }
 
+  async function updateInvoicePricing(id, pricingInfo = {}) {
+    const updated = await consultationsApi.updateInvoicePricing(id, pricingInfo)
+    const idx = consultations.value.findIndex((c) => c.id === id)
+    if (idx !== -1) consultations.value[idx] = updated
+    saveState()
+    return updated
+  }
+
   async function deleteConsultation(id) {
     const idx = consultations.value.findIndex((c) => c.id === id)
     if (idx === -1) return false
@@ -340,7 +348,7 @@ export const useConsultationsStore = defineStore('consultations', () => {
     getPaymentStatus,
     refreshFromApi,
     getConsultation, getPatientConsultations, getPractitionerConsultations, getLastConsultation,
-    createConsultation, updateConsultation, completeConsultation, reactivateConsultation, markAsPaid,
+    createConsultation, updateConsultation, completeConsultation, reactivateConsultation, markAsPaid, updateInvoicePricing,
     deleteConsultation, restoreConsultation, physicalDeleteConsultation,
     refreshDeletedPrescriptions, restoreDeletedPrescription, permanentlyDeletePrescription,
     markDispensingComplete, syncPatientHistorySnapshot,

@@ -91,6 +91,9 @@ const isConsultationLocked = computed(() =>
   ),
 )
 const isReadOnly = computed(() => lacksEditPermission.value || isConsultationLocked.value)
+const canEditInvoicePricing = computed(() =>
+  !lacksEditPermission.value && form.value.status !== 'paid' && getPaidAmount(form.value) <= 0,
+)
 const isApprenticeReadonly = computed(() => roles.value.includes('apprentice'))
 const canMarkPaid = computed(() => hasPermission(roles.value, 'invoice.manage'))
 const canDeleteConsultation = computed(() => hasPermission(roles.value, 'consultation.delete'))
@@ -239,6 +242,25 @@ function buildPersistPayload(source = form.value) {
     taxAmount: taxAmount.value,
     totalAmount: totalAmount.value,
     branchId: source.branchId || branchesStore.currentBranchId || null,
+  }, {})
+}
+
+function buildInvoicePricingPayload(source = form.value) {
+  const totals = calculateInvoiceTotals(source)
+  return cloneJson({
+    consultationFee: source.consultationFee || 0,
+    services: source.services || [],
+    discountType: source.discountType || 'none',
+    discountValue: source.discountValue || 0,
+    taxable: source.taxable !== undefined ? source.taxable : false,
+    includeRxAmount: Boolean(source.includeRxAmount),
+    add3rdParty: Boolean(source.add3rdParty),
+    currency: source.currency || settingsStore.currency || 'CAD',
+    comments: source.comments || '',
+    overrideTaxRate: source.overrideTaxRate,
+    totalWithoutTax: totals.totalWithoutTax,
+    taxAmount: totals.taxAmount,
+    totalAmount: totals.totalAmount,
   }, {})
 }
 
@@ -1043,12 +1065,23 @@ function shouldPersistRxDraft(source = rxForm.value) {
   })
 }
 
-function buildRxTotals() {
-  return {
-    totalAmount: totalAmount.value,
-    taxAmount: taxAmount.value,
-    totalWithoutTax: totalWithoutTax.value,
-  }
+function buildTotalsSourceWithPrescriptionStatus(prescriptionId, rxStatus) {
+  const source = cloneJson(form.value, {})
+  source.prescriptions = (source.prescriptions || []).map((item) => {
+    if (item.id !== prescriptionId) return item
+    const next = { ...item, rxStatus }
+    if (rxStatus === 'deleted') {
+      next.deletedAt = next.deletedAt || new Date().toISOString()
+    } else {
+      delete next.deletedAt
+    }
+    return next
+  })
+  return source
+}
+
+function buildRxTotals(source = form.value) {
+  return calculateInvoiceTotals(source)
 }
 
 function updateEditingRxIndex(rxId) {
@@ -1235,6 +1268,30 @@ async function persistConsultationDraft({ silent = false, syncRoute = true } = {
   }
 }
 
+async function persistInvoicePricing({ silent = true } = {}) {
+  const id = currentConsultationId.value
+  if (!id || !canEditInvoicePricing.value) return null
+  const updated = await consultStore.updateInvoicePricing(id, buildInvoicePricingPayload())
+  if (updated) {
+    applySavedConsultation(updated)
+    syncSavedSnapshot()
+    if (!silent) {
+      ElMessage.success(t('consultation.saved'))
+    }
+  }
+  return updated
+}
+
+async function persistBeforeInvoicePayment(options = {}) {
+  if (!isReadOnly.value) {
+    return persistConsultationDraft(options)
+  }
+  if (hasUnsavedConsultationChanges.value && canEditInvoicePricing.value) {
+    return persistInvoicePricing(options)
+  }
+  return consultation.value || form.value
+}
+
 async function saveRx() {
   if (rxCompleting.value) return
   const rx = buildPrescriptionPayload(rxForm.value, 'pending')
@@ -1266,7 +1323,7 @@ async function saveRx() {
     const consultationId = synced?.id || currentConsultationId.value
     if (!consultationId) throw new Error(t('consultation.saveBefore'))
     const updated = await consultStore.completePrescription(consultationId, editingPayload.id, {
-      totals: buildRxTotals(),
+      totals: buildRxTotals(buildTotalsSourceWithPrescriptionStatus(editingPayload.id, 'pending')),
     })
     applySavedConsultation(updated)
     syncSavedSnapshot()
@@ -1291,7 +1348,7 @@ async function deleteRx(target) {
   }
   try {
     const updated = await consultStore.deletePrescription(currentConsultationId.value, targetRx.id, {
-      totals: buildRxTotals(),
+      totals: buildRxTotals(buildTotalsSourceWithPrescriptionStatus(targetRx.id, 'deleted')),
     })
     applySavedConsultation(updated)
     syncSavedSnapshot()
@@ -1312,7 +1369,7 @@ async function completeRxRow(row) {
       await waitForRxAutosaveToFinish({ ignoreErrors: true })
     }
     const updated = await consultStore.completePrescription(currentConsultationId.value, row.id, {
-      totals: buildRxTotals(),
+      totals: buildRxTotals(buildTotalsSourceWithPrescriptionStatus(row.id, 'pending')),
     })
     applySavedConsultation(updated)
     syncSavedSnapshot()
@@ -1671,40 +1728,60 @@ const effectiveTaxRate = computed(() => {
 function getServiceExtended(sv) {
   return (sv.price || 0) * (sv.quantity || 1) - (sv.manualDiscount || 0)
 }
-function getServiceTax(sv) {
-  return sv.taxable ? getServiceExtended(sv) * effectiveTaxRate.value : 0
+function getEffectiveTaxRateFor(source = form.value) {
+  if (source?.overrideTaxRate !== null && source?.overrideTaxRate !== undefined) {
+    return source.overrideTaxRate
+  }
+  return settingsStore.taxRate
+}
+function getServiceTax(sv, source = form.value) {
+  return sv.taxable ? getServiceExtended(sv) * getEffectiveTaxRateFor(source) : 0
+}
+function getTotalServiceFor(source = form.value) {
+  return (source.services || []).reduce((s, sv) => s + getServiceExtended(sv), 0)
+}
+function getTotalServiceTaxFor(source = form.value) {
+  return (source.services || []).reduce((s, sv) => s + getServiceTax(sv, source), 0)
+}
+function calculateInvoiceTotals(source = form.value) {
+  const serviceTotal = getTotalServiceFor(source)
+  const rxTotal = getBillablePrescriptionTotal(source)
+  const rawBase = (source.consultationFee || 0) + serviceTotal + (source.includeRxAmount ? rxTotal : 0)
+  let totalBeforeTax = rawBase
+  if (source.discountType === 'percentage') totalBeforeTax *= (1 - (source.discountValue || 0) / 100)
+  else if (source.discountType === 'amount') totalBeforeTax -= (source.discountValue || 0)
+  totalBeforeTax = Math.max(0, totalBeforeTax)
+
+  let factor = 1
+  if (rawBase > 0) {
+    if (source.discountType === 'percentage') factor = Math.max(0, 1 - (source.discountValue || 0) / 100)
+    else if (source.discountType === 'amount') factor = Math.max(0, (rawBase - (source.discountValue || 0)) / rawBase)
+  }
+  const tax = getTotalServiceTaxFor(source) * factor
+  return {
+    totalWithoutTax: roundMoney(totalBeforeTax),
+    taxAmount: roundMoney(tax),
+    totalAmount: roundMoney(totalBeforeTax + tax),
+    discountFactor: factor,
+    includeRxAmount: Boolean(source.includeRxAmount),
+  }
 }
 const totalService = computed(() =>
-  form.value.services.reduce((s, sv) => s + getServiceExtended(sv), 0),
+  getTotalServiceFor(form.value),
 )
 const totalServiceTax = computed(() =>
-  form.value.services.reduce((s, sv) => s + getServiceTax(sv), 0),
+  getTotalServiceTaxFor(form.value),
 )
 // 处方总额：单剂价格 × 数量
 const totalRxAmount = computed(() =>
   getBillablePrescriptionTotal(form.value)
 )
-const totalWithoutTax = computed(() => {
-  let base = (form.value.consultationFee || 0) + totalService.value
-  // Optionally include prescription subtotals in the consultation total
-  if (form.value.includeRxAmount) {
-    base += totalRxAmount.value
-  }
-  if (form.value.discountType === 'percentage') base *= (1 - (form.value.discountValue || 0) / 100)
-  else if (form.value.discountType === 'amount') base -= (form.value.discountValue || 0)
-  return Math.max(0, base)
-})
-const discountFactor = computed(() => {
-  const rawBase = (form.value.consultationFee || 0) + totalService.value
-    + (form.value.includeRxAmount ? totalRxAmount.value : 0)
-  if (rawBase <= 0) return 1
-  if (form.value.discountType === 'percentage') return Math.max(0, 1 - (form.value.discountValue || 0) / 100)
-  if (form.value.discountType === 'amount') return Math.max(0, (rawBase - (form.value.discountValue || 0)) / rawBase)
-  return 1
-})
+const invoiceTotals = computed(() => calculateInvoiceTotals(form.value))
+const totalWithoutTax = computed(() => invoiceTotals.value.totalWithoutTax)
+const discountFactor = computed(() => invoiceTotals.value.discountFactor)
 const consultationFeeTax = computed(() => 0)
-const taxAmount = computed(() => (totalServiceTax.value + consultationFeeTax.value) * discountFactor.value)
-const totalAmount = computed(() => totalWithoutTax.value + taxAmount.value)
+const taxAmount = computed(() => roundMoney((totalServiceTax.value + consultationFeeTax.value) * discountFactor.value))
+const totalAmount = computed(() => invoiceTotals.value.totalAmount)
 
 const invoicePractitioner = computed(() =>
   authStore.getUserById(form.value.practitionerId) || authStore.currentUser,
@@ -1838,7 +1915,7 @@ async function finalizeInvoicePayment(method) {
   invoicePaymentSubmitting.value = true
   try {
     const { savedConsultation, outstandingAmount: refreshedOutstanding } =
-      await resolveInvoicePaymentAfterSave(persistConsultationDraft)
+      await resolveInvoicePaymentAfterSave(persistBeforeInvoicePayment)
 
     if (refreshedOutstanding <= 0) {
       showInvoicePaymentDialog.value = false
@@ -1875,7 +1952,7 @@ async function handleStartInvoicePayment() {
     invoicePaymentSubmitting.value = true
     try {
       const { savedConsultation, outstandingAmount: refreshedOutstanding } =
-        await resolveInvoicePaymentAfterSave(persistConsultationDraft)
+        await resolveInvoicePaymentAfterSave(persistBeforeInvoicePayment)
       if (refreshedOutstanding <= 0) {
         showInvoicePaymentDialog.value = false
         ElMessage.info(t('consultation.noPendingAmount'))
@@ -2157,6 +2234,9 @@ async function generateInvoicePdf({ openFile = true } = {}) {
   try {
     if (!isReadOnly.value && hasUnsavedConsultationChanges.value) {
       const saved = await persistConsultationDraft({ silent: true, syncRoute: false })
+      id = saved?.id || currentConsultationId.value || id
+    } else if (isReadOnly.value && hasUnsavedConsultationChanges.value && canEditInvoicePricing.value) {
+      const saved = await persistInvoicePricing({ silent: true })
       id = saved?.id || currentConsultationId.value || id
     }
     const res = await consultationsApi.generateInvoice(id)
@@ -3100,7 +3180,7 @@ async function handleSendPreviewEmail() {
             <el-col :span="12">
               <el-form label-width="200px" label-position="left" size="small">
                 <el-form-item label="Currency">
-                  <el-select v-model="form.currency" style="width:160px" :disabled="isReadOnly">
+                  <el-select v-model="form.currency" style="width:160px" :disabled="!canEditInvoicePricing">
                     <el-option label="Canadian Dollar CAD" value="CAD" />
                     <el-option label="US Dollar USD" value="USD" />
                   </el-select>
@@ -3108,27 +3188,27 @@ async function handleSendPreviewEmail() {
                 <el-form-item label="Discount Type *">
                   <div class="discount-btns">
                     <el-button :type="form.discountType === 'percentage' ? 'primary' : ''" size="small"
-                      @click="!isReadOnly && (form.discountType = 'percentage')">Percentage %</el-button>
+                      @click="canEditInvoicePricing && (form.discountType = 'percentage')">Percentage %</el-button>
                     <el-button :type="form.discountType === 'amount' ? 'primary' : ''" size="small"
-                      @click="!isReadOnly && (form.discountType = 'amount')">Amount {{ cs }}</el-button>
+                      @click="canEditInvoicePricing && (form.discountType = 'amount')">Amount {{ cs }}</el-button>
                     <el-button :type="form.discountType === 'none' ? 'primary' : ''" size="small"
-                      @click="!isReadOnly && (form.discountType = 'none')">No Disc.</el-button>
+                      @click="canEditInvoicePricing && (form.discountType = 'none')">No Disc.</el-button>
                   </div>
-                  <el-input-number v-if="form.discountType !== 'none' && !isReadOnly"
+                  <el-input-number v-if="form.discountType !== 'none' && canEditInvoicePricing"
                     v-model="form.discountValue" :min="0" size="small" style="width:120px; margin-left:8px" />
                 </el-form-item>
                 <el-form-item :label="localizeMixedLabel('HST Rate 税率')">
-                  <el-radio-group v-model="form.overrideTaxRate" :disabled="isReadOnly" size="small">
+                  <el-radio-group v-model="form.overrideTaxRate" :disabled="!canEditInvoicePricing" size="small">
                     <el-radio-button :value="null">Default ({{ (settingsStore.taxRate * 100).toFixed(0) }}%)</el-radio-button>
                     <el-radio-button :value="0">{{ localizeMixedLabel('0% 免税') }}</el-radio-button>
                     <el-radio-button :value="0.13">13%</el-radio-button>
                   </el-radio-group>
                 </el-form-item>
                 <el-form-item label="Include Prescription Amount?">
-                  <el-switch v-model="form.includeRxAmount" :disabled="isReadOnly" active-text="Yes" inactive-text="No" />
+                  <el-switch v-model="form.includeRxAmount" :disabled="!canEditInvoicePricing" active-text="Yes" inactive-text="No" />
                 </el-form-item>
                 <el-form-item label="Add 3rd Party">
-                  <el-switch v-model="form.add3rdParty" :disabled="isReadOnly" active-text="Yes" inactive-text="No" />
+                  <el-switch v-model="form.add3rdParty" :disabled="!canEditInvoicePricing" active-text="Yes" inactive-text="No" />
                 </el-form-item>
               </el-form>
             </el-col>
@@ -3137,7 +3217,7 @@ async function handleSendPreviewEmail() {
                 <div class="price-row">
                   <span>Consultation Fee</span>
                   <div class="price-val">
-                    <el-input-number v-if="!isReadOnly" v-model="form.consultationFee" :min="0" size="small" style="width:110px" />
+                    <el-input-number v-if="canEditInvoicePricing" v-model="form.consultationFee" :min="0" size="small" style="width:110px" />
                     <span v-else>{{ cs }}{{ form.consultationFee.toFixed(2) }}</span>
                   </div>
                 </div>
@@ -3145,8 +3225,11 @@ async function handleSendPreviewEmail() {
                   <span>Total Service</span>
                   <span class="price-lock">{{ cs }}{{ totalService.toFixed(2) }} <el-icon><Lock /></el-icon></span>
                 </div>
-                <div class="price-row" v-if="form.includeRxAmount && visiblePrescriptions.length">
-                  <span>{{ localizeMixedLabel('Prescription Amount 处方金额') }}</span>
+                <div class="price-row" v-if="visiblePrescriptions.length">
+                  <span>
+                    {{ localizeMixedLabel('Prescription Amount 处方金额') }}
+                    <el-tag v-if="!form.includeRxAmount" size="small" type="info">Not included</el-tag>
+                  </span>
                   <span class="price-lock">{{ cs }}{{ totalRxAmount.toFixed(2) }} <el-icon><Lock /></el-icon></span>
                 </div>
                 <div class="price-row" v-if="form.discountType !== 'none'">
@@ -3171,7 +3254,7 @@ async function handleSendPreviewEmail() {
           <el-divider />
           <el-form label-width="80px" size="small">
             <el-form-item label="Comments">
-              <el-input v-model="form.comments" type="textarea" :rows="3" :readonly="isReadOnly" placeholder="---" />
+              <el-input v-model="form.comments" type="textarea" :rows="3" :readonly="!canEditInvoicePricing" placeholder="---" />
             </el-form-item>
           </el-form>
         </el-card>
