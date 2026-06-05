@@ -117,6 +117,7 @@ export function getInventoryHerbMeta(item = {}, herbById) {
       pickValue(
         herbDict?.meridianTropism,
         herbDict?.guijing,
+        item?.meridianTropism,
         item?.guijing,
       ),
     ),

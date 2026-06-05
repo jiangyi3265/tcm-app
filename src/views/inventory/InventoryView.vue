@@ -53,6 +53,19 @@ const CATEGORY_CONFIG = computed(() => ({
 }))
 
 const herbById = computed(() => new Map(herbDictStore.activeHerbs.map((herb) => [herb.id, herb])))
+const herbByLookupToken = computed(() => {
+  const index = new Map()
+  for (const herb of herbDictStore.activeHerbs) {
+    for (const token of herbLookupTokens(herb)) {
+      if (!index.has(token)) {
+        index.set(token, herb)
+      } else if (index.get(token)?.id !== herb.id) {
+        index.set(token, null)
+      }
+    }
+  }
+  return index
+})
 
 const herbOptions = computed(() =>
   herbDictStore.activeHerbs.map((herb) => ({
@@ -311,6 +324,62 @@ function getSupplierName(item) {
   return item.supplier || '-'
 }
 
+function findSupplierIdByName(name) {
+  const normalized = String(name || '').trim().toLowerCase()
+  if (!normalized) return ''
+  const matched = suppliersStore.activeSuppliers.find((supplier) =>
+    String(supplier?.name || '').trim().toLowerCase() === normalized)
+  return matched?.id || ''
+}
+
+function normalizeLookupToken(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function splitLookupValues(value) {
+  if (Array.isArray(value)) return value.flatMap(splitLookupValues)
+  return String(value || '')
+    .split(/[;,，、；\n\r]+/)
+    .map(normalizeLookupToken)
+    .filter(Boolean)
+}
+
+function herbLookupTokens(herb) {
+  return [
+    herb?.name,
+    herb?.pinyin,
+    herb?.alias,
+    herb?.aliases,
+    herb?.englishName,
+  ].flatMap(splitLookupValues)
+}
+
+function resolveInventoryHerbDictId(item = {}) {
+  if (item.category === 'pills') return item.name || ''
+  if (item.herbDictId) return item.herbDictId
+  for (const value of [item.name, item.alias, item.aliases, item.pinyin]) {
+    const matched = herbByLookupToken.value.get(normalizeLookupToken(value))
+    if (matched?.id) return matched.id
+  }
+  return null
+}
+
+function stockQuantityClass(item) {
+  const quantity = Number(item?.quantity ?? 0)
+  const lowStock = inventoryStore.isLowStockItem(item)
+  return {
+    'low-stock': lowStock && quantity > 0,
+    'out-of-stock': lowStock && quantity <= 0,
+  }
+}
+
+function adjustedStockClass(item, delta = 0) {
+  return stockQuantityClass({
+    ...(item || {}),
+    quantity: Number(item?.quantity ?? 0) + Number(delta ?? 0),
+  })
+}
+
 function getCategoryItems(category) {
   const branchId = branchesStore.currentBranchId
   let items = inventoryStore.itemsByCategory[category] || []
@@ -318,7 +387,7 @@ function getCategoryItems(category) {
     items = items.filter(i => i.branchId === branchId || !i.branchId)
   }
   if (lowStockFilter.value) {
-    items = items.filter(i => i.quantity <= i.minStockLevel)
+    items = items.filter((i) => inventoryStore.isLowStockItem(i))
   }
   if (!searchQuery.value) return items
   const q = searchQuery.value.toLowerCase()
@@ -348,9 +417,9 @@ function toggleLowStockFilter() {
 }
 
 function getStockStatus(item) {
-  if (item.quantity === 0) return { type: 'danger', label: t('inventory.outOfStock') }
-  if (item.quantity <= item.minStockLevel) return { type: 'warning', label: t('inventory.lowStock') }
-  return { type: 'success', label: t('inventory.normal') }
+  if (!inventoryStore.isLowStockItem(item)) return { type: 'success', label: t('inventory.normal') }
+  if (Number(item?.quantity ?? 0) <= 0) return { type: 'danger', label: t('inventory.outOfStock') }
+  return { type: 'warning', label: t('inventory.lowStock') }
 }
 
 async function handleAddItem() {
@@ -432,12 +501,19 @@ const editForm = ref({})
 
 function startEdit(item) {
   editingId.value = item.id
+  const supplierId = item.supplierId || findSupplierIdByName(item.supplier)
+  const herbDictId = resolveInventoryHerbDictId(item)
 
-    editForm.value = {
-      ...item,
-    herbDictId: item.category === 'pills' ? (item.name || '') : (item.herbDictId || null),
+  editForm.value = {
+    ...item,
+    herbDictId,
+    supplierId,
+    supplier: item.supplier || suppliersStore.getSupplier(supplierId)?.name || '',
     taste: normalizeArray(item.taste),
     guijing: normalizeArray(item.guijing),
+  }
+  if (item.category !== 'pills' && herbDictId) {
+    editForm.value = syncHerbBinding(editForm.value, herbDictId)
   }
 }
 
@@ -597,6 +673,7 @@ async function openAdjustmentHistory(item) {
                   <div style="font-size: 12px">
                     <span v-if="getHerbMeta(editForm).nature" class="tcm-badge nature">{{ localizeInventoryValue('natureOptions', getHerbMeta(editForm).nature) }}</span>
                     <span v-for="taste in getHerbMeta(editForm).taste" :key="taste" class="tcm-badge taste">{{ localizeInventoryValue('tasteOptions', taste) }}</span>
+                    <span v-if="getItemToxicity(editForm)" class="tcm-badge toxicity">{{ localizeInventoryValue('toxicityOptions', getItemToxicity(editForm)) }}</span>
                   </div>
                   <div v-if="getHerbMeta(editForm).guijing.length" style="font-size: 11px; color: #888; margin-top: 2px">
                     {{ t('inventory.channelShort') }}：{{ getHerbMeta(editForm).guijing.map((item) => localizeInventoryValue('channelOptions', item)).join(locale === 'zh-CN' ? '、' : ', ') }}
@@ -606,6 +683,7 @@ async function openAdjustmentHistory(item) {
                   <div style="font-size: 12px">
                     <span v-if="getHerbMeta(row).nature" class="tcm-badge nature">{{ localizeInventoryValue('natureOptions', getHerbMeta(row).nature) }}</span>
                     <span v-for="taste in getHerbMeta(row).taste" :key="taste" class="tcm-badge taste">{{ localizeInventoryValue('tasteOptions', taste) }}</span>
+                    <span v-if="getItemToxicity(row)" class="tcm-badge toxicity">{{ localizeInventoryValue('toxicityOptions', getItemToxicity(row)) }}</span>
                   </div>
                   <div v-if="getHerbMeta(row).guijing.length" style="font-size: 11px; color: #888; margin-top: 2px">
                     {{ t('inventory.channelShort') }}：{{ getHerbMeta(row).guijing.map((item) => localizeInventoryValue('channelOptions', item)).join(locale === 'zh-CN' ? '、' : ', ') }}
@@ -618,7 +696,7 @@ async function openAdjustmentHistory(item) {
                 <div v-if="editingId === row.id">
                   <el-input-number v-model="editForm.quantity" :min="0" :step="1" size="small" controls-position="right" style="width: 100%" />
                 </div>
-                <span v-else :class="{ 'low-stock': row.quantity <= row.minStockLevel && row.quantity > 0, 'out-of-stock': row.quantity === 0 }">
+                <span v-else :class="stockQuantityClass(row)">
                   {{ row.quantity }} {{ getUnitLabel(row.unit) }}
                 </span>
               </template>
@@ -644,7 +722,7 @@ async function openAdjustmentHistory(item) {
             <el-table-column :label="t('inventory.supplier')" min-width="160">
               <template #default="{ row }">
                 <div v-if="editingId === row.id">
-                  <el-select v-model="editForm.supplierId" size="small" filterable clearable :placeholder="t('inventory.selectSupplier')" style="width: 100%"
+                  <el-select v-model="editForm.supplierId" size="small" filterable clearable :placeholder="editForm.supplier || t('inventory.selectSupplier')" style="width: 100%"
                     @change="val => { editForm.supplier = suppliersStore.getSupplier(val)?.name || '' }">
                     <el-option v-for="s in suppliersStore.activeSuppliers" :key="s.id" :label="s.name" :value="s.id" />
                   </el-select>
@@ -658,16 +736,6 @@ async function openAdjustmentHistory(item) {
                   <el-input-number v-model="editForm.gramsPerPacket" :min="1" size="small" controls-position="right" style="width: 100%" />
                 </div>
                 <span v-else>{{ row.gramsPerPacket ? row.gramsPerPacket + 'g' : '-' }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('inventory.toxicity')" min-width="100">
-              <template #default="{ row }">
-                <el-tag
-                  :type="getToxicityTagType(getItemToxicity(editingId === row.id ? editForm : row))"
-                  size="small"
-                >
-                  {{ localizeInventoryValue('toxicityOptions', getItemToxicity(editingId === row.id ? editForm : row)) }}
-                </el-tag>
               </template>
             </el-table-column>
             <el-table-column :label="t('common.operation')" width="190" fixed="right">
@@ -779,7 +847,7 @@ async function openAdjustmentHistory(item) {
         <el-descriptions-item :label="t('inventory.taste')">{{ getHerbMeta(detailItem).taste.map((item) => localizeInventoryValue('tasteOptions', item)).join(locale === 'zh-CN' ? '、' : ', ') || '-' }}</el-descriptions-item>
         <el-descriptions-item :label="t('inventory.channel')" :span="2">{{ getHerbMeta(detailItem).guijing.map((item) => localizeInventoryValue('channelOptions', item)).join(locale === 'zh-CN' ? '、' : ', ') || '-' }}</el-descriptions-item>
         <el-descriptions-item :label="t('inventory.currentStock')" :span="2">
-          <span :class="{ 'low-stock': detailItem.quantity <= detailItem.minStockLevel, 'out-of-stock': detailItem.quantity === 0 }">
+          <span :class="stockQuantityClass(detailItem)">
             {{ detailItem.quantity }} {{ getUnitLabel(detailItem.unit) }}
           </span>
           &nbsp;（{{ t('inventory.alertShort') }}：{{ detailItem.minStockLevel }} {{ getUnitLabel(detailItem.unit) }}）
@@ -815,7 +883,7 @@ async function openAdjustmentHistory(item) {
           <span style="margin-left: 8px; font-size: 12px; color: #888">{{ t('inventory.adjustHint') }}</span>
         </el-form-item>
         <el-form-item :label="t('inventory.afterAdjust')">
-          <span style="font-weight: 600" :class="{ 'low-stock': (adjustItem?.quantity + adjustDelta) <= adjustItem?.minStockLevel }">
+          <span style="font-weight: 600" :class="adjustedStockClass(adjustItem, adjustDelta)">
             {{ (adjustItem?.quantity || 0) + adjustDelta }} {{ getUnitLabel(adjustItem?.unit) }}
           </span>
         </el-form-item>
@@ -906,6 +974,7 @@ async function openAdjustmentHistory(item) {
 }
 .tcm-badge.nature { background: #e8f4fd; color: #1a6fa3; }
 .tcm-badge.taste { background: #f0faf4; color: #2d6a4f; }
+.tcm-badge.toxicity { background: #fff4e6; color: #9a5b00; }
 
 .inv-form-title {
   font-size: 12px;

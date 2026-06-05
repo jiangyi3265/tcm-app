@@ -13,9 +13,12 @@ function normalizeUserRoles(user) {
   const rawRoles = Array.isArray(user.roles) && user.roles.length > 0
     ? user.roles
     : user.role ? [user.role] : []
-  const priority = ['admin', 'practitioner', 'doctor', 'cashier', 'pharmacist', 'apprentice']
+  const priority = ['admin', 'practitioner', 'cashier', 'pharmacist', 'apprentice']
   return [...new Set(rawRoles
-    .map((role) => String(role || '').trim().toLowerCase())
+    .map((role) => {
+      const normalized = String(role || '').trim().toLowerCase()
+      return normalized === 'doctor' ? 'practitioner' : normalized
+    })
     .filter(Boolean))]
     .sort((left, right) => {
       const leftIndex = priority.includes(left) ? priority.indexOf(left) : priority.length

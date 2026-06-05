@@ -45,7 +45,7 @@ export function canStartInvoicePayment({ consultationId, outstandingAmount, cons
   const status = String(consultationStatus ?? '').trim().toLowerCase()
   return !!String(consultationId ?? '').trim()
     && Number(outstandingAmount ?? 0) > 0
-    && status === 'completed'
+    && status !== 'draft'
 }
 
 export function getPaymentMethodOptions(t) {

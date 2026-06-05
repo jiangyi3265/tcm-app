@@ -68,9 +68,18 @@ export const useInventoryStore = defineStore('inventory', () => {
 
   const activeItems = computed(() => items.value.filter((i) => i.isActive && !i.deletedAt))
 
-  const lowStockItems = computed(() =>
-    items.value.filter((i) => i.isActive && !i.deletedAt && i.quantity <= i.minStockLevel),
-  )
+  function numericStockValue(value) {
+    const amount = Number(value ?? 0)
+    return Number.isFinite(amount) ? amount : 0
+  }
+
+  function isLowStockItem(item = {}) {
+    const usage = numericStockValue(item.last30DaysUsage)
+    const quantity = numericStockValue(item.quantity)
+    return Boolean(item?.isActive && !item?.deletedAt && usage > 0 && quantity < usage)
+  }
+
+  const lowStockItems = computed(() => items.value.filter(isLowStockItem))
 
   const itemsByCategory = computed(() => {
     return {
@@ -199,6 +208,7 @@ export const useInventoryStore = defineStore('inventory', () => {
     lowStockItems,
     itemsByCategory,
     deletedItems,
+    isLowStockItem,
     getItem,
     findByName,
     getBranchItems,
