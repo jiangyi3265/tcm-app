@@ -3,8 +3,10 @@ import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { usePatientsStore } from '../../stores/patients'
+import { useConsultationsStore } from '../../stores/consultations'
+import { useAppointmentsStore } from '../../stores/appointments'
 import { useAuthStore } from '../../stores/auth'
-import { hasPermission } from '../../utils/permissions'
+import { canAccessPatientRecords, hasPermission } from '../../utils/permissions'
 import { formatDate } from '../../utils/dateUtils'
 import { COUNTRY_OPTIONS, DEFAULT_COUNTRY, getProvinceOptions } from '../../utils/countryRegionOptions'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -13,6 +15,8 @@ const { t } = useI18n()
 
 const router = useRouter()
 const patientsStore = usePatientsStore()
+const consultationsStore = useConsultationsStore()
+const appointmentsStore = useAppointmentsStore()
 const authStore = useAuthStore()
 
 const searchQuery = ref('')
@@ -28,12 +32,40 @@ const hidePatientContact = computed(() =>
   !isAdmin.value && (roles.value.includes('practitioner') || roles.value.includes('apprentice')),
 )
 const patientSortState = ref({ prop: 'name', order: 'ascending' })
-const filteredPatients = computed(() => patientsStore.searchPatients(searchQuery.value))
+const PAGE_SIZE = 20
+const currentPage = ref(1)
+const filteredPatients = computed(() =>
+  patientsStore.searchPatients(searchQuery.value).filter((patient) =>
+    canAccessPatientRecords(
+      roles.value,
+      authStore.userId,
+      patient,
+      consultationsStore.consultations,
+      {
+        currentUser: authStore.currentUser,
+        appointments: appointmentsStore.appointments,
+      },
+    ),
+  ),
+)
 const sortedPatients = computed(() => {
   const list = [...filteredPatients.value]
   if (patientSortState.value.prop !== 'name') return list
   const direction = patientSortState.value.order === 'descending' ? -1 : 1
   return list.sort((a, b) => direction * comparePatientNames(a, b))
+})
+const pagedPatients = computed(() => {
+  const start = (currentPage.value - 1) * PAGE_SIZE
+  return sortedPatients.value.slice(start, start + PAGE_SIZE)
+})
+
+watch(searchQuery, () => {
+  currentPage.value = 1
+})
+
+watch(() => sortedPatients.value.length, (count) => {
+  const maxPage = Math.max(1, Math.ceil(count / PAGE_SIZE))
+  if (currentPage.value > maxPage) currentPage.value = maxPage
 })
 
 function patientNameKey(patient) {
@@ -58,6 +90,7 @@ function handlePatientSortChange({ prop, order }) {
     prop: prop || 'name',
     order: order || 'ascending',
   }
+  currentPage.value = 1
 }
 
 function resolveDefaultPractitionerId() {
@@ -173,6 +206,10 @@ function goToPatient(patient) {
   router.push(`/patients/${patient.id}`)
 }
 
+function displayPhone(patient) {
+  return patient?.phone || patient?.mobilePhone || patient?.businessPhone || '-'
+}
+
 const GENDER_MAP = { 男: 'success', 女: 'danger' }
 </script>
 
@@ -209,7 +246,7 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
     <!-- 病人列表 -->
     <el-card class="list-card">
       <el-table
-        :data="sortedPatients"
+        :data="pagedPatients"
         row-key="id"
         stripe
         :default-sort="{ prop: 'name', order: 'ascending' }"
@@ -241,7 +278,9 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
             <el-tag v-if="row.gender" :type="GENDER_MAP[row.gender]" size="small">{{ row.gender }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column v-if="!hidePatientContact" prop="phone" :label="t('patients.phone')" width="130" />
+        <el-table-column v-if="!hidePatientContact" :label="t('patients.phone')" width="140">
+          <template #default="{ row }">{{ displayPhone(row) }}</template>
+        </el-table-column>
         <el-table-column v-if="!isApprenticeReadonly" :label="t('patients.dateOfBirth')" width="120">
           <template #default="{ row }">{{ row.dateOfBirth || '-' }}</template>
         </el-table-column>
@@ -263,7 +302,17 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
           </template>
         </el-table-column>
       </el-table>
-      <div class="table-footer">{{ t('patients.totalCount', { count: sortedPatients.length }) }}</div>
+      <div class="table-footer">
+        <span>{{ t('patients.totalCount', { count: sortedPatients.length }) }}</span>
+        <el-pagination
+          v-model:current-page="currentPage"
+          background
+          small
+          layout="prev, pager, next"
+          :page-size="PAGE_SIZE"
+          :total="sortedPatients.length"
+        />
+      </div>
     </el-card>
 
     <!-- 新建病人对话框 -->
@@ -499,7 +548,11 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
   margin-top: 12px;
   font-size: 13px;
   color: #888;
-  text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .email-list { display: flex; flex-direction: column; gap: 6px; width: 100%; }

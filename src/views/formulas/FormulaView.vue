@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useFormulasStore } from '../../stores/formulas'
 import { useInventoryStore } from '../../stores/inventory'
@@ -19,6 +19,8 @@ const settingsStore = useSettingsStore()
 
 const searchQuery = ref('')
 const filterCategory = ref('')
+const PAGE_SIZE = 20
+const currentPage = ref(1)
 
 const FORMULA_CATEGORIES = [
   { value: '调和剂', key: 'harmonizing' },
@@ -92,6 +94,19 @@ const filteredFormulas = computed(() => {
     )
   }
   return list
+})
+const pagedFormulas = computed(() => {
+  const start = (currentPage.value - 1) * PAGE_SIZE
+  return filteredFormulas.value.slice(start, start + PAGE_SIZE)
+})
+
+watch([searchQuery, filterCategory], () => {
+  currentPage.value = 1
+})
+
+watch(() => filteredFormulas.value.length, (count) => {
+  const maxPage = Math.max(1, Math.ceil(count / PAGE_SIZE))
+  if (currentPage.value > maxPage) currentPage.value = maxPage
 })
 
 // ── 展开面板 ──
@@ -376,7 +391,7 @@ const categoryCountEntries = computed(() => {
 
     <!-- 方剂列表 -->
     <div class="fv-list">
-      <div v-for="formula in filteredFormulas" :key="formula.id" class="fv-card" :class="{ expanded: expandedId === formula.id }">
+      <div v-for="formula in pagedFormulas" :key="formula.id" class="fv-card" :class="{ expanded: expandedId === formula.id }">
         <!-- 方剂卡头 -->
         <div class="fv-card-header" @click="toggleExpand(formula)">
           <div class="fv-card-left">
@@ -557,6 +572,17 @@ const categoryCountEntries = computed(() => {
 
       <el-empty v-if="filteredFormulas.length === 0" :description="t('formulaView.noMatch')" />
     </div>
+    <div class="table-footer">
+      <span>{{ t('formulaView.listCount', { count: filteredFormulas.length }) }}</span>
+      <el-pagination
+        v-model:current-page="currentPage"
+        background
+        small
+        layout="prev, pager, next"
+        :page-size="PAGE_SIZE"
+        :total="filteredFormulas.length"
+      />
+    </div>
   </div>
 </template>
 
@@ -677,6 +703,17 @@ const categoryCountEntries = computed(() => {
   color: #bbb;
 }
 .fv-card.expanded .fv-expand-icon { transform: rotate(180deg); }
+
+.table-footer {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: #888;
+  font-size: 13px;
+}
 
 /* ── 展开体 ── */
 .fv-card-body {

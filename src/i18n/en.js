@@ -1039,6 +1039,7 @@ export default {
     cannotBeNegative: 'Stock cannot be negative after adjustment',
     confirmDisable: 'Disable {name}?',
     disabled: 'Disabled',
+    itemTotalCount: '{count} items',
 
     // Batch import
     batchImport: 'Batch Import',
@@ -1168,6 +1169,7 @@ export default {
     allCategories: 'All Categories',
     uncategorized: 'Uncategorized',
     totalCount: 'Total Formulas',
+    listCount: '{count} formulas',
     searchPlaceholder: 'Search formulas, efficacy, herbs...',
     categoryPlaceholder: 'Category',
     collapse: 'Collapse',

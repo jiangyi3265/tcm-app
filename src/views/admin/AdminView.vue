@@ -1,5 +1,5 @@
 ﻿<script setup>
-import { ref, computed, reactive, onMounted } from 'vue'
+import { ref, computed, reactive, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth'
 import { useSettingsStore } from '../../stores/settings'
@@ -1860,6 +1860,8 @@ const importingHerbs = ref(false)
 const newHerb = ref(createHerbDraft())
 const herbSearchQuery = ref('')
 const herbCategoryFilter = ref('')
+const HERB_PAGE_SIZE = 20
+const herbCurrentPage = ref(1)
 
 const filteredHerbs = computed(() => {
   let list = herbDictStore.activeHerbs
@@ -1869,6 +1871,19 @@ const filteredHerbs = computed(() => {
     list = list.filter(h => h.name.toLowerCase().includes(q) || (h.pinyin && h.pinyin.toLowerCase().includes(q)))
   }
   return list
+})
+const pagedHerbs = computed(() => {
+  const start = (herbCurrentPage.value - 1) * HERB_PAGE_SIZE
+  return filteredHerbs.value.slice(start, start + HERB_PAGE_SIZE)
+})
+
+watch([herbSearchQuery, herbCategoryFilter], () => {
+  herbCurrentPage.value = 1
+})
+
+watch(() => filteredHerbs.value.length, (count) => {
+  const maxPage = Math.max(1, Math.ceil(count / HERB_PAGE_SIZE))
+  if (herbCurrentPage.value > maxPage) herbCurrentPage.value = maxPage
 })
 
 async function handleAddHerb() {
@@ -3424,7 +3439,7 @@ async function deleteTemplate(tmpl) {
           </el-select>
           <span style="color:#888; font-size:12px">{{ t('admin.herbTotalCount', { count: filteredHerbs.length }) }}</span>
         </div>
-        <el-table :data="filteredHerbs" stripe max-height="500" @selection-change="handleHerbSelectionChange">
+        <el-table :data="pagedHerbs" stripe max-height="500" @selection-change="handleHerbSelectionChange">
           <el-table-column type="selection" width="44" />
           <el-table-column :label="t('admin.herbName')" width="90"><template #default="{ row }"><span style="font-weight:600">{{ row.name }}</span></template></el-table-column>
           <el-table-column :label="t('admin.herbCategory')" width="90" prop="category" />
@@ -3441,6 +3456,17 @@ async function deleteTemplate(tmpl) {
             </template>
           </el-table-column>
         </el-table>
+        <div class="table-footer">
+          <span>{{ t('admin.herbTotalCount', { count: filteredHerbs.length }) }}</span>
+          <el-pagination
+            v-model:current-page="herbCurrentPage"
+            background
+            small
+            layout="prev, pager, next"
+            :page-size="HERB_PAGE_SIZE"
+            :total="filteredHerbs.length"
+          />
+        </div>
         <!-- Edit herb dialog -->
         <el-drawer :model-value="!!editingHerbId" @update:model-value="val => { if(!val) editingHerbId = null }" :title="t('admin.editHerbDialog')" size="680px" direction="rtl" :close-on-click-modal="false">
           <el-form :model="editHerbForm" label-width="80px">
@@ -4124,6 +4150,16 @@ async function deleteTemplate(tmpl) {
 <style scoped>
 .admin-view { max-width: 100%; }
 .tab-toolbar { margin-bottom: 16px; }
+.table-footer {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: #888;
+  font-size: 13px;
+}
 .settings-card { max-width: 600px; border-radius: 10px; }
 .email-template-editor { margin-bottom: 16px; padding-bottom: 4px; border-bottom: 1px solid #eee; }
 .email-template-title { margin: 0 0 10px 160px; font-weight: 600; color: #333; }

@@ -33,6 +33,26 @@ test('non-primary practitioner cannot access other recent records without appoin
   assert.equal(allowed, false)
 })
 
+test('non-primary practitioner cannot keep patient access from old own consultation alone', () => {
+  const allowed = canAccessPatientRecords(
+    ['practitioner'],
+    'u-2',
+    { id: 'p-1', practitionerId: 'u-9' },
+    [
+      {
+        patientId: 'p-1',
+        practitionerId: 'u-2',
+        status: 'completed',
+        date: '2026-04-03',
+        deletedAt: null,
+      },
+    ],
+    { now: '2026-04-06' },
+  )
+
+  assert.equal(allowed, false)
+})
+
 test('appointment practitioner can see only recent three months of other records', () => {
   const patient = { id: 'p-3', practitionerId: 'u-9' }
   const appointments = [

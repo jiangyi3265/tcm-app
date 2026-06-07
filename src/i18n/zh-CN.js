@@ -1040,6 +1040,7 @@ export default {
     cannotBeNegative: '调整后库存不能为负数',
     confirmDisable: '确定停用 {name}？',
     disabled: '已停用',
+    itemTotalCount: '共 {count} 项',
 
     // 批量导入
     batchImport: '批量导入',
@@ -1174,6 +1175,7 @@ export default {
     allCategories: '全部分类',
     uncategorized: '未分类',
     totalCount: '方剂总数',
+    listCount: '共 {count} 个方剂',
     searchPlaceholder: '搜索方剂名、功效、药材...',
     categoryPlaceholder: '分类',
     collapse: '收起',

@@ -30,6 +30,8 @@ const canEdit = computed(() => hasPermission(roles.value, 'inventory.edit'))
 const activeTab = ref('powder')
 const lowStockFilter = ref(false)
 const searchQuery = ref('')
+const PAGE_SIZE = 20
+const categoryPages = ref({})
 const showAddDialog = ref(false)
 const showAdjustDialog = ref(false)
 const showDetailDialog = ref(false)
@@ -292,6 +294,7 @@ watch(activeTab, () => {
   if (newItem.value.herbDictId) {
     newItem.value = syncInventoryNameBinding(newItem.value, newItem.value.herbDictId)
   }
+  setCategoryPage(activeTab.value, 1)
   selectedInventoryRows.value = []
 }, { immediate: true })
 
@@ -380,6 +383,22 @@ function adjustedStockClass(item, delta = 0) {
   })
 }
 
+function getCategoryPage(category) {
+  return categoryPages.value[category] || 1
+}
+
+function setCategoryPage(category, page) {
+  categoryPages.value = {
+    ...categoryPages.value,
+    [category]: page,
+  }
+}
+
+function resetVisibleInventoryPages() {
+  setCategoryPage(activeTab.value, 1)
+  selectedInventoryRows.value = []
+}
+
 function getCategoryItems(category) {
   const branchId = branchesStore.currentBranchId
   let items = inventoryStore.itemsByCategory[category] || []
@@ -393,6 +412,16 @@ function getCategoryItems(category) {
   const q = searchQuery.value.toLowerCase()
   return items.filter((i) => i.name.toLowerCase().includes(q) || i.supplier?.toLowerCase().includes(q))
 }
+
+function getPagedCategoryItems(category) {
+  const items = getCategoryItems(category)
+  const maxPage = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
+  const page = Math.min(getCategoryPage(category), maxPage)
+  const start = (page - 1) * PAGE_SIZE
+  return items.slice(start, start + PAGE_SIZE)
+}
+
+watch([searchQuery, lowStockFilter, () => branchesStore.currentBranchId], resetVisibleInventoryPages)
 
 const allLowStockItems = computed(() => {
   const branchId = branchesStore.currentBranchId
@@ -639,7 +668,7 @@ async function openAdjustmentHistory(item) {
     <el-card class="inventory-card">
       <el-tabs v-model="activeTab">
         <el-tab-pane v-for="(config, key) in CATEGORY_CONFIG" :key="key" :label="config.label" :name="key">
-          <el-table :data="getCategoryItems(key)" stripe @selection-change="rows => handleInventorySelectionChange(key, rows)">
+          <el-table :data="getPagedCategoryItems(key)" stripe @selection-change="rows => handleInventorySelectionChange(key, rows)">
             <el-table-column v-if="canEdit" type="selection" width="46" />
             <el-table-column :label="t('inventory.itemName')" min-width="180">
               <template #default="{ row }">
@@ -753,6 +782,18 @@ async function openAdjustmentHistory(item) {
               </template>
             </el-table-column>
           </el-table>
+          <div class="table-footer">
+            <span>{{ t('inventory.itemTotalCount', { count: getCategoryItems(key).length }) }}</span>
+            <el-pagination
+              :current-page="getCategoryPage(key)"
+              background
+              small
+              layout="prev, pager, next"
+              :page-size="PAGE_SIZE"
+              :total="getCategoryItems(key).length"
+              @current-change="page => setCategoryPage(key, page)"
+            />
+          </div>
         </el-tab-pane>
       </el-tabs>
     </el-card>
@@ -960,6 +1001,17 @@ async function openAdjustmentHistory(item) {
 }
 
 .inventory-card { border-radius: 12px; }
+
+.table-footer {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: #888;
+  font-size: 13px;
+}
 
 .low-stock { color: #e9a000; font-weight: 600; }
 .out-of-stock { color: #e63946; font-weight: 600; }

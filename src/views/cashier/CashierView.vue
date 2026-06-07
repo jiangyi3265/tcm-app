@@ -237,6 +237,11 @@ async function processPayment(consultation) {
   }
 }
 
+async function processStripePos(consultation) {
+  selectedPaymentMethod.value = 'bankcard'
+  await processPayment(consultation)
+}
+
 async function handlePrintInvoice(consultation) {
   if (!consultation) return
   try {
@@ -354,6 +359,9 @@ async function handleSendPreviewEmail() {
 
             <div class="payment-actions">
               <el-button size="small" @click="viewInvoice(c)">{{ t('cashier.viewInvoice') }}</el-button>
+              <el-button size="small" type="success" @click="processStripePos(c)">
+                <el-icon><CreditCard /></el-icon> Stripe POS
+              </el-button>
               <el-button size="small" type="primary" @click="processPayment(c)">
                 <el-icon><Money /></el-icon> {{ t('cashier.confirmPayment') }}
               </el-button>
@@ -466,7 +474,7 @@ async function handleSendPreviewEmail() {
       <template #footer>
         <el-button @click="showInvoiceDialog = false">{{ t('common.close') }}</el-button>
         <el-button v-if="selectedConsult?.outstandingAmount > 0" type="primary" @click="processPayment(selectedConsult)">
-          {{ t('cashier.confirmPayment') }}
+          {{ selectedPaymentMethod === 'bankcard' ? 'Stripe POS' : t('cashier.confirmPayment') }}
         </el-button>
         <el-button type="info" @click="handlePrintInvoice(selectedConsult)">
           {{ t('cashier.exportPdf') }}

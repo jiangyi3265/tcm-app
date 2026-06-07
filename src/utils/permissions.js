@@ -205,11 +205,6 @@ export function canAccessPatientRecords(roleOrRoles, userId, patient, consultati
 
   if (userRoles.includes('practitioner')) {
     if (normalizeId(patient.practitionerId) === normalizedUserId) return true
-    if (consultations.some((consultation) =>
-      consultation.patientId === patient.id
-      && !consultation.deletedAt
-      && normalizeId(consultation.practitionerId) === normalizedUserId
-    )) return true
     if (hasActivePractitionerAppointment(patient.id, appointments, normalizedUserId, options.now)) return true
   }
 
