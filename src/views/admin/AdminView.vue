@@ -838,13 +838,28 @@ const adminListDrafts = reactive({
   differentiationNames: normalizeAdminList(settingsStore.differentiationNames).join('\n'),
 })
 const newPatentMedicineName = ref('')
+const ADMIN_LIST_PAGE_SIZE = 20
+const patentMedicinePage = ref(1)
 const patentMedicineRows = computed(() =>
   normalizeAdminList(settingsStore.patentMedicines).map((name) => ({ name })),
 )
+const pagedPatentMedicineRows = computed(() => {
+  const start = (patentMedicinePage.value - 1) * ADMIN_LIST_PAGE_SIZE
+  return patentMedicineRows.value.slice(start, start + ADMIN_LIST_PAGE_SIZE)
+})
 const selectedPatentMedicineRows = ref([])
 const selectedHerbRows = ref([])
 const selectedAcupointRows = ref([])
 const selectedFormulaRows = ref([])
+
+watch(() => patentMedicineRows.value.length, (count) => {
+  const maxPage = Math.max(1, Math.ceil(count / ADMIN_LIST_PAGE_SIZE))
+  if (patentMedicinePage.value > maxPage) patentMedicinePage.value = maxPage
+})
+
+watch(patentMedicinePage, () => {
+  selectedPatentMedicineRows.value = []
+})
 
 function handlePatentMedicineSelectionChange(rows) {
   selectedPatentMedicineRows.value = rows || []
@@ -3409,7 +3424,7 @@ async function deleteTemplate(tmpl) {
             </el-button>
           </div>
           <el-table
-            :data="patentMedicineRows"
+            :data="pagedPatentMedicineRows"
             size="small"
             stripe
             :empty-text="t('common.noData')"
@@ -3418,7 +3433,7 @@ async function deleteTemplate(tmpl) {
             @selection-change="handlePatentMedicineSelectionChange"
           >
             <el-table-column type="selection" width="44" />
-            <el-table-column type="index" width="56" />
+            <el-table-column type="index" width="56" :index="index => (patentMedicinePage - 1) * ADMIN_LIST_PAGE_SIZE + index + 1" />
             <el-table-column prop="name" label="成药名称" />
             <el-table-column :label="t('common.operation')" width="90">
               <template #default="{ row }">
@@ -3426,6 +3441,17 @@ async function deleteTemplate(tmpl) {
               </template>
             </el-table-column>
           </el-table>
+          <div class="table-footer" style="max-width:520px; margin-left:100px">
+            <span>总列表：{{ patentMedicineRows.length }} 个</span>
+            <el-pagination
+              v-model:current-page="patentMedicinePage"
+              background
+              small
+              layout="prev, pager, next"
+              :page-size="ADMIN_LIST_PAGE_SIZE"
+              :total="patentMedicineRows.length"
+            />
+          </div>
         </el-card>
         <div class="tab-toolbar" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
           <el-button type="primary" @click="showAddHerbDialog = true"><el-icon><Plus /></el-icon> {{ t('admin.addHerb') }}</el-button>
