@@ -26,6 +26,11 @@ const successState = ref(null)
 const publicBookingSettings = ref({ ...DEFAULT_PUBLIC_BOOKING })
 const publicWindowStart = ref(dayjs().format('YYYY-MM-DD'))
 const publicWindowEnd = ref(dayjs().add(DEFAULT_PUBLIC_BOOKING.advanceDays - 1, 'day').format('YYYY-MM-DD'))
+const isEmbedded = computed(() => {
+  if (typeof window === 'undefined') return false
+  const value = new URLSearchParams(window.location.search).get('embed')
+  return ['1', 'true', 'yes'].includes(String(value || '').trim().toLowerCase())
+})
 
 function normalizeTagList(value) {
   if (Array.isArray(value)) {
@@ -483,11 +488,15 @@ watch(
 
 function copyBookingUrl() {
   const url = window.location.href
-  navigator.clipboard.writeText(url).then(() => {
-    ElMessage.success(t('publicBooking.linkCopied'))
-  }).catch(() => {
-    ElMessage.info(url)
-  })
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(url).then(() => {
+      ElMessage.success(t('publicBooking.linkCopied'))
+    }).catch(() => {
+      ElMessage.info(url)
+    })
+    return
+  }
+  ElMessage.info(url)
 }
 
 onMounted(() => {
@@ -496,7 +505,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="public-booking-page">
+  <div class="public-booking-page" :class="{ embedded: isEmbedded }">
     <div v-if="successState" class="public-card success-card">
       <h1>{{ t('publicBooking.successTitle') }}</h1>
       <p>{{ t('publicBooking.successIntro') }}</p>
@@ -511,7 +520,7 @@ onMounted(() => {
           <h1>{{ t('publicBooking.pageTitle') }}</h1>
           <p>{{ t('publicBooking.pageSubtitle') }}</p>
         </div>
-        <el-button size="small" @click="copyBookingUrl">
+        <el-button v-if="!isEmbedded" size="small" @click="copyBookingUrl">
           {{ t('publicBooking.copyLink') }}
         </el-button>
       </div>
@@ -690,8 +699,11 @@ onMounted(() => {
 .public-booking-page { min-height:100vh; padding:32px 16px; background:linear-gradient(180deg,#f8fafc 0%,#eef6f0 100%); }
 .public-card { max-width:1180px; margin:0 auto; background:#fff; border-radius:18px; padding:24px; box-shadow:0 18px 50px rgba(15,23,42,0.08); }
 .success-card { text-align:center; }
+.page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
 .page-head h1, .schedule-head h2, .time-blocks h2 { margin:0; color:#1b4332; }
 .page-head p, .schedule-head p, .time-blocks p { margin:8px 0 0; color:#64748b; }
+.public-booking-page.embedded { min-height:auto; padding:0; background:transparent; }
+.public-booking-page.embedded .public-card { max-width:none; margin:0; border-radius:8px; box-shadow:none; border:1px solid #dbe5dd; }
 .public-form { margin-top:20px; }
 .grid { display:grid; gap:16px; }
 .two-col { grid-template-columns:repeat(2,minmax(0,1fr)); }
@@ -728,6 +740,7 @@ onMounted(() => {
 @media (max-width: 768px) {
   .two-col, .schedule-summary { grid-template-columns:1fr; }
   .public-card { padding:18px; }
+  .page-head { flex-direction:column; }
   .schedule-head { flex-direction:column; align-items:flex-start; }
   .week-nav { width:100%; }
   .week-nav :deep(.el-button) { flex:1; }

@@ -695,6 +695,48 @@ const stripeWebhookStatus = computed(() =>
     ? `已设置 ${settingsStore.stripeSettings.webhookSecretMasked || ''}`.trim()
     : '未设置',
 )
+const STRIPE_WEBHOOK_EVENTS = [
+  'payment_intent.succeeded',
+  'payment_intent.payment_failed',
+  'checkout.session.completed',
+  'charge.refunded',
+  'refund.created',
+  'terminal.reader.action_succeeded',
+  'terminal.reader.action_failed',
+]
+
+function trimTrailingSlash(value) {
+  return String(value || '').replace(/\/+$/, '')
+}
+
+const publicAppBaseUrl = computed(() => {
+  const configured = trimTrailingSlash(import.meta.env.VITE_PUBLIC_APP_BASE_URL)
+  if (configured) return configured
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return trimTrailingSlash(window.location.origin)
+  }
+  return 'https://otcm.app'
+})
+const publicBookingUrl = computed(() => `${publicAppBaseUrl.value}/booking`)
+const publicBookingEmbedUrl = computed(() => `${publicBookingUrl.value}?embed=1`)
+const publicBookingIframeCode = computed(() =>
+  `<iframe src="${publicBookingEmbedUrl.value}" title="OTCM online booking" style="width:100%;min-height:960px;border:0;border-radius:8px;" loading="lazy"></iframe>`,
+)
+const stripeWebhookUrl = computed(() => `${publicAppBaseUrl.value}/api/stripe/webhook`)
+
+function copySettingsText(value, message = '已复制') {
+  const text = String(value || '')
+  if (!text) return
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      ElMessage.success(message)
+    }).catch(() => {
+      ElMessage.info(text)
+    })
+    return
+  }
+  ElMessage.info(text)
+}
 
 const emailTemplateDrafts = reactive(normalizeEmailTemplates(settingsStore.emailTemplates))
 const emailTemplateRows = computed(() =>
@@ -967,8 +1009,7 @@ async function saveStripeSettings() {
   }
   savingStripeSettings.value = true
   try {
-    const payload = { terminalReaderId }
-    if (publishableKey) payload.publishableKey = publishableKey
+    const payload = { publishableKey, terminalReaderId }
     if (secretKey) payload.secretKey = secretKey
     if (webhookSecret) payload.webhookSecret = webhookSecret
     await settingsStore.updateStripeSettings(payload)
@@ -2553,9 +2594,44 @@ async function deleteTemplate(tmpl) {
             </el-form-item>
           </el-form>
           <el-divider />
+          <div class="settings-section">
+            <h4>WordPress 预约页面</h4>
+            <p class="settings-help">
+              在 WordPress 的 otcm.ca/booking 页面添加 Custom HTML 区块，然后粘贴下面的 iframe 代码。
+            </p>
+            <el-form label-width="160px">
+              <el-form-item label="公开预约链接">
+                <div class="readonly-copy-row">
+                  <el-input :model-value="publicBookingUrl" readonly />
+                  <el-button @click="copySettingsText(publicBookingUrl, '预约链接已复制')">复制</el-button>
+                </div>
+              </el-form-item>
+              <el-form-item label="嵌入链接">
+                <div class="readonly-copy-row">
+                  <el-input :model-value="publicBookingEmbedUrl" readonly />
+                  <el-button @click="copySettingsText(publicBookingEmbedUrl, '嵌入链接已复制')">复制</el-button>
+                </div>
+              </el-form-item>
+              <el-form-item label="WordPress iframe">
+                <div class="embed-code-row">
+                  <el-input
+                    :model-value="publicBookingIframeCode"
+                    type="textarea"
+                    :rows="4"
+                    readonly
+                  />
+                  <el-button @click="copySettingsText(publicBookingIframeCode, 'iframe 代码已复制')">复制代码</el-button>
+                </div>
+              </el-form-item>
+            </el-form>
+          </div>
+          <el-divider />
           <h4>Stripe POS 设置</h4>
+          <p class="settings-help">
+            Stripe POS 使用的 Publishable Key、Secret Key、Webhook Secret、Reader ID 都可在这里替换；密钥保存后只显示掩码。
+          </p>
           <el-form :model="stripeSettingsForm" label-width="160px">
-            <el-form-item label="Published Key">
+            <el-form-item label="Publishable Key">
               <el-input
                 v-model="stripeSettingsForm.publishableKey"
                 placeholder="pk_live_..."
@@ -2603,6 +2679,19 @@ async function deleteTemplate(tmpl) {
               >
                 {{ stripeWebhookStatus }}
               </el-tag>
+            </el-form-item>
+            <el-form-item label="Webhook URL">
+              <div class="readonly-copy-row">
+                <el-input :model-value="stripeWebhookUrl" readonly />
+                <el-button @click="copySettingsText(stripeWebhookUrl, 'Webhook URL 已复制')">复制</el-button>
+              </div>
+            </el-form-item>
+            <el-form-item label="Webhook Events">
+              <div class="event-tag-list">
+                <el-tag v-for="eventName in STRIPE_WEBHOOK_EVENTS" :key="eventName" size="small" effect="plain">
+                  {{ eventName }}
+                </el-tag>
+              </div>
             </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="savingStripeSettings" @click="saveStripeSettings">
@@ -4186,7 +4275,14 @@ async function deleteTemplate(tmpl) {
   color: #888;
   font-size: 13px;
 }
-.settings-card { max-width: 600px; border-radius: 10px; }
+.settings-card { max-width: 900px; border-radius: 10px; }
+.settings-section { max-width: 760px; }
+.settings-help { margin: 0 0 14px 160px; color: #606266; font-size: 13px; line-height: 1.6; }
+.readonly-copy-row { display: flex; width: min(100%, 620px); gap: 8px; align-items: center; }
+.readonly-copy-row .el-input { flex: 1; min-width: 0; }
+.embed-code-row { display: flex; width: min(100%, 620px); flex-direction: column; gap: 8px; align-items: flex-start; }
+.embed-code-row .el-textarea { width: 100%; font-family: Consolas, 'Courier New', monospace; }
+.event-tag-list { display: flex; max-width: 620px; gap: 8px; flex-wrap: wrap; }
 .email-template-editor { margin-bottom: 16px; padding-bottom: 4px; border-bottom: 1px solid #eee; }
 .email-template-title { margin: 0 0 10px 160px; font-weight: 600; color: #333; }
 .template-variable-panel { margin: 8px 0 18px 160px; max-width: 680px; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #fafafa; }
@@ -4204,4 +4300,10 @@ async function deleteTemplate(tmpl) {
 .schedule-range-list { display: flex; flex-direction: column; gap: 8px; }
 .schedule-range-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .internship-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+
+@media (max-width: 768px) {
+  .settings-help { margin-left: 0; }
+  .readonly-copy-row { flex-direction: column; align-items: stretch; }
+  .readonly-copy-row .el-button { width: 100%; }
+}
 </style>

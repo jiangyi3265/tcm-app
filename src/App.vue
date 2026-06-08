@@ -25,10 +25,17 @@ import { RouterView } from 'vue-router'
   --color-danger: #e63946;
 }
 
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
 body {
   font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
   background-color: #f0f2f5;
   color: #333;
+  overscroll-behavior-y: none;
 }
 
 .el-button--primary {

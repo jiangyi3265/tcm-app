@@ -51,21 +51,33 @@ provide('toggleSidebar', toggleSidebar)
 
 <style scoped>
 .app-layout {
+  position: fixed;
+  inset: 0;
   display: flex;
+  width: 100%;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
+  overscroll-behavior: none;
+  background-color: #f0f2f5;
 }
 
 .main-container {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
 }
 
 .main-content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 20px;
   background-color: #f0f2f5;
 }
