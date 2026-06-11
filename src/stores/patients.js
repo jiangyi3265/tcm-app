@@ -97,6 +97,9 @@ export const usePatientsStore = defineStore('patients', () => {
       consentSignedAt: null,
       notes: data.notes || '',
       practitionerId: data.practitionerId || null,
+      staffUserId: data.staffUserId || '',
+      linkedUserId: data.linkedUserId || data.staffUserId || '',
+      isStaffProfile: Boolean(data.isStaffProfile),
     }
     const created = await patientsApi.create(newPatient)
     patients.value.push(created)
@@ -173,9 +176,29 @@ export const usePatientsStore = defineStore('patients', () => {
   /**
    * 通过关联的 staffUserId 查找是否已存在员工病人档案
    */
+  function normalizeId(value) {
+    return String(value ?? '').trim()
+  }
+
+  function getPatientLinkedStaffId(patient) {
+    if (!patient) return ''
+    return normalizeId(patient.linkedUserId || patient.staffUserId || patient.staffMeta?.userId)
+  }
+
+  function hasPatientEmail(patient, email) {
+    const target = String(email || '').trim().toLowerCase()
+    if (!target || !patient || patient.deletedAt) return false
+    const emails = [
+      patient.email,
+      ...(Array.isArray(patient.emails) ? patient.emails : []),
+    ]
+    return emails.some((value) => String(value || '').trim().toLowerCase() === target)
+  }
+
   function getPatientByStaffUserId(userId) {
-    if (!userId) return null
-    return patients.value.find((p) => p.staffUserId === String(userId) && !p.deletedAt) || null
+    const target = normalizeId(userId)
+    if (!target) return null
+    return patients.value.find((p) => getPatientLinkedStaffId(p) === target && !p.deletedAt) || null
   }
 
   /**
@@ -190,12 +213,14 @@ export const usePatientsStore = defineStore('patients', () => {
     // 按 email 去重 — 避免同一邮箱创建两条病人
     const email = (user.email || '').trim()
     if (email) {
-      const byEmail = patients.value.find((p) =>
-        !p.deletedAt && (Array.isArray(p.emails) ? p.emails : []).some((e) => String(e || '').toLowerCase() === email.toLowerCase()),
-      )
+      const byEmail = patients.value.find((p) => hasPatientEmail(p, email))
       if (byEmail) {
         // 已有相同 email 的病人档案 — 仅补写 staffUserId 关联
-        const updated = await patientsApi.update(byEmail.id, { staffUserId: String(user.id) })
+        const updated = await patientsApi.update(byEmail.id, {
+          staffUserId: String(user.id),
+          linkedUserId: String(user.id),
+          isStaffProfile: true,
+        })
         const idx = patients.value.findIndex((p) => p.id === byEmail.id)
         if (idx !== -1) patients.value[idx] = updated
         saveState()
@@ -210,6 +235,8 @@ export const usePatientsStore = defineStore('patients', () => {
       mobilePhone: user.phone || '',
       notes: 'Staff / 员工自动建档',
       staffUserId: String(user.id),
+      linkedUserId: String(user.id),
+      isStaffProfile: true,
     })
   }
 

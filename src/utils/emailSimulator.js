@@ -3,6 +3,7 @@ import { emailLogsApi } from './api'
 import { readStoredJson, writeStoredJson } from './storage'
 import { useSettingsStore } from '../stores/settings'
 import { buildTemplatedEmail } from './emailTemplates'
+import { formatPatientFirstName } from './patientName'
 
 const EMAIL_LOG_KEY = 'tcm_email_log'
 const DEFAULT_CLINIC_NAME = 'TCM Clinic'
@@ -24,7 +25,7 @@ function resolvePatientEmail(patient) {
 }
 
 function resolvePatientName(patient) {
-  return patient?.name || 'Patient'
+  return formatPatientFirstName(patient, 'Patient')
 }
 
 function formatDate(value) {
@@ -38,6 +39,28 @@ function formatMoney(value) {
 function formatCurrency(value, currency = 'CAD') {
   const code = String(currency || 'CAD').toUpperCase()
   return `${code} ${formatMoney(value)}`
+}
+
+function resolveServicePrice({ appointment, consultation, currency = 'CAD', settingsStore } = {}) {
+  const appointmentPrice = appointment?.servicePrice
+    ?? appointment?.price
+    ?? appointment?.defaultPrice
+    ?? appointment?.serviceDefaultPrice
+  if (appointmentPrice !== undefined && appointmentPrice !== null && appointmentPrice !== '') {
+    return formatCurrency(appointmentPrice, appointment?.currency || currency)
+  }
+
+  const serviceKey = appointment?.serviceType || appointment?.serviceKey
+  const service = serviceKey ? settingsStore?.serviceTypes?.[serviceKey] : null
+  if (service?.defaultPrice !== undefined && service?.defaultPrice !== null && service.defaultPrice !== '') {
+    return formatCurrency(service.defaultPrice, settingsStore?.currency || currency)
+  }
+
+  const consultationTotal = consultation?.totalAmount ?? consultation?.outstandingAmount
+  if (consultationTotal !== undefined && consultationTotal !== null && consultationTotal !== '') {
+    return formatCurrency(consultationTotal, consultation?.currency || currency)
+  }
+  return ''
 }
 
 function toAbsoluteUrl(value) {
@@ -89,9 +112,11 @@ function buildReportPdfAttachment(consultation, pdfResult = {}) {
   }
 }
 
-function getCommonVariables({ patient, clinicName, clinicAddress, appointment, consultation, practitioner, serviceLabel, links = {} } = {}) {
-  const start = appointment?.startTime || ''
+function getCommonVariables({ patient, clinicName, clinicAddress, appointment, consultation, practitioner, serviceLabel, links = {}, settingsStore: providedSettingsStore } = {}) {
+  const templateSettingsStore = providedSettingsStore || useSettingsStore()
+  const start = appointment?.startTime || consultation?.appointmentStartTime || consultation?.startTime || ''
   const [appointmentDate, appointmentTime = ''] = String(start).split(/[T ]/)
+  const fallbackAppointmentDate = consultation?.appointmentDate || consultation?.date || consultation?.consultDate || consultation?.consultationDate || ''
   const currency = consultation?.currency || 'CAD'
   const amount = consultation
     ? formatCurrency(consultation?.totalAmount ?? consultation?.outstandingAmount ?? 0, currency)
@@ -104,7 +129,8 @@ function getCommonVariables({ patient, clinicName, clinicAddress, appointment, c
     patientEmail: resolvePatientEmail(patient),
     practitionerName: practitioner?.name || practitioner?.nickName || '',
     serviceLabel: serviceLabel || appointment?.serviceLabel || appointment?.serviceType || '',
-    appointmentDate: appointmentDate || formatDate(start),
+    servicePrice: resolveServicePrice({ appointment, consultation, currency, settingsStore: templateSettingsStore }),
+    appointmentDate: appointmentDate || formatDate(start) || formatDate(fallbackAppointmentDate),
     appointmentTime,
     appointmentStartTime: start,
     appointmentEndTime: appointment?.endTime || '',

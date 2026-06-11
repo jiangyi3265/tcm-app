@@ -3,12 +3,8 @@ import { RouterView, useRoute } from 'vue-router'
 import { ref, provide, onMounted, onUnmounted } from 'vue'
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
-import { useAuthStore } from '../../stores/auth'
-import { usePatientsStore } from '../../stores/patients'
 
 const route = useRoute()
-const authStore = useAuthStore()
-const patientsStore = usePatientsStore()
 const sidebarCollapsed = ref(false)
 const isMobile = ref(false)
 
@@ -20,10 +16,6 @@ function checkMobile() {
 onMounted(() => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
-  // 登录后自动为当前员工补建病人档案（兼容老账号）
-  if (authStore.currentUser) {
-    patientsStore.ensureStaffPatient(authStore.currentUser).catch(() => {})
-  }
 })
 onUnmounted(() => window.removeEventListener('resize', checkMobile))
 

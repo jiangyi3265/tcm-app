@@ -38,6 +38,11 @@ test('模板变量支持带空格的双大括号', () => {
   assert.equal(renderEmailTemplate('Hi {{ patientName }}', { patientName: 'Ada' }), 'Hi Ada')
 })
 
+test('default invoice subject includes appointmentDate placeholder', () => {
+  const templates = normalizeEmailTemplates()
+  assert.match(templates.invoice.subject, /\{\{appointmentDate\}\}/)
+})
+
 test('构建外发邮件时保留 templateKey 和 variables', () => {
   const email = buildTemplatedEmail({
     to: 'patient@example.com',

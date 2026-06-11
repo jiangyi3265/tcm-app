@@ -1198,6 +1198,7 @@ async function syncPrescriptionDraft({ silent = true } = {}) {
   const payload = buildPrescriptionPayload(rxForm.value, 'editing')
   if (!shouldPersistRxDraft(payload)) return null
 
+  const requestSnapshot = currentSnapshot
   const requestSessionId = rxEditingSessionId.value
   pendingRxAutosave.value = false
   rxAutosaving.value = true
@@ -1212,7 +1213,11 @@ async function syncPrescriptionDraft({ silent = true } = {}) {
     })) {
       applySavedConsultation(updated)
       syncSavedSnapshot()
-      syncRxFormFromConsultation(payload.id)
+      if (buildRxDraftSnapshot() === requestSnapshot) {
+        syncRxFormFromConsultation(payload.id)
+      } else {
+        updateEditingRxIndex(payload.id)
+      }
     }
     return updated
   } finally {
@@ -2539,7 +2544,9 @@ async function handleSendPreviewEmail() {
                 </el-form-item>
                 <el-form-item label="Chief Complaint Duration">
                   <el-select v-model="form.chiefComplaintDuration" :placeholder="t('consultation.selectDuration')" style="width:100%" :disabled="isReadOnly">
-                    <el-option v-for="d in TCM_OPTIONS.chiefComplaintDuration" :key="d" :label="d" :value="d" />
+                    <el-option v-for="d in TCM_OPTIONS.chiefComplaintDuration" :key="d" :label="d" :value="d">
+                      <span>{{ d }}</span>
+                    </el-option>
                   </el-select>
                 </el-form-item>
                 <el-form-item label="Chief Complaint Description">

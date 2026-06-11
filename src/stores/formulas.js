@@ -56,7 +56,7 @@ export const useFormulasStore = defineStore('formulas', () => {
 
   async function addFormula(data) {
     const created = await formulasApi.create(data)
-    formulas.value.push(created)
+    formulas.value.unshift(created)
     saveState()
     // 从后端重新刷新确保数据一致性
     refreshFromApi().catch(() => {})

@@ -32,7 +32,7 @@ export const useHerbDictStore = defineStore('herbDict', () => {
 
   async function addHerb(data) {
     const created = await herbDictApi.create(data)
-    herbs.value.push(created); saveState(); return created
+    herbs.value.unshift(created); saveState(); return created
   }
   async function updateHerb(id, data) {
     const updated = await herbDictApi.update(id, data)

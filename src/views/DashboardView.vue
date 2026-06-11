@@ -11,6 +11,7 @@ import { useBranchesStore } from '../stores/branches'
 import { formatTime, formatDate, dayjs } from '../utils/dateUtils'
 import { getActivePrescriptions, getPaymentRecords, getPaymentStatus, getPrescriptionStatus } from '../utils/prescriptionWorkflow'
 import { SERVICE_TYPES } from '../utils/sampleData'
+import { formatPatientName } from '../utils/patientName'
 
 const { t, locale } = useI18n()
 
@@ -243,7 +244,7 @@ function getConsultStatusType(consultation) {
             class="prescription-item"
           >
             <div class="rx-info">
-              <span class="rx-patient">{{ c.patient?.name }}</span>
+              <span class="rx-patient">{{ formatPatientName(c.patient) }}</span>
               <span class="rx-formula">{{ c.formulaName || t('common.customFormula') }}</span>
             </div>
             <el-tag size="small" :type="c.prescriptionType === 'powder' ? 'warning' : 'success'">
@@ -327,7 +328,7 @@ function getConsultStatusType(consultation) {
             @click="goToConsultation(c)"
           >
             <div class="consult-info">
-              <div class="consult-patient">{{ c.patient?.name || '-' }}</div>
+              <div class="consult-patient">{{ formatPatientName(c.patient) }}</div>
               <div class="consult-chief">{{ c.chiefComplaint || t('dashboard.noChiefComplaint') }}</div>
             </div>
             <div class="consult-meta">

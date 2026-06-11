@@ -43,7 +43,7 @@ export const useAcupointsStore = defineStore('acupoints', () => {
 
   async function addAcupoint(data) {
     const created = await acupointsApi.create(data)
-    acupoints.value.push(created)
+    acupoints.value.unshift(created)
     saveState()
     return created
   }

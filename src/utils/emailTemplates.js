@@ -61,7 +61,7 @@ export const EMAIL_TEMPLATE_REGISTRY = Object.freeze({
   },
   invoice: {
     label: '发票',
-    subject: '{{clinicName}}｜发票',
+    subject: '{{clinicName}}｜发票 {{appointmentDate}}',
     body:
       '您好 {{patientName}}，您的发票已生成。\n\n'
       + '问诊编号：{{consultationId}}\n'

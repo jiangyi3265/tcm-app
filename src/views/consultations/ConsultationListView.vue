@@ -8,6 +8,7 @@ import { useAuthStore } from '../../stores/auth'
 import { useAppointmentsStore } from '../../stores/appointments'
 import { canAccessPatientRecords, filterAccessibleConsultations } from '../../utils/permissions'
 import { formatDate } from '../../utils/dateUtils'
+import { formatPatientName } from '../../utils/patientName'
 
 const { t } = useI18n()
 
@@ -43,7 +44,7 @@ const patientConsultationsMap = computed(() => {
 })
 
 function getPatientName(patientId) {
-  return patientsStore.getPatient(patientId)?.name || '-'
+  return formatPatientName(patientsStore.getPatient(patientId))
 }
 
 function getPractitionerName(practitionerId) {

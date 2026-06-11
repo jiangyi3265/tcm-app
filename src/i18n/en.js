@@ -543,7 +543,7 @@ export default {
 
   publicBooking: {
     pageTitle: 'Online Booking',
-    pageSubtitle: 'Choose a date first, then view the released time blocks for that day.',
+    pageSubtitle: 'Please select a service first, and then select your preferred date and time.',
     loadFailed: 'Unable to load booking options',
     nameRequired: 'Please enter your name',
     phoneRequired: 'Please enter a phone number',

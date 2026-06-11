@@ -9,6 +9,7 @@ import { useAuthStore } from '../../stores/auth'
 import { canAccessPatientRecords, hasPermission } from '../../utils/permissions'
 import { formatDate } from '../../utils/dateUtils'
 import { COUNTRY_OPTIONS, DEFAULT_COUNTRY, getProvinceOptions } from '../../utils/countryRegionOptions'
+import { formatPatientName, getPatientInitial } from '../../utils/patientName'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
@@ -114,7 +115,7 @@ const newPatient = ref({
   gender: '',
   addressStreet: '',
   addressCity: '',
-  addressState: '',
+  addressState: 'ON',
   addressPostal: '',
   addressCountry: DEFAULT_COUNTRY,
   historyAndMedication: '',
@@ -127,7 +128,7 @@ const countryOptions = COUNTRY_OPTIONS
 const provinceOptions = computed(() => getProvinceOptions(newPatient.value.addressCountry))
 
 watch(() => newPatient.value.addressCountry, () => {
-  newPatient.value.addressState = ''
+  newPatient.value.addressState = newPatient.value.addressCountry === DEFAULT_COUNTRY ? 'ON' : ''
 })
 
 function addEmail() { newPatient.value.emails.push('') }
@@ -171,7 +172,7 @@ function resetForm() {
     firstName: '', lastName: '', middleName: '', jobTitle: '', accountName: '',
     emails: [''], email2: '', mobilePhone: '', businessPhone: '', fax: '',
     preferredContact: 'Any', dateOfBirth: '', gender: '',
-    addressStreet: '', addressCity: '', addressState: '', addressPostal: '', addressCountry: DEFAULT_COUNTRY,
+    addressStreet: '', addressCity: '', addressState: 'ON', addressPostal: '', addressCountry: DEFAULT_COUNTRY,
     historyAndMedication: '', notes: '', practitionerId: resolveDefaultPractitionerId(),
   }
 }
@@ -198,8 +199,9 @@ async function handleMerge() {
 }
 
 function patientOptionLabel(patient) {
-  if (hidePatientContact.value) return patient.name
-  return `${patient.name} (${patient.emails?.[0] || ''})`
+  const name = formatPatientName(patient)
+  if (hidePatientContact.value) return name
+  return `${name} (${patient.emails?.[0] || ''})`
 }
 
 function goToPatient(patient) {
@@ -264,10 +266,10 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
           <template #default="{ row }">
             <div class="patient-name-cell">
               <el-avatar :size="32" style="background: var(--color-primary); flex-shrink:0">
-                {{ (row.name || '?').charAt(0) }}
+                {{ getPatientInitial(row) }}
               </el-avatar>
               <div>
-                <div style="font-weight: 600">{{ row.name }}</div>
+                <div style="font-weight: 600">{{ formatPatientName(row) }}</div>
                 <div v-if="!hidePatientContact" style="font-size: 12px; color: #888">{{ row.emails?.[0] }}</div>
               </div>
             </div>
@@ -421,28 +423,28 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
               <el-input v-model="newPatient.addressStreet" placeholder="Street Address" />
             </el-form-item>
           </el-col>
-          <el-col :span="6">
-            <el-form-item :label="t('patients.country')">
-              <el-select v-model="newPatient.addressCountry" filterable style="width:100%">
-                <el-option v-for="p in countryOptions" :key="p.value" :label="p.label" :value="p.value" />
-              </el-select>
+          <el-col :span="12">
+            <el-form-item :label="t('patients.city')">
+              <el-input v-model="newPatient.addressCity" placeholder="City" />
             </el-form-item>
           </el-col>
-          <el-col :span="6">
+          <el-col :span="12">
+            <el-form-item :label="t('patients.postalCode')">
+              <el-input v-model="newPatient.addressPostal" placeholder="Postal Code" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
             <el-form-item :label="t('patients.province')">
               <el-select v-model="newPatient.addressState" filterable style="width:100%">
                 <el-option v-for="p in provinceOptions" :key="p.value" :label="p.label" :value="p.value" />
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="6">
-            <el-form-item :label="t('patients.city')">
-              <el-input v-model="newPatient.addressCity" placeholder="City" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="6">
-            <el-form-item :label="t('patients.postalCode')">
-              <el-input v-model="newPatient.addressPostal" placeholder="Postal Code" />
+          <el-col :span="12">
+            <el-form-item :label="t('patients.country')">
+              <el-select v-model="newPatient.addressCountry" filterable style="width:100%">
+                <el-option v-for="p in countryOptions" :key="p.value" :label="p.label" :value="p.value" />
+              </el-select>
             </el-form-item>
           </el-col>
         </el-row>

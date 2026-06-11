@@ -77,6 +77,18 @@ const copy = computed(() => (isZh.value
       cancelledDesc: 'This appointment has been cancelled and follow-up emails will stop automatically.',
       patientLabel: 'Patient',
       appointmentLabel: 'Appointment',
+      patientInfo: 'Patient information',
+      firstName: 'First name',
+      lastName: 'Last name',
+      gender: 'Gender',
+      dateOfBirth: 'Birth date',
+      email: 'Email',
+      phone: 'Phone',
+      addressStreet: 'Address',
+      addressCity: 'City',
+      addressState: 'Province',
+      addressCountry: 'Country',
+      addressPostal: 'Post code',
       chiefComplaint: 'Chief complaint / reason for visit *',
       chiefComplaintPh: 'Describe the main issue you want help with',
       duration: 'Duration',
@@ -155,6 +167,17 @@ const CURRENT_MEDICATION_OPTIONS = [
 
 function createIntakeForm() {
   return {
+    firstName: '',
+    lastName: '',
+    gender: '',
+    dateOfBirth: '',
+    email: '',
+    phone: '',
+    addressStreet: '',
+    addressCity: '',
+    addressState: 'ON',
+    addressCountry: 'CA',
+    addressPostal: '',
     chiefComplaint: '',
     chiefComplaintDuration: '',
     chiefComplaintDescription: '',
@@ -200,6 +223,19 @@ onMounted(async () => {
   try {
     const info = await intakePublicApi.getInfo(token)
     appointmentInfo.value = info
+    Object.assign(form.value, {
+      firstName: info.firstName || form.value.firstName,
+      lastName: info.lastName || form.value.lastName,
+      gender: info.gender || form.value.gender,
+      dateOfBirth: info.dateOfBirth || form.value.dateOfBirth,
+      email: info.email || form.value.email,
+      phone: info.phone || form.value.phone,
+      addressStreet: info.addressStreet || form.value.addressStreet,
+      addressCity: info.addressCity || form.value.addressCity,
+      addressState: info.addressState || form.value.addressState,
+      addressCountry: info.addressCountry || form.value.addressCountry,
+      addressPostal: info.addressPostal || form.value.addressPostal,
+    })
     if (info.intakeSubmitted) {
       submitted.value = true
     }
@@ -300,6 +336,56 @@ async function handleCancelAppointment() {
             <strong>{{ formattedStartTime }}</strong>
           </div>
         </div>
+
+        <section class="section-card">
+          <h2>{{ copy.patientInfo || 'Patient information' }}</h2>
+          <div class="grid two">
+            <label class="field-block">
+              <span>{{ copy.firstName || 'First name' }}</span>
+              <input v-model="form.firstName" class="form-input" type="text" placeholder="First name" />
+            </label>
+            <label class="field-block">
+              <span>{{ copy.lastName || 'Last name' }}</span>
+              <input v-model="form.lastName" class="form-input" type="text" placeholder="Last name" />
+            </label>
+            <label class="field-block">
+              <span>{{ copy.gender || 'Gender' }}</span>
+              <input v-model="form.gender" class="form-input" type="text" placeholder="Gender" />
+            </label>
+            <label class="field-block">
+              <span>{{ copy.dateOfBirth || 'Birth date' }}</span>
+              <input v-model="form.dateOfBirth" class="form-input" type="date" />
+            </label>
+            <label class="field-block">
+              <span>{{ copy.email || 'Email' }}</span>
+              <input v-model="form.email" class="form-input" type="email" placeholder="Email" />
+            </label>
+            <label class="field-block">
+              <span>{{ copy.phone || 'Phone' }}</span>
+              <input v-model="form.phone" class="form-input" type="tel" placeholder="Phone" />
+            </label>
+            <label class="field-block full">
+              <span>{{ copy.addressStreet || 'Address' }}</span>
+              <input v-model="form.addressStreet" class="form-input" type="text" placeholder="Street address" />
+            </label>
+            <label class="field-block">
+              <span>{{ copy.addressCity || 'City' }}</span>
+              <input v-model="form.addressCity" class="form-input" type="text" placeholder="City" />
+            </label>
+            <label class="field-block">
+              <span>{{ copy.addressPostal || 'Post code' }}</span>
+              <input v-model="form.addressPostal" class="form-input" type="text" placeholder="Post code" />
+            </label>
+            <label class="field-block">
+              <span>{{ copy.addressState || 'Province' }}</span>
+              <input v-model="form.addressState" class="form-input" type="text" placeholder="ON" />
+            </label>
+            <label class="field-block">
+              <span>{{ copy.addressCountry || 'Country' }}</span>
+              <input v-model="form.addressCountry" class="form-input" type="text" placeholder="CA" />
+            </label>
+          </div>
+        </section>
 
         <section class="section-card">
           <h2>{{ copy.chiefComplaint }}</h2>

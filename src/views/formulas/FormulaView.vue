@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useFormulasStore } from '../../stores/formulas'
 import { useInventoryStore } from '../../stores/inventory'
@@ -11,6 +12,8 @@ import { bindHerbSelection } from '../../utils/herbBinding'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t, locale } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const formulasStore = useFormulasStore()
 const inventoryStore = useInventoryStore()
 const herbDictStore = useHerbDictStore()
@@ -170,16 +173,33 @@ function startEdit(formula) {
   editHerb.value = createHerbDraft()
 }
 
+function openEditWindow(formula) {
+  if (!formula?.id) return
+  const target = router.resolve({ path: '/formulas', query: { edit: formula.id } })
+  window.open(target.href, '_blank', 'noopener')
+}
+
+watch(
+  () => [route.query.edit, formulasStore.formulas.length],
+  ([editId]) => {
+    if (!editId || editing.value) return
+    const formula = formulasStore.getFormula(String(editId))
+    if (formula) startEdit(formula)
+  },
+  { immediate: true },
+)
+
 function cancelEdit() {
   editing.value = false
 }
 
 function addEditHerb() {
   if (!editHerb.value.herbDictId) return ElMessage.warning(t('inventory.selectHerbRequired'))
-  editForm.value.items.push({
+  editForm.value.items.unshift({
     ...editHerb.value,
-    sortOrder: editForm.value.items.length + 1,
+    sortOrder: 1,
   })
+  editForm.value.items.forEach((item, index) => { item.sortOrder = index + 1 })
   editHerb.value = createHerbDraft()
 }
 
@@ -208,10 +228,11 @@ const newHerb = ref(createHerbDraft())
 
 function addNewHerb() {
   if (!newHerb.value.herbDictId) return ElMessage.warning(t('inventory.selectHerbRequired'))
-  newFormula.value.items.push({
+  newFormula.value.items.unshift({
     ...newHerb.value,
-    sortOrder: newFormula.value.items.length + 1,
+    sortOrder: 1,
   })
+  newFormula.value.items.forEach((item, index) => { item.sortOrder = index + 1 })
   newHerb.value = createHerbDraft()
 }
 
@@ -375,7 +396,7 @@ const categoryCountEntries = computed(() => {
             <el-col :span="4"><el-input v-model="newHerb.notes" :placeholder="t('admin.formulaHerbNotes')" size="small" /></el-col>
             <el-col :span="3"><el-button size="small" type="primary" @click="addNewHerb">{{ t('consultation.addHerb') }}</el-button></el-col>
           </el-row>
-          <el-table :data="newFormula.items" size="small" max-height="200" :empty-text="t('admin.formulaNoHerbsAdd')">
+          <el-table :data="newFormula.items" size="small" :empty-text="t('admin.formulaNoHerbsAdd')">
             <el-table-column prop="herbName" :label="t('admin.formulaHerbName')" min-width="100" />
             <el-table-column :label="t('admin.formulaDosage')" width="80"><template #default="{ row }">{{ row.dosage }}{{ row.unit }}</template></el-table-column>
             <el-table-column prop="notes" :label="t('admin.formulaHerbNotes')" width="100" />
@@ -483,7 +504,7 @@ const categoryCountEntries = computed(() => {
               </div>
 
               <div class="fv-card-actions">
-                <el-button size="small" type="primary" @click.stop="startEdit(formula)">
+                <el-button size="small" type="primary" @click.stop="openEditWindow(formula)">
                   <el-icon><Edit /></el-icon> {{ t('formulaView.editFormula') }}
                 </el-button>
                 <el-button size="small" @click.stop="duplicateFormula(formula)">
@@ -540,7 +561,7 @@ const categoryCountEntries = computed(() => {
                     <el-col :span="4"><el-input v-model="editHerb.notes" :placeholder="t('admin.formulaHerbNotes')" size="small" /></el-col>
                     <el-col :span="3"><el-button size="small" type="primary" @click="addEditHerb">{{ t('consultation.addHerb') }}</el-button></el-col>
                   </el-row>
-                  <el-table :data="editForm.items" size="small" max-height="250" :empty-text="t('admin.formulaNoHerbsAdd')">
+                  <el-table :data="editForm.items" size="small" :empty-text="t('admin.formulaNoHerbsAdd')">
                     <el-table-column :label="t('admin.formulaHerbName')" min-width="180">
                       <template #default="{ row }">
                         <el-select

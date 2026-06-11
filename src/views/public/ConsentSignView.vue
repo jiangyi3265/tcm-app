@@ -154,7 +154,7 @@ async function handleSign() {
 
       <div v-else-if="signed" class="state-box success">
         <h2>{{ text.signedTitle }}</h2>
-        <p v-if="formattedSignedAt">{{ text.signedAt }}：{{ formattedSignedAt }}</p>
+        <p v-if="formattedSignedAt">{{ text.signedAt }}: {{ formattedSignedAt }}</p>
         <p>{{ text.signedDesc }}</p>
       </div>
 
