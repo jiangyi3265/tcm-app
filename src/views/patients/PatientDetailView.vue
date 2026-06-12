@@ -28,6 +28,7 @@ import {
   getNewerHistoryIndex,
   getOlderHistoryIndex,
 } from '../../utils/historyCompareNavigation'
+import { GENDER_OPTIONS, formatGender, getGenderTagType, normalizeGender } from '../../utils/gender'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
@@ -225,6 +226,7 @@ function startEdit() {
   const addressCountry = normalizeCountryCode(patient.value?.addressCountry, DEFAULT_COUNTRY)
   editForm.value = {
     ...patient.value,
+    gender: normalizeGender(patient.value?.gender),
     addressCountry,
     addressState: normalizeProvinceCode(addressCountry, patient.value?.addressState),
     emails: [...(patient.value.emails || [])],
@@ -239,6 +241,7 @@ function cancelEdit() {
 async function saveEdit() {
   try {
     const updates = { ...editForm.value }
+    updates.gender = normalizeGender(updates.gender)
     if (hasConsultationDrivenHistory.value) {
       delete updates.historyAndMedication
       delete updates.historySourceConsultId
@@ -631,8 +634,8 @@ const fileTree = computed(() => {
               style="cursor:pointer" @click="openPatientFile({ url: patient.consentPdfUrl, label: t('patientDetail.consentPdfFile') })">
               PDF
             </el-tag>
-            <el-tag v-if="!isApprenticeReadonly && patient.gender" :type="patient.gender === '男' ? 'primary' : 'danger'" size="small">
-              {{ patient.gender }}
+            <el-tag v-if="!isApprenticeReadonly && patient.gender" :type="getGenderTagType(patient.gender)" size="small">
+              {{ formatGender(patient.gender) }}
             </el-tag>
           </div>
           <div v-if="!isApprenticeReadonly" class="patient-meta">
@@ -691,7 +694,7 @@ const fileTree = computed(() => {
                   <el-descriptions-item :label="t('patientDetail.lastName')">{{ patient.lastName || '-' }}</el-descriptions-item>
                   <el-descriptions-item :label="t('patientDetail.firstName')">{{ patient.firstName || '-' }}</el-descriptions-item>
                   <el-descriptions-item :label="t('patientDetail.middleName')">{{ patient.middleName || '-' }}</el-descriptions-item>
-                  <el-descriptions-item :label="t('patientDetail.gender')">{{ patient.gender || '-' }}</el-descriptions-item>
+                  <el-descriptions-item :label="t('patientDetail.gender')">{{ formatGender(patient.gender) }}</el-descriptions-item>
                   <el-descriptions-item :label="t('patientDetail.dateOfBirth')">{{ patient.dateOfBirth || '-' }}</el-descriptions-item>
                   <el-descriptions-item :label="t('patientDetail.jobTitle')">{{ patient.jobTitle || '-' }}</el-descriptions-item>
                   <el-descriptions-item :label="t('patientDetail.accountName')" :span="2">{{ patient.accountName || '-' }}</el-descriptions-item>
@@ -870,19 +873,15 @@ const fileTree = computed(() => {
                     <el-col :span="12">
                       <el-form-item :label="t('patientDetail.gender')">
                         <el-radio-group v-model="editForm.gender">
-                          <el-radio value="男">{{ t('patients.male') }}</el-radio>
-                          <el-radio value="女">{{ t('patients.female') }}</el-radio>
+                          <el-radio v-for="option in GENDER_OPTIONS" :key="option.value" :value="option.value">
+                            {{ option.label }}
+                          </el-radio>
                         </el-radio-group>
                       </el-form-item>
                     </el-col>
                     <el-col :span="12">
                       <el-form-item :label="t('patientDetail.dateOfBirth')">
-                        <el-date-picker
-                          v-model="editForm.dateOfBirth"
-                          type="date"
-                          value-format="YYYY-MM-DD"
-                          style="width: 100%"
-                        />
+                        <el-input v-model="editForm.dateOfBirth" placeholder="YYYY/MM/DD" />
                       </el-form-item>
                     </el-col>
                     <el-col :span="12">

@@ -67,7 +67,6 @@ export const EMAIL_TEMPLATE_REGISTRY = Object.freeze({
       + '问诊编号：{{consultationId}}\n'
       + '日期：{{consultationDate}}\n'
       + '金额：{{amount}}\n'
-      + '发票 PDF 已随邮件附件发送。\n\n'
       + '感谢您的到访。',
   },
   appointmentChange: {

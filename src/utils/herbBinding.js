@@ -80,6 +80,8 @@ export function bindHerbSelection(target, herb, { nameKey = 'name' } = {}) {
     ...target,
     herbDictId: herb?.id || null,
     ...(nameKey ? { [nameKey]: herb?.name || '' } : {}),
+    pinyin: herb?.pinyin || '',
+    latinName: herb?.latinName || '',
   }
 }
 
@@ -119,6 +121,18 @@ export function getInventoryHerbMeta(item = {}, herbById) {
         herbDict?.guijing,
         item?.meridianTropism,
         item?.guijing,
+      ),
+    ),
+    pinyin: normalizeText(
+      pickValue(
+        herbDict?.pinyin,
+        item?.pinyin,
+      ),
+    ),
+    latinName: normalizeText(
+      pickValue(
+        herbDict?.latinName,
+        item?.latinName,
       ),
     ),
   }

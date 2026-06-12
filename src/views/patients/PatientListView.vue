@@ -10,6 +10,7 @@ import { canAccessPatientRecords, hasPermission } from '../../utils/permissions'
 import { formatDate } from '../../utils/dateUtils'
 import { COUNTRY_OPTIONS, DEFAULT_COUNTRY, getProvinceOptions } from '../../utils/countryRegionOptions'
 import { formatPatientName, getPatientInitial } from '../../utils/patientName'
+import { GENDER_OPTIONS, formatGender, getGenderTagType, normalizeGender } from '../../utils/gender'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
@@ -159,6 +160,7 @@ async function handleAddPatient() {
 
   await patientsStore.addPatient({
     ...newPatient.value,
+    gender: normalizeGender(newPatient.value.gender),
     emails: validEmails,
     phone: newPatient.value.mobilePhone,
   })
@@ -212,7 +214,6 @@ function displayPhone(patient) {
   return patient?.phone || patient?.mobilePhone || patient?.businessPhone || '-'
 }
 
-const GENDER_MAP = { 男: 'success', 女: 'danger' }
 </script>
 
 <template>
@@ -277,7 +278,7 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
         </el-table-column>
         <el-table-column v-if="!isApprenticeReadonly" :label="t('patients.gender')" width="80">
           <template #default="{ row }">
-            <el-tag v-if="row.gender" :type="GENDER_MAP[row.gender]" size="small">{{ row.gender }}</el-tag>
+            <el-tag v-if="row.gender" :type="getGenderTagType(row.gender)" size="small">{{ formatGender(row.gender) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column v-if="!hidePatientContact" :label="t('patients.phone')" width="140">
@@ -340,20 +341,15 @@ const GENDER_MAP = { 男: 'success', 女: 'danger' }
           <el-col :span="12">
             <el-form-item :label="t('patients.gender')">
               <el-radio-group v-model="newPatient.gender">
-                <el-radio value="男">{{ t('patients.male') }}</el-radio>
-                <el-radio value="女">{{ t('patients.female') }}</el-radio>
+                <el-radio v-for="option in GENDER_OPTIONS" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </el-radio>
               </el-radio-group>
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item :label="t('patients.dateOfBirth')">
-              <el-date-picker
-                v-model="newPatient.dateOfBirth"
-                type="date"
-                :placeholder="t('patients.selectDate')"
-                value-format="YYYY-MM-DD"
-                style="width: 100%"
-              />
+              <el-input v-model="newPatient.dateOfBirth" placeholder="YYYY/MM/DD" />
             </el-form-item>
           </el-col>
           <el-col :span="12">

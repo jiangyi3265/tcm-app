@@ -4,6 +4,7 @@ import { patientsApi } from '../utils/api'
 import { readStoredJson, writeStoredJson } from '../utils/storage'
 import { useConsultationsStore } from './consultations'
 import { useAppointmentsStore } from './appointments'
+import { normalizeGender } from '../utils/gender'
 
 export const usePatientsStore = defineStore('patients', () => {
   const patients = ref([])
@@ -39,7 +40,9 @@ export const usePatientsStore = defineStore('patients', () => {
 
   async function refreshFromApi() {
     const list = await patientsApi.list()
-    patients.value = Array.isArray(list) ? list : []
+    patients.value = Array.isArray(list)
+      ? list.map((patient) => ({ ...patient, gender: normalizeGender(patient?.gender) }))
+      : []
     saveState()
     return patients.value
   }
@@ -81,7 +84,7 @@ export const usePatientsStore = defineStore('patients', () => {
       fax: data.fax || '',
       preferredContact: data.preferredContact || 'Any',
       dateOfBirth: data.dateOfBirth || '',
-      gender: data.gender || '',
+      gender: normalizeGender(data.gender),
       address: data.address || '',
       addressStreet: data.addressStreet || '',
       addressCity: data.addressCity || '',
@@ -102,14 +105,18 @@ export const usePatientsStore = defineStore('patients', () => {
       isStaffProfile: Boolean(data.isStaffProfile),
     }
     const created = await patientsApi.create(newPatient)
-    patients.value.push(created)
+    const normalized = { ...created, gender: normalizeGender(created?.gender) }
+    patients.value.push(normalized)
     saveState()
-    return created
+    return normalized
   }
 
   async function updatePatient(id, updates) {
     const idx = patients.value.findIndex((p) => p.id === id)
     if (idx !== -1) {
+      if (updates.gender !== undefined) {
+        updates.gender = normalizeGender(updates.gender)
+      }
       if (Array.isArray(updates.emails)) {
         const validEmails = updates.emails.map((email) => String(email || '').trim()).filter(Boolean)
         updates.emails = validEmails
@@ -123,9 +130,10 @@ export const usePatientsStore = defineStore('patients', () => {
         updates.name = `${ln} ${fn}`.trim() || p.name
       }
       const updated = await patientsApi.update(id, updates)
-      patients.value[idx] = updated
+      const normalized = { ...updated, gender: normalizeGender(updated?.gender) }
+      patients.value[idx] = normalized
       saveState()
-      return updated
+      return normalized
     }
     return null
   }
@@ -133,14 +141,14 @@ export const usePatientsStore = defineStore('patients', () => {
   async function deletePatient(id) {
     const updated = await patientsApi.softDelete(id)
     const idx = patients.value.findIndex((p) => p.id === id)
-    if (idx !== -1) patients.value[idx] = updated
+    if (idx !== -1) patients.value[idx] = { ...updated, gender: normalizeGender(updated?.gender) }
     saveState()
   }
 
   async function restorePatient(id) {
     const updated = await patientsApi.restore(id)
     const idx = patients.value.findIndex((p) => p.id === id)
-    if (idx !== -1) patients.value[idx] = updated
+    if (idx !== -1) patients.value[idx] = { ...updated, gender: normalizeGender(updated?.gender) }
     saveState()
   }
 

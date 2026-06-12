@@ -4,9 +4,9 @@ import { readStoredJson, writeStoredJson } from './storage'
 import { useSettingsStore } from '../stores/settings'
 import { buildTemplatedEmail } from './emailTemplates'
 import { formatPatientFirstName } from './patientName'
+import { resolveClinicName } from './clinicName'
 
 const EMAIL_LOG_KEY = 'tcm_email_log'
-const DEFAULT_CLINIC_NAME = 'TCM Clinic'
 
 function loadEmailLog() {
   return readStoredJson(EMAIL_LOG_KEY, []) || []
@@ -14,10 +14,6 @@ function loadEmailLog() {
 
 function saveEmailLog(log) {
   writeStoredJson(EMAIL_LOG_KEY, log)
-}
-
-function resolveClinicName(clinicName) {
-  return clinicName || DEFAULT_CLINIC_NAME
 }
 
 function resolvePatientEmail(patient) {

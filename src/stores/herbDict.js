@@ -27,7 +27,12 @@ export const useHerbDictStore = defineStore('herbDict', () => {
   function findByName(name) {
     if (!name) return []
     const q = name.toLowerCase()
-    return activeHerbs.value.filter((h) => h.name.toLowerCase().includes(q) || (h.pinyin && h.pinyin.toLowerCase().includes(q)))
+    return activeHerbs.value.filter((h) =>
+      h.name.toLowerCase().includes(q)
+      || (h.alias && h.alias.toLowerCase().includes(q))
+      || (h.pinyin && h.pinyin.toLowerCase().includes(q))
+      || (h.latinName && h.latinName.toLowerCase().includes(q)),
+    )
   }
 
   async function addHerb(data) {

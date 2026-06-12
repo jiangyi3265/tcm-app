@@ -4,8 +4,8 @@ import { SERVICE_TYPES } from '../utils/sampleData'
 import { settingsApi } from '../utils/api'
 import { readStoredJson, writeStoredJson } from '../utils/storage'
 import { cloneDefaultEmailTemplates, normalizeEmailTemplates } from '../utils/emailTemplates'
+import { DEFAULT_CLINIC_NAME, resolveClinicName } from '../utils/clinicName'
 
-const DEFAULT_CLINIC_NAME = 'TCM Clinic Management System'
 const DEFAULT_CURRENCY = 'CAD'
 const DEFAULT_PATENT_MEDICINES = []
 const DEFAULT_FORMULA_CATEGORIES = ['经典方', '经验方', '自拟方']
@@ -271,7 +271,7 @@ export const useSettingsStore = defineStore('settings', () => {
     publicBookingDripWindowDays.value = data?.publicBookingDripWindowDays ?? 7
     publicBookingDripMinutes.value = data?.publicBookingDripMinutes ?? 60
     profitRatio.value = data?.profitRatio ?? 1.0
-    clinicName.value = data?.clinicName || DEFAULT_CLINIC_NAME
+    clinicName.value = resolveClinicName(data?.clinicName)
     clinicAddress.value = data?.clinicAddress || ''
     clinicPhone.value = data?.clinicPhone || ''
     currency.value = data?.currency || DEFAULT_CURRENCY
@@ -312,7 +312,7 @@ export const useSettingsStore = defineStore('settings', () => {
       publicBookingDripWindowDays: publicBookingDripWindowDays.value,
       publicBookingDripMinutes: publicBookingDripMinutes.value,
       profitRatio: profitRatio.value,
-      clinicName: clinicName.value,
+      clinicName: resolveClinicName(clinicName.value),
       clinicAddress: clinicAddress.value,
       clinicPhone: clinicPhone.value,
       currency: currency.value,
@@ -424,7 +424,7 @@ export const useSettingsStore = defineStore('settings', () => {
     if (updates.publicBookingDripWindowDays !== undefined) publicBookingDripWindowDays.value = updates.publicBookingDripWindowDays
     if (updates.publicBookingDripMinutes !== undefined) publicBookingDripMinutes.value = updates.publicBookingDripMinutes
     if (updates.profitRatio !== undefined) profitRatio.value = updates.profitRatio
-    if (updates.clinicName !== undefined) clinicName.value = updates.clinicName
+    if (updates.clinicName !== undefined) clinicName.value = resolveClinicName(updates.clinicName)
     if (updates.clinicAddress !== undefined) clinicAddress.value = updates.clinicAddress
     if (updates.clinicPhone !== undefined) clinicPhone.value = updates.clinicPhone
     if (updates.currency !== undefined) currency.value = updates.currency || DEFAULT_CURRENCY

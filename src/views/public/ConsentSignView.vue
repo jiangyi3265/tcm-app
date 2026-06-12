@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { consentPublicApi } from '../../utils/api'
+import { resolveClinicName } from '../../utils/clinicName'
 
 const route = useRoute()
 const { locale } = useI18n()
@@ -90,7 +91,7 @@ onMounted(async () => {
     documentVersion.value = info.consentVersion || ''
     sections.value = Array.isArray(info.sections) ? info.sections : []
     agreements.value = Object.fromEntries(sections.value.map((section) => [section.key, false]))
-    clinicName.value = info.clinicName || ''
+    clinicName.value = resolveClinicName(info.clinicName)
     clinicAddress.value = info.clinicAddress || ''
     clinicPhone.value = info.clinicPhone || ''
     if (info.consentSigned) {

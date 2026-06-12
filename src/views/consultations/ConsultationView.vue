@@ -885,6 +885,41 @@ function getPrescriptionTypeLabel(type) {
   return labels[type] || type || '-'
 }
 
+function isExternalPurchase(whereToGet) {
+  const text = String(whereToGet || '').toLowerCase()
+  return text.includes('external') || text.includes('外部')
+}
+
+function shouldUseClinicInventory(source = rxForm.value) {
+  return !isExternalPurchase(source?.whereToGet) && source?.prescriptionType !== 'none'
+}
+
+function getHerbMeta(herbDictId, name = '') {
+  const byId = herbDictId ? herbDictStore.getHerb(herbDictId) : null
+  const trimmedName = String(name || '').trim()
+  const byName = !byId && trimmedName
+    ? herbDictStore.activeHerbs.find(
+      (h) => h.name === trimmedName || h.name.split('(')[0] === trimmedName,
+    )
+    : null
+  const herb = byId || byName || null
+  return {
+    herbDictId: herb?.id || herbDictId || null,
+    pinyin: herb?.pinyin || '',
+    latinName: herb?.latinName || '',
+  }
+}
+
+function withHerbMeta(item = {}) {
+  const meta = getHerbMeta(item.herbDictId, item.name || item.herbName)
+  return {
+    ...item,
+    herbDictId: meta.herbDictId,
+    pinyin: item.pinyin || meta.pinyin,
+    latinName: item.latinName || meta.latinName,
+  }
+}
+
 function formatSupplierDisplay(supplierName, gramsPerPacket) {
   const supplier = String(supplierName || '').trim()
   if (!supplier) return '-'
@@ -965,10 +1000,13 @@ function listScopedInventoryItems(category) {
 }
 
 function buildInventorySuggestion(item) {
+  const herb = item.herbDictId ? herbDictStore.getHerb(item.herbDictId) : null
   return {
     value: item.name,
     source: 'inventory',
     herbDictId: item.herbDictId || null,
+    pinyin: herb?.pinyin || '',
+    latinName: herb?.latinName || '',
     inventoryId: item.id,
     supplierId: item.supplierId || null,
     supplierName: item.supplier || '',
@@ -1005,6 +1043,8 @@ function clearRxItemInventoryBinding(row, { clearHerbDict = false } = {}) {
   row.subtotal = rxForm.value.prescriptionType === 'none' ? 0 : row.subtotal
   if (clearHerbDict) {
     row.herbDictId = null
+    row.pinyin = ''
+    row.latinName = ''
   }
 }
 
@@ -1107,14 +1147,29 @@ function applyCopiedPrescriptions(sourcePrescriptions = []) {
 }
 
 function buildPrescriptionPayload(source = rxForm.value, overrideStatus = 'editing') {
+  const usesClinicInventory = shouldUseClinicInventory(source)
   return {
     ...source,
     id: source.id || buildRxId(),
+    inventoryReservation: usesClinicInventory ? (source.inventoryReservation || []) : [],
+    inventorySyncedAt: usesClinicInventory ? (source.inventorySyncedAt || null) : null,
     subtotal: rxSubtotal.value,
     perDoseSubtotal: rxPerDoseSubtotal.value,
     rxStatus: overrideStatus,
     dispensingCompleted: overrideStatus === 'dispensed',
-    items: (source.items || []).map((item) => ({ ...item })),
+    items: (source.items || []).map((item) => {
+      const next = withHerbMeta(item)
+      if (!usesClinicInventory) {
+        next.inventoryId = null
+        next.inventoryStock = 0
+        next.stockSufficient = true
+        next.outOfStock = false
+        next.allCandidates = []
+        next.supplierId = null
+        next.supplierName = ''
+      }
+      return next
+    }),
   }
 }
 
@@ -1369,7 +1424,7 @@ async function saveRx() {
     return
   }
 
-  if (rx.prescriptionType && rx.prescriptionType !== 'none') {
+  if (shouldUseClinicInventory(rx)) {
     const insufficientItems = rx.items.filter(i => i.stockSufficient === false)
     if (insufficientItems.length > 0) {
       const names = insufficientItems.map(i => i.name).join(', ')
@@ -1463,18 +1518,30 @@ async function reopenRxRow(row) {
   }
 }
 
+function buildPrintableConsultation(source = form.value) {
+  return {
+    ...source,
+    prescriptions: (source.prescriptions || []).map((rx) => ({
+      ...rx,
+      items: (rx.items || []).map((item) => withHerbMeta(item)),
+    })),
+  }
+}
+
 function handlePrintRx(target) {
   const idx = resolvePrescriptionIndex(target)
   if (idx < 0) return
   const practitioner = authStore.users.find(u => u.id === form.value.practitionerId)
   const clinicName = settingsStore.clinicName || 'Clinic'
-  printPrescription(form.value, patient.value, practitioner, clinicName, idx)
+  printPrescription(buildPrintableConsultation(), patient.value, practitioner, clinicName, idx)
 }
 
 function addRxItem() {
-  rxForm.value.items.push({
+  rxForm.value.items.unshift({
     name: '',
     herbDictId: null,
+    pinyin: '',
+    latinName: '',
     dosage: 0,
     unit: 'g',
     category: '',
@@ -1521,25 +1588,29 @@ function applyFormulaToDialog(formula) {
 
   const prescType = rxForm.value.prescriptionType || 'raw_herbs'
   const qty = rxForm.value.quantity || 7
+  const formulaItems = (formula.items || []).map((item) => {
+    const meta = getHerbMeta(item.herbDictId, item.herbName || item.name)
+    return {
+      ...item,
+      herbDictId: meta.herbDictId,
+      pinyin: item.pinyin || meta.pinyin,
+      latinName: item.latinName || meta.latinName,
+    }
+  })
 
   if (prescType === 'none') {
-    rxForm.value.items = (formula.items || []).map(h => {
-      let herbDictId = h.herbDictId || null
-      if (!herbDictId && h.herbName) {
-        const match = herbDictStore.activeHerbs.find(
-          (d) => d.name === h.herbName || d.name.split('(')[0] === h.herbName,
-        )
-        if (match) herbDictId = match.id
-      }
+    rxForm.value.items = formulaItems.map(h => {
       return {
-        name: h.herbName, herbDictId, dosage: h.dosage, unit: h.unit || 'g',
+        name: h.herbName || h.name, herbDictId: h.herbDictId, dosage: h.dosage, unit: h.unit || 'g',
+        pinyin: h.pinyin || '',
+        latinName: h.latinName || '',
         convertedQty: null, convertedUnit: '', supplierName: '', supplierId: null,
         category: '', guijing: '', nature: '', taste: '', pricePerUnit: 0, subtotal: 0,
       }
     })
   } else {
     const result = calculatePrescription(
-      formula.items || [],
+      formulaItems,
       qty,
       prescType,
       inventoryStore.items,
@@ -1548,6 +1619,8 @@ function applyFormulaToDialog(formula) {
     rxForm.value.items = result.items.map(r => ({
       name: r.name,
       herbDictId: r.herbDictId || null,
+      pinyin: r.pinyin || '',
+      latinName: r.latinName || '',
       dosage: r.originalDosage,
       unit: r.originalUnit,
       convertedQty: r.convertedQty,
@@ -1586,9 +1659,11 @@ function recalcRxItems() {
   }
   const qty = rxForm.value.quantity || 7
 
-  const formulaItems = rxForm.value.items.map(i => ({
+  const formulaItems = rxForm.value.items.map(i => withHerbMeta({
     herbName: i.name,
     herbDictId: i.herbDictId,
+    pinyin: i.pinyin || '',
+    latinName: i.latinName || '',
     dosage: i.dosage,
     unit: i.unit || 'g',
     inventoryId: i.inventoryId || null,
@@ -1601,6 +1676,8 @@ function recalcRxItems() {
     if (rxForm.value.items[idx]) {
       const item = rxForm.value.items[idx]
       item.convertedQty = r.convertedQty
+      item.pinyin = item.pinyin || r.pinyin || ''
+      item.latinName = item.latinName || r.latinName || ''
       item.convertedUnit = r.convertedUnit
       item.packetsPerDose = r.packetsPerDose
       item.gramsPerPacket = r.gramsPerPacket
@@ -1645,6 +1722,7 @@ function queryHerbs(row, queryString, cb) {
         item.aliases,
         herb?.alias,
         herb?.pinyin,
+        herb?.latinName,
       ].filter(Boolean).join(' '))
       return haystack.includes(keyword)
     })
@@ -1662,6 +1740,7 @@ function queryHerbs(row, queryString, cb) {
       source: 'herbDict',
       herbDictId: herb.id,
       pinyin: herb.pinyin || '',
+      latinName: herb.latinName || '',
     }))
     .slice(0, 12)
 
@@ -1674,6 +1753,8 @@ function handleHerbSelect(item, row) {
   rxAutocompleteActive.value = false
   row.name = item.value
   row.herbDictId = item.herbDictId || item.id || null
+  row.pinyin = item.pinyin || ''
+  row.latinName = item.latinName || ''
   if (item.source === 'inventory') {
     row.inventoryId = item.inventoryId || null
     row.supplierId = item.supplierId || null
@@ -1697,13 +1778,15 @@ function handleHerbInputChange(row) {
     )
     if (exactMatch) {
       row.herbDictId = exactMatch.id
+      row.pinyin = exactMatch.pinyin || ''
+      row.latinName = exactMatch.latinName || ''
     }
   }
   recalcRxItems()
 }
 
 // ============ Acupuncture ============
-function addAcu() { form.value.acupuncture.push({ point: '', side: 'bilateral', notes: '' }) }
+function addAcu() { form.value.acupuncture.unshift({ point: '', side: 'bilateral', notes: '' }) }
 function removeAcu(i) { form.value.acupuncture.splice(i, 1) }
 
 function applyAcuTemplate(templateId) {
@@ -3646,7 +3729,7 @@ async function handleSendPreviewEmail() {
               <span v-else style="color:#aaa">-</span>
             </template>
           </el-table-column>
-          <el-table-column label="Supplier" width="110" v-if="rxForm.prescriptionType !== 'none'">
+          <el-table-column label="Supplier" width="110" v-if="shouldUseClinicInventory(rxForm)">
             <template #default="{ row, $index }">
               <el-select
                 v-if="row.allCandidates && row.allCandidates.length > 0"
@@ -3668,7 +3751,7 @@ async function handleSendPreviewEmail() {
               <span v-else style="color:#ccc; font-size:12px">-</span>
             </template>
           </el-table-column>
-          <el-table-column label="Stock" width="70" v-if="rxForm.prescriptionType !== 'none'">
+          <el-table-column label="Stock" width="70" v-if="shouldUseClinicInventory(rxForm)">
             <template #default="{ row }">
               <el-tag v-if="row.outOfStock" type="danger" size="small">Out</el-tag>
               <el-tag v-else-if="row.inventoryId" :type="row.stockSufficient ? 'success' : 'warning'" size="small">

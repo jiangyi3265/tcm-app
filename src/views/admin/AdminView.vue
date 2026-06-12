@@ -141,6 +141,7 @@ function createHerbDraft() {
     name: '',
     alias: '',
     pinyin: '',
+    latinName: '',
     category: '',
     nature: '',
     taste: [],
@@ -167,6 +168,7 @@ function prepareHerbForm(herb = {}) {
 function buildHerbPayload(form = {}) {
   return {
     ...form,
+    latinName: String(form.latinName || '').trim(),
     taste: splitOptionText(form.taste).join('; '),
     toxicity: form.toxicity || '无毒',
     meridianTropism: normalizeMeridianTropism(form.meridianTropism).join('; '),
@@ -854,7 +856,7 @@ const CSV_IMPORT_TARGETS = [
   { value: 'patients', label: '病人' },
 ]
 const CSV_IMPORT_HINTS = {
-  herbs: 'name,category,nature,taste,meridianTropism,toxicity,efficacy,dosageRange',
+  herbs: 'name,pinyin,latinName,category,nature,taste,meridianTropism,toxicity,efficacy,dosageRange',
   formulas: 'Name,Formula Source,Formula Category,Description',
   formulaItems: 'Formula,Herb,Quantity,Unit',
   patentMedicines: 'name',
@@ -1112,6 +1114,8 @@ async function importCsvRows(target, rows) {
   if (target === 'herbs') {
     const items = rowsToObjects(rows, {
       name: ['name', '名称', '草药', '草药名'],
+      pinyin: ['pinyin', '拼音'],
+      latinName: ['latinname', 'latin name', 'latin', '拉丁名', '拉丁语'],
       category: ['category', '分类', '类别'],
       nature: ['nature', '性味', '药性', '性'],
       taste: ['taste', '味'],
@@ -1119,7 +1123,7 @@ async function importCsvRows(target, rows) {
       toxicity: ['toxicity', '毒性'],
       efficacy: ['efficacy', '功效'],
       dosageRange: ['dosagerange', '剂量'],
-    }, ['name', 'category', 'nature', 'taste', 'meridianTropism', 'toxicity', 'efficacy', 'dosageRange'])
+    }, ['name', 'pinyin', 'latinName', 'category', 'nature', 'taste', 'meridianTropism', 'toxicity', 'efficacy', 'dosageRange'])
     let created = 0
     for (const item of items) {
       if (!item.name || herbDictStore.activeHerbs.some((h) => h.name === item.name)) continue
@@ -1703,7 +1707,8 @@ const formulaCategoryOptions = computed(() => settingsStore.formulaCategories ||
 
 function addFormulaHerb() {
   if (!newFormulaHerb.value.herbDictId) return ElMessage.warning(t('inventory.selectHerbRequired'))
-  newFormula.value.items.push({ ...newFormulaHerb.value, sortOrder: newFormula.value.items.length + 1 })
+  newFormula.value.items.unshift({ ...newFormulaHerb.value, sortOrder: 1 })
+  newFormula.value.items.forEach((item, index) => { item.sortOrder = index + 1 })
   newFormulaHerb.value = createFormulaHerbDraft()
 }
 
@@ -1738,7 +1743,8 @@ function startEditFormula(formula) {
 
 function addEditFormulaHerb() {
   if (!editFormulaHerb.value.herbDictId) return ElMessage.warning(t('inventory.selectHerbRequired'))
-  editFormulaForm.value.items.push({ ...editFormulaHerb.value, sortOrder: editFormulaForm.value.items.length + 1 })
+  editFormulaForm.value.items.unshift({ ...editFormulaHerb.value, sortOrder: 1 })
+  editFormulaForm.value.items.forEach((item, index) => { item.sortOrder = index + 1 })
   editFormulaHerb.value = createFormulaHerbDraft()
 }
 
@@ -1924,7 +1930,12 @@ const filteredHerbs = computed(() => {
   if (herbCategoryFilter.value) list = list.filter(h => h.category === herbCategoryFilter.value)
   if (herbSearchQuery.value) {
     const q = herbSearchQuery.value.toLowerCase()
-    list = list.filter(h => h.name.toLowerCase().includes(q) || (h.pinyin && h.pinyin.toLowerCase().includes(q)))
+    list = list.filter(h =>
+      h.name.toLowerCase().includes(q)
+      || (h.alias && h.alias.toLowerCase().includes(q))
+      || (h.pinyin && h.pinyin.toLowerCase().includes(q))
+      || (h.latinName && h.latinName.toLowerCase().includes(q)),
+    )
   }
   return list
 })
@@ -1986,14 +1997,17 @@ async function handleImportHerbs() {
       if (!parts[0]) continue
       const existing = herbDictStore.activeHerbs.find(h => h.name === parts[0])
       if (existing) continue
+      const hasLatinColumns = parts.length >= 9
       await herbDictStore.addHerb({
         name: parts[0],
-        category: parts[1] || '',
-        nature: parts[2] || '',
-        taste: parts[3] || '',
-        meridianTropism: parts[4] || '',
-        toxicity: parts[5] || '无毒',
-        efficacy: parts[6] || '',
+        pinyin: hasLatinColumns ? (parts[1] || '') : '',
+        latinName: hasLatinColumns ? (parts[2] || '') : '',
+        category: parts[hasLatinColumns ? 3 : 1] || '',
+        nature: parts[hasLatinColumns ? 4 : 2] || '',
+        taste: parts[hasLatinColumns ? 5 : 3] || '',
+        meridianTropism: parts[hasLatinColumns ? 6 : 4] || '',
+        toxicity: parts[hasLatinColumns ? 7 : 5] || '无毒',
+        efficacy: parts[hasLatinColumns ? 8 : 6] || '',
       })
       created++
     }
@@ -3557,6 +3571,8 @@ async function deleteTemplate(tmpl) {
         <el-table :data="pagedHerbs" stripe max-height="500" @selection-change="handleHerbSelectionChange">
           <el-table-column type="selection" width="44" />
           <el-table-column :label="t('admin.herbName')" width="90"><template #default="{ row }"><span style="font-weight:600">{{ row.name }}</span></template></el-table-column>
+          <el-table-column :label="t('admin.herbPinyin')" width="120"><template #default="{ row }"><span style="font-size:12px">{{ row.pinyin || '-' }}</span></template></el-table-column>
+          <el-table-column :label="t('admin.herbLatinName')" width="150"><template #default="{ row }"><span style="font-size:12px">{{ row.latinName || '-' }}</span></template></el-table-column>
           <el-table-column :label="t('admin.herbCategory')" width="90" prop="category" />
           <el-table-column :label="t('admin.herbNature')" width="60" prop="nature" />
           <el-table-column :label="t('admin.herbTaste')" width="100" prop="taste" />
@@ -3587,7 +3603,8 @@ async function deleteTemplate(tmpl) {
           <el-form :model="editHerbForm" label-width="80px">
             <el-row :gutter="12"><el-col :span="8"><el-form-item :label="t('admin.herbName')"><el-input v-model="editHerbForm.name" /></el-form-item></el-col>
             <el-col :span="8"><el-form-item :label="t('admin.herbPinyin')"><el-input v-model="editHerbForm.pinyin" /></el-form-item></el-col>
-            <el-col :span="8"><el-form-item :label="t('admin.herbAlias')"><el-input v-model="editHerbForm.alias" /></el-form-item></el-col></el-row>
+            <el-col :span="8"><el-form-item :label="t('admin.herbLatinName')"><el-input v-model="editHerbForm.latinName" /></el-form-item></el-col></el-row>
+            <el-form-item :label="t('admin.herbAlias')"><el-input v-model="editHerbForm.alias" /></el-form-item>
             <el-row :gutter="12"><el-col :span="8"><el-form-item :label="t('admin.herbCategory')"><el-select v-model="editHerbForm.category" filterable clearable style="width:100%"><el-option v-for="option in herbCategoryOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item></el-col>
             <el-col :span="8"><el-form-item :label="t('admin.herbNature')"><el-select v-model="editHerbForm.nature" filterable clearable style="width:100%"><el-option v-for="option in herbNatureOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item></el-col>
             <el-col :span="8"><el-form-item :label="t('admin.herbTaste')"><el-select v-model="editHerbForm.taste" multiple filterable clearable collapse-tags collapse-tags-tooltip style="width:100%"><el-option v-for="option in herbTasteOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item></el-col></el-row>
@@ -4189,8 +4206,9 @@ async function deleteTemplate(tmpl) {
       <el-form :model="newHerb" label-width="80px" size="small">
         <el-row :gutter="12">
           <el-col :span="8"><el-form-item :label="t('admin.herbName')" required><el-input v-model="newHerb.name" :placeholder="t('admin.herbNamePh')" /></el-form-item></el-col>
-          <el-col :span="8"><el-form-item :label="t('admin.herbAlias')"><el-input v-model="newHerb.alias" :placeholder="t('admin.herbAliasPh')" /></el-form-item></el-col>
           <el-col :span="8"><el-form-item :label="t('admin.herbPinyin')"><el-input v-model="newHerb.pinyin" :placeholder="t('admin.herbPinyinPh')" /></el-form-item></el-col>
+          <el-col :span="8"><el-form-item :label="t('admin.herbLatinName')"><el-input v-model="newHerb.latinName" :placeholder="t('admin.herbLatinNamePh')" /></el-form-item></el-col>
+          <el-col :span="8"><el-form-item :label="t('admin.herbAlias')"><el-input v-model="newHerb.alias" :placeholder="t('admin.herbAliasPh')" /></el-form-item></el-col>
           <el-col :span="8"><el-form-item :label="t('admin.herbCategory')"><el-select v-model="newHerb.category" filterable clearable style="width:100%" :placeholder="t('admin.herbCategoryPh')"><el-option v-for="option in herbCategoryOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item></el-col>
           <el-col :span="8"><el-form-item :label="t('admin.herbNature')"><el-select v-model="newHerb.nature" filterable clearable style="width:100%" :placeholder="t('admin.herbNaturePh')"><el-option v-for="option in herbNatureOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item></el-col>
           <el-col :span="8"><el-form-item :label="t('admin.herbTaste')"><el-select v-model="newHerb.taste" multiple filterable clearable collapse-tags collapse-tags-tooltip style="width:100%" :placeholder="t('admin.herbTastePh')"><el-option v-for="option in herbTasteOptions" :key="option" :label="option" :value="option" /></el-select></el-form-item></el-col>

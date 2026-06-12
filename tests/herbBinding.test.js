@@ -13,7 +13,7 @@ test('bindHerbSelection 为库存行写入 herbDictId 和 name', () => {
   const result = bindHerbSelection(row, herb)
 
   assert.notEqual(result, row)
-  assert.deepEqual(result, { id: 'inv-1', name: '黄芪', herbDictId: 'herb-hq' })
+  assert.deepEqual(result, { id: 'inv-1', name: '黄芪', herbDictId: 'herb-hq', pinyin: '', latinName: '' })
   assert.deepEqual(row, { id: 'inv-1', name: '', herbDictId: null })
 })
 
@@ -24,7 +24,7 @@ test('bindHerbSelection 为方剂药味返回新对象并写入 herbDictId 和 h
   const result = bindHerbSelection(item, herb, { nameKey: 'herbName' })
 
   assert.notEqual(result, item)
-  assert.deepEqual(result, { herbName: '当归', herbDictId: 'herb-dg' })
+  assert.deepEqual(result, { herbName: '当归', herbDictId: 'herb-dg', pinyin: '', latinName: '' })
   assert.deepEqual(item, { herbName: '', herbDictId: null })
 })
 
@@ -51,6 +51,8 @@ test('getInventoryHerbMeta 支持 Map 作为 herbById 来源，并优先读取�
 
   assert.deepEqual(meta, {
     alias: '绵黄芪',
+    pinyin: '',
+    latinName: '',
     nature: '温',
     taste: ['甘', '辛'],
     toxicity: '无毒',
@@ -79,6 +81,8 @@ test('getInventoryHerbMeta 在字典字段缺失时逐字段回退旧库存值',
   const meta = getInventoryHerbMeta(item, herbById)
 
   assert.equal(meta.alias, '橘皮')
+  assert.equal(meta.pinyin, '')
+  assert.equal(meta.latinName, '')
   assert.equal(meta.nature, '温')
   assert.deepEqual(meta.taste, ['苦', '辛'])
   assert.deepEqual(meta.guijing, ['肺', '脾'])
@@ -94,6 +98,8 @@ test('getInventoryHerbMeta 缺失草药字典时回退旧库存字段', () => {
   })
 
   assert.equal(meta.alias, '广陈皮、橘皮')
+  assert.equal(meta.pinyin, '')
+  assert.equal(meta.latinName, '')
   assert.equal(meta.nature, '温')
   assert.equal(meta.toxicity, '小毒')
   assert.deepEqual(meta.taste, ['苦', '辛'])

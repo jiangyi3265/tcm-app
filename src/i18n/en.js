@@ -45,9 +45,9 @@ export default {
 
   // ── App ──
   app: {
-    name: 'TCM Clinic',
-    fullName: 'TCM Clinic Management System',
-    subtitle: 'TCM Clinic Management System',
+    name: 'OTCM Acupuncture Clinic',
+    fullName: 'OTCM Acupuncture Clinic',
+    subtitle: 'OTCM Acupuncture Clinic',
   },
 
   // ── Roles ──
@@ -113,8 +113,8 @@ export default {
 
   // ── Login ──
   login: {
-    title: 'TCM Clinic Management System',
-    subtitle: 'TCM Clinic Management System',
+    title: 'OTCM Acupuncture Clinic',
+    subtitle: 'OTCM Acupuncture Clinic',
     emailPlaceholder: 'Email address',
     passwordPlaceholder: 'Password',
     loginButton: 'Log In',
@@ -388,7 +388,7 @@ export default {
 
     // Sign dialog
     signConsentDialog: 'Sign Consent Form',
-    consentDocTitle: 'TCM Clinic Informed Consent v1.0',
+    consentDocTitle: 'OTCM Acupuncture Clinic Informed Consent v1.0',
     consentSection1Title: '1. Treatment Methods',
     consentSection1: 'This clinic uses traditional Chinese medicine treatment methods including but not limited to: herbal prescriptions (decoctions, pills, powders, etc.), acupuncture, massage, cupping therapy, etc. All treatments are administered by licensed TCM practitioners.',
     consentSection2Title: '2. Risk Disclosure',
@@ -688,8 +688,8 @@ export default {
   },
 
   publicConsent: {
-    appTitle: 'TCM Clinic Management System',
-    appSubtitle: 'TCM Clinic Management System',
+    appTitle: 'OTCM Acupuncture Clinic',
+    appSubtitle: 'OTCM Acupuncture Clinic',
     loading: 'Loading...',
     invalidRequest: 'Unable to process this request',
     loadFailed: 'Unable to load consent information',
@@ -937,7 +937,7 @@ export default {
     natureTasteChannel: 'Nature / Taste / Channel',
     currentStock: 'Stock',
     alertLevel: 'Alert Level',
-    last30DaysUsage: 'Last 30 Days Usage',
+    last30DaysUsage: 'Peak 30-Day Usage',
     alertShort: 'Alert',
     unitPrice: 'Unit Price',
     supplier: 'Supplier',
@@ -1405,8 +1405,10 @@ export default {
     herbNamePh: 'Herb name',
     herbAlias: 'Alias',
     herbAliasPh: 'Alias',
-    herbPinyin: 'Latin/拉丁语',
-    herbPinyinPh: 'Latin name',
+    herbPinyin: 'Pinyin',
+    herbPinyinPh: 'Pinyin',
+    herbLatinName: 'Latin Name',
+    herbLatinNamePh: 'Latin name',
     herbCategory: 'Category',
     herbCategoryPh: 'Select category',
     herbNature: 'Nature',
@@ -1423,7 +1425,7 @@ export default {
     herbContraindication: 'Contraindication',
     herbContraindicationPh: 'Contraindication',
     herbNotes: 'Notes',
-    herbSearchPh: 'Search herb name/Latin',
+    herbSearchPh: 'Search herb name/Pinyin/Latin',
     herbFilterCategory: 'Filter by category',
     herbTotalCount: '{count} herbs total',
     herbCreated: 'Herb created',

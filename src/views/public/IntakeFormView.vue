@@ -3,6 +3,14 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { intakePublicApi } from '../../utils/api'
+import { GENDER_OPTIONS, normalizeGender } from '../../utils/gender'
+import { resolveClinicName } from '../../utils/clinicName'
+import {
+  COUNTRY_OPTIONS,
+  getProvinceOptions,
+  normalizeCountryCode,
+  normalizeProvinceCode,
+} from '../../utils/countryRegionOptions'
 
 const route = useRoute()
 const { locale } = useI18n()
@@ -134,35 +142,35 @@ function bilingualHeading(label, english) {
 }
 
 const MEDICAL_HISTORY_OPTIONS = [
-  '高血压 Hypertension',
-  '糖尿病 Diabetes',
-  '冠心病 Coronary Artery Disease',
-  '心律不齐 Arrhythmia',
-  '心力衰竭 Heart Failure',
-  '脑卒中史 Stroke History',
-  '哮喘 / 慢阻肺 Asthma / COPD',
-  '肾脏病 Kidney Disease',
-  '肝脏病 Liver Disease',
-  '自身免疫疾病 Autoimmune Disease',
-  '恶性肿瘤 Cancer / Malignancy',
-  '凝血功能障碍 Coagulation Disorder',
-  '甲状腺疾病 Thyroid Disease',
-  '骨质疏松 Osteoporosis',
-  '皮肤病 Skin Condition',
-  '精神 / 心理疾病 Psychiatric Condition',
-  '神经系统疾病 Neurological Disease',
-  '其他 Other',
+  'Hypertension',
+  'Diabetes',
+  'Coronary artery disease',
+  'Arrhythmia',
+  'Heart failure',
+  'Stroke history',
+  'Asthma / COPD',
+  'Kidney disease',
+  'Liver disease',
+  'Autoimmune disease',
+  'Cancer / malignancy',
+  'Coagulation disorder',
+  'Thyroid disease',
+  'Osteoporosis',
+  'Skin condition',
+  'Psychiatric condition',
+  'Neurological disease',
+  'Other',
 ]
 
 const CURRENT_MEDICATION_OPTIONS = [
-  '抗凝血药（华法林、阿司匹林等） Anticoagulants',
-  '降压药 Antihypertensives',
-  '降糖药 / 胰岛素 Diabetes Medications',
-  '抗抑郁 / 精神类药物 Psychiatric Medications',
-  '类固醇 / 免疫抑制剂 Steroids / Immunosuppressants',
-  '中草药 / 中成药 Chinese Herbal Medicine',
-  '保健品 / 维生素 Supplements / Vitamins',
-  '其他处方药 Other Prescription Drugs',
+  'Anticoagulants',
+  'Antihypertensives',
+  'Diabetes medications / insulin',
+  'Psychiatric medications',
+  'Steroids / immunosuppressants',
+  'Chinese herbal medicine',
+  'Supplements / vitamins',
+  'Other prescription drugs',
 ]
 
 function createIntakeForm() {
@@ -218,22 +226,43 @@ const formattedStartTime = computed(() => {
   if (Number.isNaN(parsed.getTime())) return String(value).replace('T', ' ').slice(0, 16)
   return parsed.toLocaleString(isZh.value ? 'zh-CN' : 'en-US')
 })
+const displayClinicName = computed(() => resolveClinicName(appointmentInfo.value?.clinicName))
+const provinceOptions = computed(() => getProvinceOptions(form.value.addressCountry || 'CA'))
+
+function normalizeAddressRegion(countryValue, provinceValue) {
+  const country = normalizeCountryCode(countryValue || 'CA')
+  const province = normalizeProvinceCode(country, provinceValue || '')
+  return {
+    country,
+    province: province || (country === 'CA' ? 'ON' : ''),
+  }
+}
+
+function handleCountryChange() {
+  const normalized = normalizeAddressRegion(form.value.addressCountry, form.value.addressState)
+  form.value.addressCountry = normalized.country
+  form.value.addressState = normalized.province
+}
 
 onMounted(async () => {
   try {
     const info = await intakePublicApi.getInfo(token)
     appointmentInfo.value = info
+    const addressRegion = normalizeAddressRegion(
+      info.addressCountry || form.value.addressCountry,
+      info.addressState || form.value.addressState,
+    )
     Object.assign(form.value, {
       firstName: info.firstName || form.value.firstName,
       lastName: info.lastName || form.value.lastName,
-      gender: info.gender || form.value.gender,
+      gender: normalizeGender(info.gender || form.value.gender),
       dateOfBirth: info.dateOfBirth || form.value.dateOfBirth,
       email: info.email || form.value.email,
       phone: info.phone || form.value.phone,
       addressStreet: info.addressStreet || form.value.addressStreet,
       addressCity: info.addressCity || form.value.addressCity,
-      addressState: info.addressState || form.value.addressState,
-      addressCountry: info.addressCountry || form.value.addressCountry,
+      addressState: addressRegion.province,
+      addressCountry: addressRegion.country,
       addressPostal: info.addressPostal || form.value.addressPostal,
     })
     if (info.intakeSubmitted) {
@@ -268,7 +297,10 @@ async function handleSubmit() {
   submitting.value = true
   submitError.value = ''
   try {
-    await intakePublicApi.submit(token, form.value)
+    await intakePublicApi.submit(token, {
+      ...form.value,
+      gender: normalizeGender(form.value.gender),
+    })
     submitted.value = true
   } catch (e) {
     submitError.value = e.message || copy.value.submitFailed
@@ -295,7 +327,7 @@ async function handleCancelAppointment() {
   <div class="intake-page">
     <div class="intake-card">
       <div class="intake-header">
-        <div class="header-badge">{{ appointmentInfo?.clinicName || 'OTCM' }}</div>
+        <div class="header-badge">{{ displayClinicName }}</div>
         <h1>{{ copy.pageTitle }}</h1>
         <p>{{ copy.pageSubtitle }}</p>
         <p v-if="appointmentInfo?.clinicAddress || appointmentInfo?.clinicPhone" class="clinic-contact">
@@ -350,11 +382,16 @@ async function handleCancelAppointment() {
             </label>
             <label class="field-block">
               <span>{{ copy.gender || 'Gender' }}</span>
-              <input v-model="form.gender" class="form-input" type="text" placeholder="Gender" />
+              <select v-model="form.gender" class="form-input">
+                <option value="">{{ copy.gender || 'Gender' }}</option>
+                <option v-for="option in GENDER_OPTIONS" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
             </label>
             <label class="field-block">
               <span>{{ copy.dateOfBirth || 'Birth date' }}</span>
-              <input v-model="form.dateOfBirth" class="form-input" type="date" />
+              <input v-model="form.dateOfBirth" class="form-input" type="text" placeholder="YYYY/MM/DD" inputmode="numeric" />
             </label>
             <label class="field-block">
               <span>{{ copy.email || 'Email' }}</span>
@@ -378,11 +415,20 @@ async function handleCancelAppointment() {
             </label>
             <label class="field-block">
               <span>{{ copy.addressState || 'Province' }}</span>
-              <input v-model="form.addressState" class="form-input" type="text" placeholder="ON" />
+              <select v-model="form.addressState" class="form-input">
+                <option value="">Province</option>
+                <option v-for="option in provinceOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
             </label>
             <label class="field-block">
               <span>{{ copy.addressCountry || 'Country' }}</span>
-              <input v-model="form.addressCountry" class="form-input" type="text" placeholder="CA" />
+              <select v-model="form.addressCountry" class="form-input" @change="handleCountryChange">
+                <option v-for="option in COUNTRY_OPTIONS" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
             </label>
           </div>
         </section>
@@ -405,7 +451,7 @@ async function handleCancelAppointment() {
             </label>
             <label class="field-block">
               <span>{{ copy.duration }}</span>
-              <input v-model="form.chiefComplaintDuration" class="form-input" type="text" placeholder="例如：3 天 / 2 weeks" />
+              <input v-model="form.chiefComplaintDuration" class="form-input" type="text" placeholder="e.g. 3 days / 2 weeks" />
             </label>
             <label class="field-block full">
               <span>{{ copy.description }}</span>
@@ -422,12 +468,12 @@ async function handleCancelAppointment() {
           <h2>{{ copy.implants }}</h2>
           <div class="grid two">
             <label class="field-block">
-              <span>金属植入物部位（如有） Location of metal implants</span>
-              <input v-model="form.metalImplantsLocation" class="form-input" type="text" placeholder="请注明部位" />
+              <span>Location of metal implants (if any)</span>
+              <input v-model="form.metalImplantsLocation" class="form-input" type="text" placeholder="Please specify the location" />
             </label>
             <label class="field-block">
-              <span>植入物类型 Type of implant</span>
-              <input v-model="form.implantType" class="form-input" type="text" placeholder="如：钛合金螺钉、关节假体等" />
+              <span>Type of implant</span>
+              <input v-model="form.implantType" class="form-input" type="text" placeholder="e.g. titanium screws, joint implant" />
             </label>
           </div>
         </section>
@@ -460,7 +506,7 @@ async function handleCancelAppointment() {
           </div>
           <label class="field-block full">
             <span>{{ copy.medicationDetails }}</span>
-            <textarea v-model="form.medicationDetails" class="form-textarea" rows="4" placeholder="药名 / Name\n剂量 / Dose"></textarea>
+            <textarea v-model="form.medicationDetails" class="form-textarea" rows="4" placeholder="Medication name / dose"></textarea>
           </label>
         </section>
 
@@ -468,12 +514,12 @@ async function handleCancelAppointment() {
           <h2>{{ bilingualHeading(copy.allergies, 'ALLERGIES') }}</h2>
           <div class="grid two">
             <label class="field-block">
-              <span>药物过敏 Drug Allergies</span>
-              <input v-model="form.drugAllergies" class="form-input" type="text" placeholder="如：青霉素、磺胺类..." />
+              <span>Drug allergies</span>
+              <input v-model="form.drugAllergies" class="form-input" type="text" placeholder="e.g. penicillin, sulfa drugs" />
             </label>
             <label class="field-block">
-              <span>其他过敏 Other Allergies</span>
-              <input v-model="form.otherAllergies" class="form-input" type="text" placeholder="如：乳胶、金属、食物..." />
+              <span>Other allergies</span>
+              <input v-model="form.otherAllergies" class="form-input" type="text" placeholder="e.g. latex, metals, food" />
             </label>
           </div>
         </section>
@@ -482,32 +528,32 @@ async function handleCancelAppointment() {
           <h2>{{ bilingualHeading(copy.lifestyle, 'LIFESTYLE') }}</h2>
           <div class="grid two">
             <div class="field-block">
-              <span>吸烟 Smoking</span>
+              <span>Smoking</span>
               <div class="radio-group">
-                <label><input v-model="form.smokingStatus" type="radio" value="无 None" /> <span>无 None</span></label>
-                <label><input v-model="form.smokingStatus" type="radio" value="有 Yes" /> <span>有 Yes</span></label>
-                <label><input v-model="form.smokingStatus" type="radio" value="已戒 Quit" /> <span>已戒 Quit</span></label>
+                <label><input v-model="form.smokingStatus" type="radio" value="None" /> <span>None</span></label>
+                <label><input v-model="form.smokingStatus" type="radio" value="Yes" /> <span>Yes</span></label>
+                <label><input v-model="form.smokingStatus" type="radio" value="Quit" /> <span>Quit</span></label>
               </div>
             </div>
             <div class="field-block">
-              <span>饮酒 Alcohol</span>
+              <span>Alcohol</span>
               <div class="radio-group">
-                <label><input v-model="form.alcoholStatus" type="radio" value="无 None" /> <span>无 None</span></label>
-                <label><input v-model="form.alcoholStatus" type="radio" value="偶尔 Occasionally" /> <span>偶尔 Occasionally</span></label>
-                <label><input v-model="form.alcoholStatus" type="radio" value="经常 Frequently" /> <span>经常 Frequently</span></label>
+                <label><input v-model="form.alcoholStatus" type="radio" value="None" /> <span>None</span></label>
+                <label><input v-model="form.alcoholStatus" type="radio" value="Occasionally" /> <span>Occasionally</span></label>
+                <label><input v-model="form.alcoholStatus" type="radio" value="Frequently" /> <span>Frequently</span></label>
               </div>
             </div>
             <div class="field-block">
-              <span>运动习惯 Exercise</span>
+              <span>Exercise</span>
               <div class="radio-group">
-                <label><input v-model="form.exerciseStatus" type="radio" value="无 None" /> <span>无 None</span></label>
-                <label><input v-model="form.exerciseStatus" type="radio" value="偶尔 Occasionally" /> <span>偶尔 Occasionally</span></label>
-                <label><input v-model="form.exerciseStatus" type="radio" value="规律 Regularly" /> <span>规律 Regularly</span></label>
+                <label><input v-model="form.exerciseStatus" type="radio" value="None" /> <span>None</span></label>
+                <label><input v-model="form.exerciseStatus" type="radio" value="Occasionally" /> <span>Occasionally</span></label>
+                <label><input v-model="form.exerciseStatus" type="radio" value="Regularly" /> <span>Regularly</span></label>
               </div>
             </div>
             <label class="field-block">
-              <span>生活方式补充 Lifestyle notes</span>
-              <input v-model="form.lifestyleNotes" class="form-input" type="text" placeholder="如：夜班、久坐、饮食不规律..." />
+              <span>Lifestyle notes</span>
+              <input v-model="form.lifestyleNotes" class="form-input" type="text" placeholder="e.g. night shifts, prolonged sitting, irregular diet" />
             </label>
           </div>
         </section>
@@ -516,18 +562,18 @@ async function handleCancelAppointment() {
           <h2>{{ bilingualHeading(copy.femaleOnly, 'FEMALE PATIENTS ONLY') }}</h2>
           <div class="grid three">
             <div class="field-block">
-              <span>是否妊娠 Currently Pregnant</span>
+              <span>Currently pregnant</span>
               <div class="radio-group">
-                <label><input v-model="form.currentlyPregnant" type="radio" value="否 No" /> <span>否 No</span></label>
-                <label><input v-model="form.currentlyPregnant" type="radio" value="是 Yes" /> <span>是 Yes</span></label>
-                <label><input v-model="form.currentlyPregnant" type="radio" value="不确定 Not sure" /> <span>不确定 Not sure</span></label>
+                <label><input v-model="form.currentlyPregnant" type="radio" value="No" /> <span>No</span></label>
+                <label><input v-model="form.currentlyPregnant" type="radio" value="Yes" /> <span>Yes</span></label>
+                <label><input v-model="form.currentlyPregnant" type="radio" value="Not sure" /> <span>Not sure</span></label>
               </div>
             </div>
             <div class="field-block">
-              <span>是否哺乳 Breastfeeding</span>
+              <span>Breastfeeding</span>
               <div class="radio-group">
-                <label><input v-model="form.breastfeeding" type="radio" value="否 No" /> <span>否 No</span></label>
-                <label><input v-model="form.breastfeeding" type="radio" value="是 Yes" /> <span>是 Yes</span></label>
+                <label><input v-model="form.breastfeeding" type="radio" value="No" /> <span>No</span></label>
+                <label><input v-model="form.breastfeeding" type="radio" value="Yes" /> <span>Yes</span></label>
               </div>
             </div>
           </div>

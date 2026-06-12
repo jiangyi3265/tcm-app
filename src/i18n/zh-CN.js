@@ -45,9 +45,9 @@ export default {
 
   // ── 应用名称 ──
   app: {
-    name: '中医诊所',
-    fullName: '中医诊所管理系统',
-    subtitle: 'TCM Clinic Management System',
+    name: 'OTCM Acupuncture Clinic',
+    fullName: 'OTCM Acupuncture Clinic',
+    subtitle: 'OTCM Acupuncture Clinic',
   },
 
   // ── 角色 ──
@@ -113,8 +113,8 @@ export default {
 
   // ── 登录 ──
   login: {
-    title: '中医诊所管理系统',
-    subtitle: 'TCM Clinic Management System',
+    title: 'OTCM Acupuncture Clinic',
+    subtitle: 'OTCM Acupuncture Clinic',
     emailPlaceholder: '邮箱地址',
     passwordPlaceholder: '密码',
     loginButton: '登 录',
@@ -188,8 +188,8 @@ export default {
     newPatient: '新建病人',
     name: '姓名',
     gender: '性别',
-    male: '男',
-    female: '女',
+    male: 'Male',
+    female: 'Female',
     phone: '电话',
     dateOfBirth: '出生日期',
     consent: '知情同意书',
@@ -389,7 +389,7 @@ export default {
 
     // 签署对话框
     signConsentDialog: '签署知情同意书',
-    consentDocTitle: '中医诊所知情同意书 v1.0',
+    consentDocTitle: 'OTCM Acupuncture Clinic 知情同意书 v1.0',
     consentSection1Title: '一、治疗方法说明',
     consentSection1: '本诊所采用传统中医治疗方法，包括但不限于：中药处方（汤剂、丸剂、散剂等）、针灸治疗、推拿按摩、拔罐疗法等。所有治疗均由持证中医师实施。',
     consentSection2Title: '二、风险告知',
@@ -689,8 +689,8 @@ export default {
   },
 
   publicConsent: {
-    appTitle: '中医诊所综合管理系统',
-    appSubtitle: 'TCM Clinic Management System',
+    appTitle: 'OTCM Acupuncture Clinic',
+    appSubtitle: 'OTCM Acupuncture Clinic',
     loading: '正在加载...',
     invalidRequest: '无法处理请求',
     loadFailed: '无法加载同意书信息',
@@ -938,7 +938,7 @@ export default {
     natureTasteChannel: '性味归经',
     currentStock: '当前库存',
     alertLevel: '预警线',
-    last30DaysUsage: '过去30天使用量',
+    last30DaysUsage: '累计30天最大用量',
     alertShort: '预警',
     unitPrice: '单价',
     supplier: '供应商',
@@ -1411,8 +1411,10 @@ export default {
     herbNamePh: '药材名称',
     herbAlias: '别名',
     herbAliasPh: '别名',
-    herbPinyin: 'Latin/拉丁语',
-    herbPinyinPh: '拉丁名',
+    herbPinyin: '拼音',
+    herbPinyinPh: '拼音',
+    herbLatinName: '拉丁名',
+    herbLatinNamePh: '拉丁名',
     herbCategory: '分类',
     herbCategoryPh: '选择分类',
     herbNature: '药性',
@@ -1429,7 +1431,7 @@ export default {
     herbContraindication: '禁忌',
     herbContraindicationPh: '禁忌',
     herbNotes: '备注',
-    herbSearchPh: '搜索药材名称/拉丁名',
+    herbSearchPh: '搜索药材名称/拼音/拉丁名',
     herbFilterCategory: '分类筛选',
     herbTotalCount: '共 {count} 种药材',
     herbCreated: '药材已创建',

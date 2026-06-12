@@ -80,6 +80,7 @@ function normalizeServiceTypes(source) {
         ...fallback,
         ...item,
         key,
+        label: item?.label ?? item?.name ?? item?.displayName ?? fallback.label ?? key,
         requiredTag: item?.requiredTag ?? fallback.requiredTag ?? '',
         roomRequired: Boolean(item?.roomRequired ?? fallback.roomRequired),
       }

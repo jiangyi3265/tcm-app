@@ -273,6 +273,8 @@ export function convertSingleHerb(
   return {
     name: item.herbName || item.name,
     herbDictId: item.herbDictId || null,
+    pinyin: item.pinyin || '',
+    latinName: item.latinName || '',
     originalDosage: item.dosage || 0,
     originalUnit: item.unit || 'g',
     convertedQty,
