@@ -3,12 +3,13 @@ import { ref, computed } from 'vue'
 import { acupointsApi } from '../utils/api'
 import { readStoredJson, writeStoredJson } from '../utils/storage'
 import defaultAcupoints from '../utils/acupointsData.json'
+import { getActiveAcupoints, normalizeAcupointList } from '../utils/acupoints'
 
 export const useAcupointsStore = defineStore('acupoints', () => {
   const acupoints = ref([])
 
   function init() {
-    const stored = readStoredJson('tcm_acupoints', []) || []
+    const stored = normalizeAcupointList(readStoredJson('tcm_acupoints', []))
     if (stored.length > 0) {
       acupoints.value = stored
     } else {
@@ -22,15 +23,13 @@ export const useAcupointsStore = defineStore('acupoints', () => {
     writeStoredJson('tcm_acupoints', acupoints.value)
   }
 
-  const activeAcupoints = computed(() =>
-    acupoints.value.filter((a) => a.isActive && !a.deletedAt),
-  )
+  const activeAcupoints = computed(() => getActiveAcupoints(acupoints.value))
 
   /** Get flat list of active acupoint names (for backward compat with ACUPUNCTURE_POINTS) */
   const acupointNames = computed(() => activeAcupoints.value.map((a) => a.name))
 
   function getAcupoint(id) {
-    return acupoints.value.find((a) => a.id === id) || null
+    return normalizeAcupointList(acupoints.value).find((a) => a.id === id) || null
   }
 
   function findByName(name) {
@@ -43,40 +42,52 @@ export const useAcupointsStore = defineStore('acupoints', () => {
 
   async function addAcupoint(data) {
     const created = await acupointsApi.create(data)
-    acupoints.value.unshift(created)
+    acupoints.value = [created, ...normalizeAcupointList(acupoints.value)]
     saveState()
     return created
   }
 
   async function updateAcupoint(id, data) {
     const updated = await acupointsApi.update(id, data)
-    const idx = acupoints.value.findIndex((a) => a.id === id)
-    if (idx !== -1) acupoints.value[idx] = updated
+    const list = normalizeAcupointList(acupoints.value)
+    const idx = list.findIndex((a) => a.id === id)
+    if (idx !== -1) {
+      list[idx] = updated
+      acupoints.value = list
+    }
     saveState()
     return updated
   }
 
   async function deleteAcupoint(id) {
     const updated = await acupointsApi.softDelete(id)
-    const idx = acupoints.value.findIndex((a) => a.id === id)
-    if (idx !== -1) acupoints.value[idx] = updated
+    const list = normalizeAcupointList(acupoints.value)
+    const idx = list.findIndex((a) => a.id === id)
+    if (idx !== -1) {
+      list[idx] = updated
+      acupoints.value = list
+    }
     saveState()
   }
 
   async function restoreAcupoint(id) {
     const updated = await acupointsApi.restore(id)
-    const idx = acupoints.value.findIndex((a) => a.id === id)
-    if (idx !== -1) acupoints.value[idx] = updated
+    const list = normalizeAcupointList(acupoints.value)
+    const idx = list.findIndex((a) => a.id === id)
+    if (idx !== -1) {
+      list[idx] = updated
+      acupoints.value = list
+    }
     saveState()
   }
 
   async function hardDeleteAcupoint(id) {
     await acupointsApi.hardDelete(id)
-    acupoints.value = acupoints.value.filter((a) => a.id !== id)
+    acupoints.value = normalizeAcupointList(acupoints.value).filter((a) => a.id !== id)
     saveState()
   }
 
-  const deletedAcupoints = computed(() => acupoints.value.filter((a) => a.deletedAt))
+  const deletedAcupoints = computed(() => normalizeAcupointList(acupoints.value).filter((a) => a.deletedAt))
 
   init()
 

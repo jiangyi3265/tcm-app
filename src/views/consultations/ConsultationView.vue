@@ -39,6 +39,7 @@ import {
   shouldSkipRxAutosaveAfterSync,
 } from '../../utils/rxAutosaveGuard'
 import { localizeMixedText } from '../../utils/localizeMixedText'
+import { normalizeAcupointList } from '../../utils/acupoints'
 import {
   getActivePrescriptions,
   getBillablePrescriptions,
@@ -239,16 +240,21 @@ function getAcuSourceName(value) {
   return String(value)
 }
 
+function getActiveAcupointList() {
+  return normalizeAcupointList(acupointsStore?.activeAcupoints)
+}
+
 function resolveAcuPoint(value) {
   const source = value && typeof value === 'object' ? value : {}
   const sourceId = source.acupointId || source.id || source.pointId
+  const activeAcupoints = getActiveAcupointList()
   if (sourceId) {
-    const byId = acupointsStore.activeAcupoints.find((item) => String(item.id) === String(sourceId))
+    const byId = activeAcupoints.find((item) => String(item.id) === String(sourceId))
     if (byId) return byId
   }
   const keys = new Set(acuTextVariants(getAcuSourceName(value)))
   if (!keys.size) return null
-  return acupointsStore.activeAcupoints.find((item) =>
+  return activeAcupoints.find((item) =>
     acuTextVariants(item.name).some((key) => keys.has(key)),
   ) || null
 }
