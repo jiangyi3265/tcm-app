@@ -19,7 +19,12 @@ import { getCountryLabel, getProvinceLabel } from '../../utils/countryRegionOpti
 import { TCM_OPTIONS, CHIEF_COMPLAINTS, emptyDiff, normalizeDiff } from '../../utils/sampleData'
 import { printPrescription } from '../../utils/pdfExport'
 import { useEmailSimulator } from '../../utils/emailSimulator'
-import { filesApi, consultationsApi } from '../../utils/api'
+import { aiApi, filesApi, consultationsApi } from '../../utils/api'
+import {
+  applyAiConsultationNotes,
+  buildAiCurrentNotes,
+  buildAiOptionCatalog,
+} from '../../utils/aiConsultationAssistant'
 import { runStripeTerminalPayment } from '../../utils/stripeTerminalPayment'
 import { calculatePrescription, recalcWithSupplier } from '../../utils/prescriptionCalc'
 import { rehydrateCopiedPrescriptions, sanitizeCopiedConsultationData } from '../../utils/consultationCopy'
@@ -192,6 +197,13 @@ const invoicePdfGenerating = ref(false)
 const emailSending = ref(false)
 const serverDocuments = ref([])
 const documentsLoading = ref(false)
+const aiListening = ref(false)
+const aiAnalyzing = ref(false)
+const aiTranscript = ref('')
+const aiInterimTranscript = ref('')
+const aiSpeechLang = ref(locale.value === 'zh-CN' ? 'zh-CN' : 'en-US')
+const aiLastApplied = ref(null)
+let aiRecognition = null
 
 function cloneJson(value, fallback = null) {
   if (value === undefined) return fallback
@@ -386,6 +398,131 @@ async function navigateWithoutUnsavedPrompt(navigate) {
 
 function localizeMixedLabel(text = '') {
   return localizeMixedText(text, locale.value)
+}
+
+const aiOptionCatalog = computed(() => buildAiOptionCatalog({
+  tcmOptions: TCM_OPTIONS,
+  chiefComplaints: CHIEF_COMPLAINTS,
+  customChiefComplaints: settingsStore.customChiefComplaints,
+}))
+
+const aiSpeechSupported = computed(() => {
+  if (typeof window === 'undefined') return false
+  return Boolean(window.SpeechRecognition || window.webkitSpeechRecognition)
+})
+
+const aiTranscriptPreview = computed(() => {
+  const finalText = aiTranscript.value.trim()
+  const interim = aiInterimTranscript.value.trim()
+  return [finalText, interim].filter(Boolean).join('\n')
+})
+
+function getSpeechRecognitionCtor() {
+  if (typeof window === 'undefined') return null
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null
+}
+
+function timestampForTranscript() {
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function appendAiTranscript(text) {
+  const next = String(text || '').trim()
+  if (!next) return
+  const line = `[${timestampForTranscript()}] ${next}`
+  aiTranscript.value = aiTranscript.value ? `${aiTranscript.value}\n${line}` : line
+}
+
+function startAiListening() {
+  if (isReadOnly.value) return
+  const SpeechRecognition = getSpeechRecognitionCtor()
+  if (!SpeechRecognition) {
+    ElMessage.warning(t('consultation.aiSpeechUnsupported'))
+    return
+  }
+  if (aiListening.value) return
+  aiInterimTranscript.value = ''
+  aiRecognition = new SpeechRecognition()
+  aiRecognition.continuous = true
+  aiRecognition.interimResults = true
+  aiRecognition.lang = aiSpeechLang.value
+  aiRecognition.onresult = (event) => {
+    let finalText = ''
+    let interimText = ''
+    for (let i = event.resultIndex; i < event.results.length; i += 1) {
+      const transcript = event.results[i]?.[0]?.transcript || ''
+      if (event.results[i]?.isFinal) finalText += transcript
+      else interimText += transcript
+    }
+    if (finalText.trim()) appendAiTranscript(finalText)
+    aiInterimTranscript.value = interimText.trim()
+  }
+  aiRecognition.onerror = (event) => {
+    const errorName = event?.error || 'speech-recognition'
+    if (errorName !== 'no-speech') {
+      ElMessage.warning(`${t('consultation.aiListenError')}: ${errorName}`)
+    }
+  }
+  aiRecognition.onend = () => {
+    aiInterimTranscript.value = ''
+    if (!aiListening.value) return
+    try {
+      aiRecognition?.start()
+    } catch {
+      aiListening.value = false
+    }
+  }
+  aiListening.value = true
+  try {
+    aiRecognition.start()
+  } catch (error) {
+    aiListening.value = false
+    ElMessage.error(error?.message || t('common.operationFailed'))
+  }
+}
+
+function stopAiListening() {
+  aiListening.value = false
+  aiInterimTranscript.value = ''
+  try {
+    aiRecognition?.stop()
+  } catch {
+    // ignore browser recognition shutdown races
+  }
+}
+
+function clearAiTranscript() {
+  aiTranscript.value = ''
+  aiInterimTranscript.value = ''
+  aiLastApplied.value = null
+}
+
+async function applyAiAssistantNotes() {
+  const transcript = aiTranscriptPreview.value.trim()
+  if (!transcript) {
+    ElMessage.warning(t('consultation.aiTranscriptRequired'))
+    return
+  }
+  aiAnalyzing.value = true
+  try {
+    const result = await aiApi.consultationNotes({
+      transcript,
+      currentNotes: buildAiCurrentNotes(form.value),
+      optionCatalog: aiOptionCatalog.value,
+      locale: locale.value,
+    })
+    const stats = applyAiConsultationNotes(form.value, result, aiOptionCatalog.value)
+    aiLastApplied.value = {
+      at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      evidence: Array.isArray(result.evidence) ? result.evidence.slice(0, 6) : [],
+      stats,
+    }
+    ElMessage.success(t('consultation.aiApplied'))
+  } catch (error) {
+    ElMessage.error(error?.message || t('consultation.aiApplyFailed'))
+  } finally {
+    aiAnalyzing.value = false
+  }
 }
 
 function normalizePrescriptionPreference(value) {
@@ -787,6 +924,7 @@ watch(currentConsultationId, (id) => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
+  stopAiListening()
 })
 const showRxDialog = ref(false)
 const editingRxIdx = ref(-1)
@@ -2516,6 +2654,63 @@ async function handleSendPreviewEmail() {
 
       <!-- Tab 1: Summary -->
       <el-tab-pane :label="t('consultation.tabSummary')" name="summary">
+        <el-card v-if="!isReadOnly" class="section-card ai-assistant-card" shadow="never">
+          <template #header>
+            <div class="ai-assistant-header">
+              <span class="sec-header">{{ t('consultation.aiAssistant') }}</span>
+              <div class="ai-assistant-actions">
+                <el-select v-model="aiSpeechLang" size="small" style="width: 118px" :disabled="aiListening">
+                  <el-option label="中文" value="zh-CN" />
+                  <el-option label="English" value="en-US" />
+                </el-select>
+                <el-button
+                  v-if="!aiListening"
+                  size="small"
+                  type="primary"
+                  :disabled="!aiSpeechSupported"
+                  @click="startAiListening"
+                >
+                  <el-icon><Microphone /></el-icon>{{ t('consultation.aiStart') }}
+                </el-button>
+                <el-button v-else size="small" type="danger" @click="stopAiListening">
+                  <el-icon><VideoPause /></el-icon>{{ t('consultation.aiStop') }}
+                </el-button>
+                <el-button size="small" :loading="aiAnalyzing" :disabled="!aiTranscriptPreview" @click="applyAiAssistantNotes">
+                  <el-icon><MagicStick /></el-icon>{{ t('consultation.aiApply') }}
+                </el-button>
+                <el-button size="small" text :disabled="!aiTranscriptPreview" @click="clearAiTranscript">
+                  {{ t('consultation.aiClear') }}
+                </el-button>
+              </div>
+            </div>
+          </template>
+          <div class="ai-assistant-body">
+            <div class="ai-assistant-status">
+              <el-tag :type="aiListening ? 'danger' : 'info'" effect="plain" size="small">
+                {{ aiListening ? t('consultation.aiListening') : t('consultation.aiIdle') }}
+              </el-tag>
+              <el-tag size="small" type="success" effect="plain">{{ t('consultation.aiNoAudioSaved') }}</el-tag>
+              <el-tag v-if="!aiSpeechSupported" size="small" type="warning" effect="plain">{{ t('consultation.aiSpeechUnsupported') }}</el-tag>
+              <el-tag v-if="aiLastApplied" size="small" effect="plain">
+                {{ t('consultation.aiLastApplied', { time: aiLastApplied.at }) }}
+              </el-tag>
+            </div>
+            <el-input
+              v-model="aiTranscript"
+              type="textarea"
+              :rows="3"
+              resize="vertical"
+              :placeholder="t('consultation.aiTranscriptPlaceholder')"
+            />
+            <div v-if="aiInterimTranscript" class="ai-interim">{{ aiInterimTranscript }}</div>
+            <div v-if="aiLastApplied?.stats" class="ai-apply-summary">
+              {{ t('consultation.aiApplySummary', aiLastApplied.stats) }}
+            </div>
+            <div v-if="aiLastApplied?.evidence?.length" class="ai-evidence-list">
+              <el-tag v-for="item in aiLastApplied.evidence" :key="item" size="small" effect="plain">{{ item }}</el-tag>
+            </div>
+          </div>
+        </el-card>
         <el-row :gutter="16">
           <!-- Left column -->
           <el-col :span="14">
@@ -2750,7 +2945,7 @@ async function handleSendPreviewEmail() {
                     </el-select>
                   </el-form-item>
                 </el-form>
-                <div class="diff-right-label">{{ localizeMixedLabel('Other Exterior Symptom 其它表证') }}</div>
+                <div class="diff-right-label">{{ localizeMixedLabel('Practitioner Observation & Exterior Symptoms 医师观察和体表症状') }}</div>
                 <el-input v-model="form.diff.otherExterior" type="textarea" :rows="6" :readonly="isReadOnly" placeholder="---" />
               </el-col>
             </el-row>
@@ -3841,6 +4036,27 @@ async function handleSendPreviewEmail() {
 
 .section-card { border-radius: 10px; }
 .sec-header { font-size: 12px; font-weight: 700; color: #555; letter-spacing: 0.5px; text-transform: uppercase; }
+.ai-assistant-card { margin-bottom: 12px; border-left: 3px solid #2f80ed; }
+.ai-assistant-header,
+.ai-assistant-actions,
+.ai-assistant-status,
+.ai-evidence-list {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ai-assistant-header { justify-content: space-between; }
+.ai-assistant-body { display: flex; flex-direction: column; gap: 8px; }
+.ai-interim {
+  border: 1px dashed #c9d8f6;
+  border-radius: 6px;
+  color: #5b6f95;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 8px;
+}
+.ai-apply-summary { color: #666; font-size: 12px; }
 .diff-sections { display: flex; flex-direction: column; gap: 12px; }
 .diff-card { border-radius: 10px; }
 .diff-header { font-weight: 700; color: #1b4332; font-size: 14px; }
@@ -3932,6 +4148,8 @@ async function handleSendPreviewEmail() {
 
   .cv-header-left,
   .cv-header-right,
+  .ai-assistant-header,
+  .ai-assistant-actions,
   .diff-card-header,
   .subsection-header,
   .price-row,
@@ -3945,6 +4163,7 @@ async function handleSendPreviewEmail() {
   }
 
   .cv-header-right :deep(.el-button),
+  .ai-assistant-actions :deep(.el-button),
   .subsection-header :deep(.el-button),
   .pdf-links :deep(.el-button) {
     width: 100%;

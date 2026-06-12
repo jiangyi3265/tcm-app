@@ -273,6 +273,12 @@ export const consultationsApi = {
   },
 }
 
+export const aiApi = {
+  consultationNotes(data) {
+    return request('/api/ai/consultation-notes', { method: 'POST', body: data })
+  },
+}
+
 export const stripeApi = {
   createCheckoutSession(consultationId) {
     return request('/api/stripe/checkout-sessions', {
