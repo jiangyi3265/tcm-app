@@ -439,6 +439,20 @@ function appendAiTranscript(text) {
   aiTranscript.value = aiTranscript.value ? `${aiTranscript.value}\n${line}` : line
 }
 
+function speechRecognitionErrorMessage(error) {
+  const raw = String(error?.message || error?.error || error || '').trim()
+  const normalized = raw.toLowerCase()
+  if (normalized.includes('quota') || normalized.includes('exceeded')) {
+    return t('consultation.aiSpeechQuotaExceeded')
+  }
+  if (['not-allowed', 'service-not-allowed'].includes(normalized)
+    || normalized.includes('permission')
+    || normalized.includes('denied')) {
+    return t('consultation.aiSpeechPermissionDenied')
+  }
+  return raw ? `${t('consultation.aiListenError')}: ${raw}` : t('consultation.aiListenError')
+}
+
 function startAiListening() {
   if (isReadOnly.value) return
   const SpeechRecognition = getSpeechRecognitionCtor()
@@ -466,7 +480,8 @@ function startAiListening() {
   aiRecognition.onerror = (event) => {
     const errorName = event?.error || 'speech-recognition'
     if (errorName !== 'no-speech') {
-      ElMessage.warning(`${t('consultation.aiListenError')}: ${errorName}`)
+      aiListening.value = false
+      ElMessage.warning(speechRecognitionErrorMessage(event))
     }
   }
   aiRecognition.onend = () => {
@@ -483,7 +498,7 @@ function startAiListening() {
     aiRecognition.start()
   } catch (error) {
     aiListening.value = false
-    ElMessage.error(error?.message || t('common.operationFailed'))
+    ElMessage.warning(speechRecognitionErrorMessage(error))
   }
 }
 

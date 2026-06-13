@@ -770,6 +770,8 @@ export default {
     aiNoAudioSaved: '不保存录音',
     aiSpeechUnsupported: '当前浏览器不支持语音输入',
     aiListenError: '语音输入错误',
+    aiSpeechQuotaExceeded: '手机浏览器语音识别额度暂时受限。请手动输入对话文字后点击“填入记录”。',
+    aiSpeechPermissionDenied: '浏览器未允许麦克风或语音识别。请开启权限，或手动输入对话文字后点击“填入记录”。',
     aiTranscriptRequired: '请先监听或输入对话文字',
     aiTranscriptPlaceholder: '对话转写会显示在这里。填入前可以手动编辑。',
     aiApplied: 'AI 记录已填入',

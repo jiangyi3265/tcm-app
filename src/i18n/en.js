@@ -769,6 +769,8 @@ export default {
     aiNoAudioSaved: 'Audio not saved',
     aiSpeechUnsupported: 'Speech input unavailable in this browser',
     aiListenError: 'Speech input error',
+    aiSpeechQuotaExceeded: 'Speech recognition quota is temporarily unavailable on this mobile browser. Enter the transcript manually, then tap Apply to Notes.',
+    aiSpeechPermissionDenied: 'Microphone or speech recognition permission is blocked. Enable permission, or enter the transcript manually and tap Apply to Notes.',
     aiTranscriptRequired: 'Please capture or enter transcript text first',
     aiTranscriptPlaceholder: 'Conversation transcript appears here. You may edit it before applying.',
     aiApplied: 'AI notes applied',
