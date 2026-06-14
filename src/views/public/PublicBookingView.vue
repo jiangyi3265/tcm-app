@@ -299,10 +299,7 @@ async function loadOptions() {
     publicWindowStart.value = response?.publicWindowStart || dayjs().format('YYYY-MM-DD')
     publicWindowEnd.value = response?.publicWindowEnd || resolveWindowEnd(publicWindowStart.value, nextSettings)
 
-    const currentWeekValue = dayjs(currentWeek.value)
-    if (currentWeekValue.valueOf() < windowStartWeek.value.valueOf() || currentWeekValue.valueOf() > windowEndWeek.value.valueOf()) {
-      currentWeek.value = alignWeekStart(publicWindowStart.value)
-    }
+    currentWeek.value = alignWeekStart(publicWindowStart.value)
 
     if (!form.value.serviceType && serviceTypes.value.length > 0) {
       form.value.serviceType = serviceTypes.value[0].key
