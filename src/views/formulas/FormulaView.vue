@@ -24,6 +24,7 @@ const searchQuery = ref('')
 const filterCategory = ref('')
 const PAGE_SIZE = 20
 const currentPage = ref(1)
+const isDedicatedEditMode = computed(() => Boolean(route.query.edit))
 
 const FORMULA_CATEGORIES = [
   { value: '调和剂', key: 'harmonizing' },
@@ -83,6 +84,10 @@ function validateFormulaHerbs(items = []) {
 
 // ── 过滤 ──
 const filteredFormulas = computed(() => {
+  if (isDedicatedEditMode.value) {
+    const formula = formulasStore.getFormula(String(route.query.edit || ''))
+    return formula ? [formula] : []
+  }
   let list = formulasStore.activeFormulas
   if (filterCategory.value) {
     list = list.filter(f => f.category === filterCategory.value)
@@ -310,9 +315,9 @@ const categoryCountEntries = computed(() => {
 </script>
 
 <template>
-  <div class="formula-view">
+  <div class="formula-view" :class="{ 'dedicated-edit': isDedicatedEditMode }">
     <!-- 顶部统计 -->
-    <div class="fv-stats">
+    <div v-if="!isDedicatedEditMode" class="fv-stats">
       <div class="fv-stat-card main">
         <div class="fv-stat-num">{{ totalCount }}</div>
         <div class="fv-stat-label">{{ t('formulaView.totalCount') }}</div>
@@ -324,7 +329,7 @@ const categoryCountEntries = computed(() => {
     </div>
 
     <!-- 工具栏 -->
-    <div class="fv-toolbar">
+    <div v-if="!isDedicatedEditMode" class="fv-toolbar">
       <div class="fv-toolbar-left">
         <el-input
           v-model="searchQuery"
@@ -345,7 +350,7 @@ const categoryCountEntries = computed(() => {
 
     <!-- 新建方剂面板（页内展开） -->
     <transition name="fv-panel">
-      <el-card v-if="showAddPanel" class="fv-add-panel" shadow="always">
+      <el-card v-if="!isDedicatedEditMode && showAddPanel" class="fv-add-panel" shadow="always">
         <template #header>
           <div class="fv-panel-header">
             <span class="fv-panel-title">{{ t('formulaView.newTemplateTitle') }}</span>
@@ -414,7 +419,7 @@ const categoryCountEntries = computed(() => {
     <div class="fv-list">
       <div v-for="formula in pagedFormulas" :key="formula.id" class="fv-card" :class="{ expanded: expandedId === formula.id }">
         <!-- 方剂卡头 -->
-        <div class="fv-card-header" @click="toggleExpand(formula)">
+        <div class="fv-card-header" @click="!isDedicatedEditMode && toggleExpand(formula)">
           <div class="fv-card-left">
             <span class="fv-card-name">{{ formula.name }}</span>
             <el-tag v-if="formula.category" size="small" type="info" style="margin-left:8px">{{ getFormulaCategoryLabel(formula.category) }}</el-tag>
@@ -593,7 +598,7 @@ const categoryCountEntries = computed(() => {
 
       <el-empty v-if="filteredFormulas.length === 0" :description="t('formulaView.noMatch')" />
     </div>
-    <div class="table-footer">
+    <div v-if="!isDedicatedEditMode" class="table-footer">
       <span>{{ t('formulaView.listCount', { count: filteredFormulas.length }) }}</span>
       <el-pagination
         v-model:current-page="currentPage"
@@ -610,6 +615,15 @@ const categoryCountEntries = computed(() => {
 <style scoped>
 .formula-view {
   max-width: 100%;
+}
+
+.formula-view.dedicated-edit .fv-card-header {
+  cursor: default;
+}
+
+.formula-view.dedicated-edit .fv-card {
+  box-shadow: none;
+  border: 1px solid #e5ece8;
 }
 
 /* ── 统计 ── */

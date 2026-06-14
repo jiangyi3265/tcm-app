@@ -707,10 +707,10 @@ const fileTree = computed(() => {
                     <el-descriptions-item :label="t('patientDetail.fax')">{{ patient.fax || '-' }}</el-descriptions-item>
                     <el-descriptions-item :label="t('patientDetail.preferredContact')">{{ patient.preferredContact || '-' }}</el-descriptions-item>
                     <el-descriptions-item :label="t('patientDetail.streetAddress')" :span="2">{{ patient.addressStreet || patient.address || '-' }}</el-descriptions-item>
-                    <el-descriptions-item :label="t('patientDetail.country')">{{ displayCountry(patient) }}</el-descriptions-item>
-                    <el-descriptions-item :label="t('patientDetail.province')">{{ displayProvince(patient) }}</el-descriptions-item>
                     <el-descriptions-item :label="t('patientDetail.city')">{{ patient.addressCity || '-' }}</el-descriptions-item>
                     <el-descriptions-item :label="t('patientDetail.postalCode')">{{ patient.addressPostal || '-' }}</el-descriptions-item>
+                    <el-descriptions-item :label="t('patientDetail.province')">{{ displayProvince(patient) }}</el-descriptions-item>
+                    <el-descriptions-item :label="t('patientDetail.country')">{{ displayCountry(patient) }}</el-descriptions-item>
                   </template>
                   <el-descriptions-item :label="t('patientDetail.primaryPractitioner')">
                     {{ getPractitionerName(patient.practitionerId) }}
@@ -941,28 +941,28 @@ const fileTree = computed(() => {
                         <el-input v-model="editForm.addressStreet" />
                       </el-form-item>
                     </el-col>
-                    <el-col v-if="!hidePatientContact" :span="6">
-                      <el-form-item :label="t('patientDetail.country')">
-                        <el-select v-model="editForm.addressCountry" filterable style="width:100%" @change="handleEditCountryChange">
-                          <el-option v-for="p in countryOptions" :key="p.value" :label="p.label" :value="p.value" />
-                        </el-select>
+                    <el-col v-if="!hidePatientContact" :span="12">
+                      <el-form-item :label="t('patientDetail.city')">
+                        <el-input v-model="editForm.addressCity" />
                       </el-form-item>
                     </el-col>
-                    <el-col v-if="!hidePatientContact" :span="6">
+                    <el-col v-if="!hidePatientContact" :span="12">
+                      <el-form-item :label="t('patientDetail.postalCode')">
+                        <el-input v-model="editForm.addressPostal" />
+                      </el-form-item>
+                    </el-col>
+                    <el-col v-if="!hidePatientContact" :span="12">
                       <el-form-item :label="t('patientDetail.province')">
                         <el-select v-model="editForm.addressState" filterable style="width:100%">
                           <el-option v-for="p in editProvinceOptions" :key="p.value" :label="p.label" :value="p.value" />
                         </el-select>
                       </el-form-item>
                     </el-col>
-                    <el-col v-if="!hidePatientContact" :span="6">
-                      <el-form-item :label="t('patientDetail.city')">
-                        <el-input v-model="editForm.addressCity" />
-                      </el-form-item>
-                    </el-col>
-                    <el-col v-if="!hidePatientContact" :span="6">
-                      <el-form-item :label="t('patientDetail.postalCode')">
-                        <el-input v-model="editForm.addressPostal" />
+                    <el-col v-if="!hidePatientContact" :span="12">
+                      <el-form-item :label="t('patientDetail.country')">
+                        <el-select v-model="editForm.addressCountry" filterable style="width:100%" @change="handleEditCountryChange">
+                          <el-option v-for="p in countryOptions" :key="p.value" :label="p.label" :value="p.value" />
+                        </el-select>
                       </el-form-item>
                     </el-col>
                     <el-col :span="24">

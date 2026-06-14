@@ -296,8 +296,8 @@ async function loadOptions() {
 
     const nextSettings = normalizePublicBookingSettings(response?.publicBooking)
     publicBookingSettings.value = nextSettings
-    publicWindowStart.value = dayjs().format('YYYY-MM-DD')
-    publicWindowEnd.value = resolveWindowEnd(publicWindowStart.value, nextSettings)
+    publicWindowStart.value = response?.publicWindowStart || dayjs().format('YYYY-MM-DD')
+    publicWindowEnd.value = response?.publicWindowEnd || resolveWindowEnd(publicWindowStart.value, nextSettings)
 
     const currentWeekValue = dayjs(currentWeek.value)
     if (currentWeekValue.valueOf() < windowStartWeek.value.valueOf() || currentWeekValue.valueOf() > windowEndWeek.value.valueOf()) {
@@ -611,26 +611,6 @@ onMounted(() => {
               <el-input v-model="form.email" :placeholder="t('publicBooking.emailPlaceholder')" />
             </el-form-item>
           </div>
-        </section>
-
-        <section class="booking-section optional-section">
-          <div class="grid two-col">
-            <el-form-item :label="t('appointments.chiefComplaint')">
-              <el-input v-model="form.intakeFormData.chiefComplaint" :placeholder="t('appointments.chiefComplaintPlaceholder')" />
-            </el-form-item>
-            <el-form-item :label="t('appointments.allergies')">
-              <el-input v-model="form.intakeFormData.allergies" :placeholder="t('appointments.allergiesPlaceholder')" />
-            </el-form-item>
-          </div>
-          <el-form-item :label="t('appointments.currentMedications')">
-            <el-input v-model="form.intakeFormData.currentMedications" :placeholder="t('appointments.currentMedicationsPlaceholder')" />
-          </el-form-item>
-          <el-form-item :label="t('appointments.medicalHistory')">
-            <el-input v-model="form.intakeFormData.medicalHistory" type="textarea" :rows="2" :placeholder="t('appointments.medicalHistoryPlaceholder')" />
-          </el-form-item>
-          <el-form-item :label="t('appointments.notesLabel')">
-            <el-input v-model="form.notes" type="textarea" :rows="2" :placeholder="t('appointments.notesPlaceholder')" />
-          </el-form-item>
         </section>
 
         <div class="actions">

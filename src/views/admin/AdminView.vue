@@ -717,7 +717,7 @@ const publicAppBaseUrl = computed(() => {
   if (typeof window !== 'undefined' && window.location?.origin) {
     return trimTrailingSlash(window.location.origin)
   }
-  return 'https://otcm.app'
+  return 'https://www.otcm.app'
 })
 const publicBookingUrl = computed(() => `${publicAppBaseUrl.value}/booking`)
 const publicBookingEmbedUrl = computed(() => `${publicBookingUrl.value}?embed=1`)

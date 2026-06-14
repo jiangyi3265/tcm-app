@@ -298,6 +298,7 @@ function buildFormFromConsultation(record = {}) {
   if (!nextForm.currency || nextForm.currency === 'CNY') {
     nextForm.currency = settingsStore.currency || 'CAD'
   }
+  nextForm.chiefComplaintDuration = normalizeChiefComplaintDuration(nextForm.chiefComplaintDuration)
   if (nextForm.diff?.tongueImage && !nextForm.diff?.tongueImageResource) {
     nextForm.diff.tongueImageResource = nextForm.diff.tongueImage
   }
@@ -309,6 +310,17 @@ function applySavedConsultation(record) {
   form.value = buildFormFromConsultation(record)
 }
 
+function normalizeChiefComplaintDuration(value) {
+  return String(value || '')
+    .replace(/^\s*&gt;\s*/i, '> ')
+    .replace(/^\s*&lt;\s*/i, '< ')
+    .trim()
+}
+
+function formatChiefComplaintDuration(value) {
+  return normalizeChiefComplaintDuration(value)
+}
+
 function buildPersistPayload(source = form.value) {
   const nextDiff = cloneJson(source.diff || {}, {})
   if (nextDiff.tongueImageResource) {
@@ -316,6 +328,7 @@ function buildPersistPayload(source = form.value) {
   }
   return cloneJson({
     ...source,
+    chiefComplaintDuration: normalizeChiefComplaintDuration(source.chiefComplaintDuration),
     diff: nextDiff,
     acupuncture: normalizeAcuRows(source.acupuncture || []),
     consultationFeeTaxable: false,
@@ -744,7 +757,7 @@ function applyIntakePrefill(intake, appointmentId = null) {
   if (!intake || typeof intake !== 'object') return
 
   if (intake.chiefComplaint) form.value.chiefComplaint = intake.chiefComplaint
-  if (intake.chiefComplaintDuration) form.value.chiefComplaintDuration = intake.chiefComplaintDuration
+  if (intake.chiefComplaintDuration) form.value.chiefComplaintDuration = normalizeChiefComplaintDuration(intake.chiefComplaintDuration)
   if (intake.chiefComplaintDescription) form.value.chiefComplaintDescription = intake.chiefComplaintDescription
   if (intake.progressOfDisease) form.value.progressOfDisease = intake.progressOfDisease
   if (intake.diff) {
@@ -1741,9 +1754,72 @@ const rxPerDoseSubtotal = computed(() => {
   return roundMoney(rxSubtotal.value / quantity)
 })
 
+function getFormulaMergeKey(item) {
+  const id = String(item?.herbDictId || '').trim()
+  if (id) return `id:${id}`
+  return `name:${String(item?.herbName || item?.name || '').trim().toLowerCase()}`
+}
+
+function toFormulaMergeItem(item = {}) {
+  return {
+    herbName: item.herbName || item.name || '',
+    herbDictId: item.herbDictId || null,
+    pinyin: item.pinyin || '',
+    latinName: item.latinName || '',
+    dosage: Number(item.dosage ?? item.originalDosage ?? 0) || 0,
+    unit: item.unit || item.originalUnit || 'g',
+    inventoryId: item.inventoryId || null,
+    supplierId: item.supplierId || null,
+    notes: item.notes || '',
+  }
+}
+
+function mergeFormulaItemLists(existingItems = [], incomingItems = []) {
+  const merged = []
+  const indexByKey = new Map()
+
+  function upsert(rawItem) {
+    const item = toFormulaMergeItem(rawItem)
+    const key = getFormulaMergeKey(item)
+    if (!item.herbName || key === 'name:') return
+    if (!indexByKey.has(key)) {
+      indexByKey.set(key, merged.length)
+      merged.push({ ...item })
+      return
+    }
+
+    const index = indexByKey.get(key)
+    const current = merged[index]
+    const useIncomingDose = Number(item.dosage || 0) > Number(current.dosage || 0)
+    merged[index] = {
+      ...(useIncomingDose ? item : current),
+      herbDictId: current.herbDictId || item.herbDictId || null,
+      pinyin: current.pinyin || item.pinyin || '',
+      latinName: current.latinName || item.latinName || '',
+      inventoryId: current.inventoryId || item.inventoryId || null,
+      supplierId: current.supplierId || item.supplierId || null,
+      notes: [current.notes, item.notes].filter(Boolean).join(' / '),
+    }
+  }
+
+  existingItems.forEach(upsert)
+  incomingItems.forEach(upsert)
+  return merged.map((item, index) => ({ ...item, sortOrder: index + 1 }))
+}
+
+function mergeFormulaNames(currentName, nextName) {
+  const names = String(currentName || '')
+    .split(/\s*\+\s*|[,，、]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+  const next = String(nextName || '').trim()
+  if (next && !names.includes(next)) names.push(next)
+  return names.join(' + ')
+}
+
 // Apply a formula to the prescription dialog
 function applyFormulaToDialog(formula) {
-  rxForm.value.formulaName = formula.name
+  rxForm.value.formulaName = mergeFormulaNames(rxForm.value.formulaName, formula.name)
 
   const prescType = rxForm.value.prescriptionType || 'raw_herbs'
   const qty = rxForm.value.quantity || 7
@@ -1756,9 +1832,10 @@ function applyFormulaToDialog(formula) {
       latinName: item.latinName || meta.latinName,
     }
   })
+  const mergedFormulaItems = mergeFormulaItemLists(rxForm.value.items || [], formulaItems)
 
   if (prescType === 'none') {
-    rxForm.value.items = formulaItems.map(h => {
+    rxForm.value.items = mergedFormulaItems.map(h => {
       return {
         name: h.herbName || h.name, herbDictId: h.herbDictId, dosage: h.dosage, unit: h.unit || 'g',
         pinyin: h.pinyin || '',
@@ -1769,7 +1846,7 @@ function applyFormulaToDialog(formula) {
     })
   } else {
     const result = calculatePrescription(
-      formulaItems,
+      mergedFormulaItems,
       qty,
       prescType,
       inventoryStore.items,
@@ -2843,8 +2920,13 @@ async function handleSendPreviewEmail() {
                 </el-form-item>
                 <el-form-item label="Chief Complaint Duration">
                   <el-select v-model="form.chiefComplaintDuration" :placeholder="t('consultation.selectDuration')" style="width:100%" :disabled="isReadOnly">
-                    <el-option v-for="d in TCM_OPTIONS.chiefComplaintDuration" :key="d" :label="d" :value="d">
-                      <span>{{ d }}</span>
+                    <el-option
+                      v-for="d in TCM_OPTIONS.chiefComplaintDuration"
+                      :key="d"
+                      :label="formatChiefComplaintDuration(d)"
+                      :value="normalizeChiefComplaintDuration(d)"
+                    >
+                      <span>{{ formatChiefComplaintDuration(d) }}</span>
                     </el-option>
                   </el-select>
                 </el-form-item>
