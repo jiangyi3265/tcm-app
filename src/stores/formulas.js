@@ -2,18 +2,23 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { FORMULA_DATABASE } from '../utils/sampleData'
 import { formulasApi } from '../utils/api'
-import { readStoredJson, writeStoredJson } from '../utils/storage'
+import { getStoredItem, readStoredJson, writeStoredJson } from '../utils/storage'
+
+const TOKEN_KEY = 'tcm_token'
 
 export const useFormulasStore = defineStore('formulas', () => {
   const formulas = ref([])
 
   function init() {
     const saved = readStoredJson('tcm_formulas', null)
-    if (saved) {
+    if (Array.isArray(saved)) {
       formulas.value = saved
     } else {
       formulas.value = convertLegacy()
       saveState()
+    }
+    if (getStoredItem(TOKEN_KEY)) {
+      refreshFromApi().catch(() => {})
     }
   }
 

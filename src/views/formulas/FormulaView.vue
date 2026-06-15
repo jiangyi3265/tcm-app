@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useFormulasStore } from '../../stores/formulas'
@@ -24,7 +24,9 @@ const searchQuery = ref('')
 const filterCategory = ref('')
 const PAGE_SIZE = 20
 const currentPage = ref(1)
-const isDedicatedEditMode = computed(() => Boolean(route.query.edit))
+const requestedEditId = computed(() => String(route.query.edit || ''))
+const editTargetFormula = computed(() => requestedEditId.value ? formulasStore.getFormula(requestedEditId.value) : null)
+const isDedicatedEditMode = computed(() => Boolean(requestedEditId.value && editTargetFormula.value))
 
 const FORMULA_CATEGORIES = [
   { value: '调和剂', key: 'harmonizing' },
@@ -85,8 +87,7 @@ function validateFormulaHerbs(items = []) {
 // ── 过滤 ──
 const filteredFormulas = computed(() => {
   if (isDedicatedEditMode.value) {
-    const formula = formulasStore.getFormula(String(route.query.edit || ''))
-    return formula ? [formula] : []
+    return [editTargetFormula.value]
   }
   let list = formulasStore.activeFormulas
   if (filterCategory.value) {
@@ -193,6 +194,10 @@ watch(
   },
   { immediate: true },
 )
+
+onMounted(() => {
+  formulasStore.refreshFromApi().catch(() => {})
+})
 
 function cancelEdit() {
   editing.value = false

@@ -875,6 +875,7 @@ async function saveHistoryMedStrict() {
 }
 
 onMounted(() => {
+  formulasStore.refreshFromApi().catch(() => {})
   if (isNew && (!form.value.currency || form.value.currency === 'CNY')) {
     form.value.currency = settingsStore.currency || 'CAD'
   }
