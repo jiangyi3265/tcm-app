@@ -118,8 +118,6 @@ export default {
     emailPlaceholder: '邮箱地址',
     passwordPlaceholder: '密码',
     loginButton: '登 录',
-    demoTitle: '演示账号（点击快速填入）',
-    demoAccounts: '演示账号（点击快速填入）',
     loginSuccess: '登录成功',
     loginWarning: '请输入邮箱和密码',
   },

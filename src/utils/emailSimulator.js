@@ -77,6 +77,38 @@ function safeFileToken(value) {
     .replace(/^-+|-+$/g, '') || 'consultation'
 }
 
+function resolvePdfDate(consultation = {}, pdfResult = {}) {
+  const candidates = [
+    pdfResult.date,
+    pdfResult.createdAt,
+    consultation.consultDate,
+    consultation.consultationDate,
+    consultation.date,
+    consultation.appointmentDate,
+    consultation.appointmentStartTime,
+    consultation.startTime,
+  ]
+  for (const value of candidates) {
+    const text = String(value || '').trim()
+    if (text.length >= 10) return text.split(/[T ]/)[0]
+  }
+  return new Date().toISOString().slice(0, 10)
+}
+
+function resolvePdfVersion(consultation = {}, pdfResult = {}) {
+  const value = pdfResult.version
+    ?? pdfResult.fileVersion
+    ?? consultation.version
+    ?? consultation.pdfVersion
+    ?? 1
+  const text = safeFileToken(String(value || '1').trim())
+  return /^v/i.test(text) ? text.toLowerCase() : `v${text}`
+}
+
+function buildPdfFileName(kind, consultation = {}, pdfResult = {}) {
+  return `${safeFileToken(kind)}-${safeFileToken(resolvePdfDate(consultation, pdfResult))}-${resolvePdfVersion(consultation, pdfResult)}.pdf`
+}
+
 function buildInvoicePdfAttachment(consultation, pdfResult = {}) {
   const resource = pdfResult?.resource
     || pdfResult?.filePath
@@ -84,10 +116,9 @@ function buildInvoicePdfAttachment(consultation, pdfResult = {}) {
     || consultation?.invoicePath
     || ''
   if (!resource) return null
-  const consultationNo = consultation?.consultationId || consultation?.id
   return {
     resource,
-    fileName: `invoice-${safeFileToken(consultationNo)}.pdf`,
+    fileName: buildPdfFileName('invoice', consultation, pdfResult),
     contentType: 'application/pdf',
   }
 }
@@ -100,10 +131,9 @@ function buildReportPdfAttachment(consultation, pdfResult = {}) {
     || consultation?.reportPath
     || ''
   if (!resource) return null
-  const consultationNo = consultation?.consultationId || consultation?.id
   return {
     resource,
-    fileName: `consultation-report-${safeFileToken(consultationNo)}.pdf`,
+    fileName: buildPdfFileName('consultation-report', consultation, pdfResult),
     contentType: 'application/pdf',
   }
 }
@@ -120,9 +150,12 @@ function getCommonVariables({ patient, clinicName, clinicAddress, appointment, c
   return {
     clinicName: resolveClinicName(clinicName || practitioner?.clinicName),
     clinicAddress: clinicAddress || '',
+    clinicPhone: templateSettingsStore?.clinicPhone || '',
+    clinicEmail: templateSettingsStore?.clinicEmail || '',
     patientId: patient?.id || '',
     patientName: resolvePatientName(patient),
     patientEmail: resolvePatientEmail(patient),
+    patientPhone: patient?.phone || patient?.mobile || '',
     practitionerName: practitioner?.name || practitioner?.nickName || '',
     serviceLabel: serviceLabel || appointment?.serviceLabel || appointment?.serviceType || '',
     servicePrice: resolveServicePrice({ appointment, consultation, currency, settingsStore: templateSettingsStore }),

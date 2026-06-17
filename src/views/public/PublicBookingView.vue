@@ -411,7 +411,7 @@ async function submitBooking() {
       phone: form.value.phone.trim(),
       email: form.value.email.trim(),
       practitionerId: form.value.practitionerId || selectedSlot.value.assignedPractitionerId || null,
-      roomId: null,
+      roomId: selectedSlot.value.roomId || null,
       serviceType: form.value.serviceType,
       startTime: selectedSlot.value.startTime,
       endTime: selectedSlot.value.endTime,
@@ -421,6 +421,7 @@ async function submitBooking() {
     successState.value = response?.appointment || {
       startTime: selectedSlot.value.startTime,
       practitionerId: selectedSlot.value.assignedPractitionerId,
+      roomId: selectedSlot.value.roomId,
     }
     selectedSlotValue.value = ''
     await loadSchedule().catch(() => {})

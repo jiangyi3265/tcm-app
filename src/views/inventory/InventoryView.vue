@@ -32,6 +32,7 @@ const lowStockFilter = ref(false)
 const searchQuery = ref('')
 const PAGE_SIZE = 20
 const categoryPages = ref({})
+const inventorySortState = ref({ prop: '', order: '' })
 const showAddDialog = ref(false)
 const showAdjustDialog = ref(false)
 const showDetailDialog = ref(false)
@@ -399,6 +400,36 @@ function resetVisibleInventoryPages() {
   selectedInventoryRows.value = []
 }
 
+function inventoryTextValue(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function inventoryNumberValue(value) {
+  const number = Number(value ?? 0)
+  return Number.isFinite(number) ? number : 0
+}
+
+function compareInventoryRows(left, right, prop) {
+  if (prop === 'quantity' || prop === 'last30DaysUsage') {
+    const diff = inventoryNumberValue(left?.[prop]) - inventoryNumberValue(right?.[prop])
+    if (diff !== 0) return diff
+    return inventoryTextValue(left?.name).localeCompare(inventoryTextValue(right?.name))
+  }
+  return inventoryTextValue(left?.name).localeCompare(inventoryTextValue(right?.name))
+}
+
+function sortInventoryItems(items) {
+  const { prop, order } = inventorySortState.value || {}
+  if (!prop || !order) return items
+  const direction = order === 'descending' ? -1 : 1
+  return [...items].sort((left, right) => direction * compareInventoryRows(left, right, prop))
+}
+
+function handleInventorySortChange({ prop, order }) {
+  inventorySortState.value = { prop: prop || '', order: order || '' }
+  resetVisibleInventoryPages()
+}
+
 function getCategoryItems(category) {
   const branchId = branchesStore.currentBranchId
   let items = inventoryStore.itemsByCategory[category] || []
@@ -408,9 +439,11 @@ function getCategoryItems(category) {
   if (lowStockFilter.value) {
     items = items.filter((i) => inventoryStore.isLowStockItem(i))
   }
-  if (!searchQuery.value) return items
-  const q = searchQuery.value.toLowerCase()
-  return items.filter((i) => i.name.toLowerCase().includes(q) || i.supplier?.toLowerCase().includes(q))
+  if (searchQuery.value) {
+    const q = searchQuery.value.toLowerCase()
+    items = items.filter((i) => i.name.toLowerCase().includes(q) || i.supplier?.toLowerCase().includes(q))
+  }
+  return sortInventoryItems(items)
 }
 
 function getPagedCategoryItems(category) {
@@ -668,9 +701,20 @@ async function openAdjustmentHistory(item) {
     <el-card class="inventory-card">
       <el-tabs v-model="activeTab">
         <el-tab-pane v-for="(config, key) in CATEGORY_CONFIG" :key="key" :label="config.label" :name="key">
-          <el-table :data="getPagedCategoryItems(key)" stripe @selection-change="rows => handleInventorySelectionChange(key, rows)">
+          <el-table
+            :data="getPagedCategoryItems(key)"
+            stripe
+            @selection-change="rows => handleInventorySelectionChange(key, rows)"
+            @sort-change="handleInventorySortChange"
+          >
             <el-table-column v-if="canEdit" type="selection" width="46" />
-            <el-table-column :label="t('inventory.itemName')" min-width="180">
+            <el-table-column
+              prop="name"
+              :label="t('inventory.itemName')"
+              min-width="180"
+              sortable="custom"
+              :sort-orders="['ascending', 'descending']"
+            >
               <template #default="{ row }">
                 <div v-if="editingId === row.id">
                   <el-select
@@ -720,7 +764,13 @@ async function openAdjustmentHistory(item) {
                 </div>
               </template>
             </el-table-column>
-            <el-table-column :label="t('inventory.currentStock')" min-width="130">
+            <el-table-column
+              prop="quantity"
+              :label="t('inventory.currentStock')"
+              min-width="130"
+              sortable="custom"
+              :sort-orders="['ascending', 'descending']"
+            >
               <template #default="{ row }">
                 <div v-if="editingId === row.id">
                   <el-input-number v-model="editForm.quantity" :min="0" :step="1" size="small" controls-position="right" style="width: 100%" />
@@ -730,7 +780,13 @@ async function openAdjustmentHistory(item) {
                 </span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('inventory.last30DaysUsage')" min-width="130">
+            <el-table-column
+              prop="last30DaysUsage"
+              :label="t('inventory.last30DaysUsage')"
+              min-width="130"
+              sortable="custom"
+              :sort-orders="['ascending', 'descending']"
+            >
               <template #default="{ row }">
                 <div v-if="editingId === row.id">
                   <div style="font-size: 13px; color: #555; margin-bottom: 6px">{{ formatUsageAmount(row.last30DaysUsage) }} {{ getUnitLabel(row.unit) }}</div>

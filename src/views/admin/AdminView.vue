@@ -711,11 +711,26 @@ function trimTrailingSlash(value) {
   return String(value || '').replace(/\/+$/, '')
 }
 
+function normalizePublicBaseUrl(value) {
+  const trimmed = trimTrailingSlash(value)
+  if (!trimmed) return ''
+  try {
+    const url = new URL(trimmed)
+    if (url.hostname === 'otcm.app') {
+      url.hostname = 'www.otcm.app'
+      return trimTrailingSlash(url.toString())
+    }
+  } catch (error) {
+    if (trimmed === 'https://otcm.app') return 'https://www.otcm.app'
+  }
+  return trimmed
+}
+
 const publicAppBaseUrl = computed(() => {
-  const configured = trimTrailingSlash(import.meta.env.VITE_PUBLIC_APP_BASE_URL)
+  const configured = normalizePublicBaseUrl(import.meta.env.VITE_PUBLIC_APP_BASE_URL)
   if (configured) return configured
   if (typeof window !== 'undefined' && window.location?.origin) {
-    return trimTrailingSlash(window.location.origin)
+    return normalizePublicBaseUrl(window.location.origin)
   }
   return 'https://www.otcm.app'
 })

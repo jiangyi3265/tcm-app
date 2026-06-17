@@ -39,19 +39,6 @@ async function handleLogin() {
   }
 }
 
-const demoAccounts = [
-  { label: 'Admin', email: 'admin@clinic.com', color: '#e63946' },
-  { label: 'Dr. Li', email: 'doctor@clinic.com', color: '#2d6a4f' },
-  { label: 'Dr. Wang', email: 'doctor2@clinic.com', color: '#40916c' },
-  { label: 'Apprentice', email: 'apprentice@clinic.com', color: '#e9c46a' },
-  { label: 'Pharmacist', email: 'pharmacist@clinic.com', color: '#264653' },
-  { label: 'Cashier', email: 'cashier@clinic.com', color: '#f4a261' },
-]
-
-function fillDemo(account) {
-  form.email = account.email
-  form.password = 'admin123'
-}
 </script>
 
 <template>
@@ -107,22 +94,6 @@ function fillDemo(account) {
           {{ t('login.loginButton') }}
         </el-button>
       </el-form>
-
-      <div class="demo-accounts">
-        <div class="demo-title">{{ t('login.demoAccounts') }}</div>
-        <div class="demo-btns">
-          <button
-            v-for="acc in demoAccounts"
-            :key="acc.email"
-            class="demo-btn"
-            :style="{ '--accent': acc.color }"
-            @click="fillDemo(acc)"
-          >
-            <span class="demo-dot" :style="{ background: acc.color }"></span>
-            {{ acc.label }}
-          </button>
-        </div>
-      </div>
     </div>
   </div>
 </template>
@@ -188,55 +159,6 @@ function fillDemo(account) {
 }
 
 .login-form {
-  margin-bottom: 16px;
-}
-
-.demo-accounts {
-  border-top: 1px solid #f0f0f0;
-  padding-top: 16px;
-}
-
-.demo-title {
-  font-size: 12px;
-  color: #aaa;
-  text-align: center;
-  margin-bottom: 10px;
-  letter-spacing: 0.5px;
-}
-
-.demo-btns {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
-}
-
-.demo-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
-  border: 1px solid #e8e8e8;
-  border-radius: 20px;
-  background: #fafafa;
-  font-size: 12px;
-  color: #555;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.demo-btn:hover {
-  border-color: var(--accent, #2d6a4f);
-  background: #fff;
-  color: var(--accent, #2d6a4f);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-  transform: translateY(-1px);
-}
-
-.demo-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
+  margin-bottom: 0;
 }
 </style>

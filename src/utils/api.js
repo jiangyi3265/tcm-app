@@ -29,7 +29,7 @@ function normalizeScheduleParams(params = {}) {
   return normalized
 }
 
-async function request(path, { method = 'GET', body, auth = true } = {}) {
+async function request(path, { method = 'GET', body, auth = true, timeoutMs = 0 } = {}) {
   const headers = {
     'Content-Type': 'application/json',
   }
@@ -40,11 +40,29 @@ async function request(path, { method = 'GET', body, auth = true } = {}) {
     headers.Authorization = `Bearer ${token}`
   }
 
-  const response = await fetch(path, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
+  const controller = timeoutMs > 0 && typeof AbortController !== 'undefined'
+    ? new AbortController()
+    : null
+  const timer = controller
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : null
+
+  let response
+  try {
+    response = await fetch(path, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller?.signal,
+    })
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Request timed out.')
+    }
+    throw error
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
@@ -275,7 +293,11 @@ export const consultationsApi = {
 
 export const aiApi = {
   consultationNotes(data) {
-    return request('/api/ai/consultation-notes', { method: 'POST', body: data })
+    return request('/api/ai/consultation-notes', {
+      method: 'POST',
+      body: data,
+      timeoutMs: 20 * 60 * 1000,
+    })
   },
 }
 

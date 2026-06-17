@@ -624,11 +624,23 @@ const categoryCountEntries = computed(() => {
 
 .formula-view.dedicated-edit .fv-card-header {
   cursor: default;
+  padding: 0 0 16px;
+  border-bottom: 1px solid #e5ece8;
 }
 
 .formula-view.dedicated-edit .fv-card {
   box-shadow: none;
-  border: 1px solid #e5ece8;
+  border: 0;
+  border-radius: 0;
+}
+
+.formula-view.dedicated-edit .fv-card-body {
+  border-top: 0;
+  padding: 16px 0 0;
+}
+
+.formula-view.dedicated-edit .fv-card-right {
+  display: none;
 }
 
 /* ── 统计 ── */

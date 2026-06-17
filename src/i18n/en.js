@@ -118,8 +118,6 @@ export default {
     emailPlaceholder: 'Email address',
     passwordPlaceholder: 'Password',
     loginButton: 'Log In',
-    demoTitle: 'Demo accounts (click to fill)',
-    demoAccounts: 'Demo accounts (click to fill)',
     loginSuccess: 'Login successful',
     loginWarning: 'Please enter email and password',
   },
