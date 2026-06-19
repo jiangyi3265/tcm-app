@@ -157,8 +157,13 @@ export const useInventoryStore = defineStore('inventory', () => {
   async function adjustStock(id, delta, reason = '') {
     const idx = items.value.findIndex((i) => i.id === id)
     if (idx === -1) return false
+    const current = items.value[idx]
     const updated = normalizeInventoryItem(await inventoryApi.adjust(id, delta, reason))
-    items.value[idx] = updated
+    items.value[idx] = {
+      ...current,
+      ...updated,
+      last30DaysUsage: updated.last30DaysUsage ?? current.last30DaysUsage ?? 0,
+    }
     saveState()
     await refreshFromApi()
     return true

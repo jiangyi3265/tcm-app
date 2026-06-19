@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { ref, computed, onMounted, onBeforeUnmount, reactive, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
@@ -1520,8 +1520,26 @@ watch(
   { deep: true },
 )
 
-const rxDrawerSize = computed(() => (isMobile.value ? '100%' : '640px'))
+// 处方抽屉加宽，使药材表格各列能完整放下、不再出现横向滚动 (bug 2)
+const rxDrawerSize = computed(() => (isMobile.value ? '100%' : '960px'))
 const sideDrawerSize = computed(() => (isMobile.value ? '100%' : '520px'))
+
+// 处方表格高度随屏幕高度自适应：桌面端尽量多显示药材(约 16 味)，避免内部频繁滚动 (bug 2)
+const viewportHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 900)
+function handleViewportResize() {
+  if (typeof window !== 'undefined') viewportHeight.value = window.innerHeight
+}
+const rxTableMaxHeight = computed(() =>
+  isMobile.value
+    ? Math.max(280, Math.round(viewportHeight.value * 0.55))
+    : Math.max(640, viewportHeight.value - 230),
+)
+onMounted(() => {
+  if (typeof window !== 'undefined') window.addEventListener('resize', handleViewportResize)
+})
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') window.removeEventListener('resize', handleViewportResize)
+})
 
 async function persistConsultationDraft({ silent = false, syncRoute = true } = {}) {
   saving.value = true
@@ -3987,9 +4005,9 @@ async function handleSendPreviewEmail() {
             <el-button size="small" @click="addRxItem"><el-icon><Plus /></el-icon> {{ t('consultation.addHerb') }}</el-button>
           </div>
         </div>
-        <div class="wide-table-wrap">
-          <el-table :data="rxForm.items" size="small" max-height="360" style="margin-bottom:8px">
-          <el-table-column label="?Herb" min-width="110">
+        <div class="wide-table-wrap rx-table-wrap">
+          <el-table class="rx-items-table" :data="rxForm.items" size="small" :max-height="rxTableMaxHeight" style="margin-bottom:8px">
+          <el-table-column :label="localizeMixedLabel('Herb 药材')" min-width="110">
             <template #default="{ row }">
               <el-autocomplete
                 v-model="row.name"
@@ -4023,7 +4041,6 @@ async function handleSendPreviewEmail() {
               </span>
               <span v-else-if="row.convertedQty != null" :style="{ color: row.stockSufficient === false ? '#e63946' : '#2d6a4f', fontWeight: 600 }">
                 {{ row.packetsPerDose != null ? row.packetsPerDose : row.convertedQty }}{{ row.convertedUnit }}
-                <span style="font-size:11px; color:#888; display:block">{{ formatPerDoseSummary(row, rxForm.quantity) }}</span>
               </span>
               <span v-else style="color:#aaa">-</span>
             </template>
@@ -4050,21 +4067,12 @@ async function handleSendPreviewEmail() {
               <span v-else style="color:#ccc; font-size:12px">-</span>
             </template>
           </el-table-column>
-          <el-table-column label="Stock" width="70" v-if="shouldUseClinicInventory(rxForm)">
-            <template #default="{ row }">
-              <el-tag v-if="row.outOfStock" type="danger" size="small">Out</el-tag>
-              <el-tag v-else-if="row.inventoryId" :type="row.stockSufficient ? 'success' : 'warning'" size="small">
-                {{ formatStockQuantity(row) }}{{ getStockUnit(row) }}
-              </el-tag>
-              <el-tag v-else type="info" size="small">N/A</el-tag>
-            </template>
-          </el-table-column>
           <el-table-column :label="localizeMixedLabel('Price 价格')" width="110">
             <template #default="{ row }">
               <span style="font-size:13px; color:#555">{{ cs }}{{ (row.pricePerUnit || 0).toFixed(2) }}</span>
             </template>
           </el-table-column>
-          <el-table-column width="45">
+          <el-table-column width="36" align="center" class-name="rx-action-cell">
             <template #default="{ $index }">
               <el-button type="danger" text size="small" :icon="'Delete'" @click="removeRxItem($index)" />
             </template>
@@ -4182,6 +4190,9 @@ async function handleSendPreviewEmail() {
 .subsection-header { display: flex; justify-content: space-between; align-items: center; margin: 8px 0; }
 .subsec-label { font-size: 13px; font-weight: 600; color: #444; }
 .wide-table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.rx-table-wrap { overflow-x: visible; }
+.rx-items-table :deep(.el-table__cell) { padding: 4px 0; }
+.rx-items-table :deep(.rx-action-cell .cell) { padding-left: 0; padding-right: 0; text-align: center; }
 
 .discount-btns { display: flex; gap: 4px; }
 .third-party-upload { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -4285,6 +4296,10 @@ async function handleSendPreviewEmail() {
 
   .wide-table-wrap :deep(.el-table) {
     min-width: 720px;
+  }
+
+  .rx-table-wrap :deep(.el-table) {
+    min-width: 0;
   }
 
   .pdf-links,

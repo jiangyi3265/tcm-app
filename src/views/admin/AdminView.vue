@@ -2287,20 +2287,8 @@ async function deleteTemplate(tmpl) {
               <span v-else style="color:#bbb">-</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('admin.appointmentInterval')" width="180">
-            <template #default="{ row }">
-              <div v-if="editingUserId === row.id && (row.role === 'practitioner' || (row.roles || []).includes('practitioner'))">
-                <el-select v-model="editUserForm.appointmentInterval" size="small" style="width:160px">
-                  <el-option label="overlap1(首诊)" value="overlap1" />
-                  <el-option label="overlap2(复诊)" value="overlap2" />
-                </el-select>
-              </div>
-              <span v-else-if="row.role === 'practitioner' || (row.roles || []).includes('practitioner')">
-                {{ formatIntervalOption(settingsStore.getPractitionerInterval(row.id), row) }}
-              </span>
-              <span v-else style="color:#bbb">-</span>
-            </template>
-          </el-table-column>
+          <!-- "Appointment Interval" 列已移除：预约时间间隔由每个服务对应的 overlap1(首诊)/overlap2(复诊) 决定，
+               该全局间隔变量不再需要（详见 bug 1(1)）。医师的 overlap1/overlap2 时长见下方两列。 -->
           <el-table-column label="首诊时长(overlap1)" width="130">
             <template #default="{ row }">
               <div v-if="editingUserId === row.id && (row.role === 'practitioner' || (row.roles || []).includes('practitioner'))">
