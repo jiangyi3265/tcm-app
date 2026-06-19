@@ -277,7 +277,6 @@ function startEditUser(user) {
   editUserForm.value = {
     ...user,
     roles: userRoles,
-    appointmentInterval: settingsStore.getPractitionerInterval(user.id),
     color: user.color || resolvePractitionerColor(user),
     regulatoryBody: user.regulatoryBody || '',
     registrationNumber: user.registrationNumber || '',
@@ -289,12 +288,7 @@ function startEditUser(user) {
 
 async function saveEditUser() {
   try {
-    // 保存预约间隔到settings
-    if (editUserForm.value.appointmentInterval !== undefined) {
-      await settingsStore.setPractitionerInterval(editingUserId.value, editUserForm.value.appointmentInterval)
-    }
-    const { appointmentInterval, ...userData } = editUserForm.value
-    const updated = await authStore.updateUser(editingUserId.value, userData)
+    const updated = await authStore.updateUser(editingUserId.value, editUserForm.value)
     // 同步更新对应的病人档案（姓名、邮箱、电话等）
     try {
       await patientsStore.ensureStaffPatient(updated)
@@ -661,7 +655,6 @@ async function handleResetPwd() {
 // ========== System settings ==========
 const settingsForm = reactive({
   taxRate: settingsStore.taxRate,
-  practitionerInterval: settingsStore.practitionerInterval,
   publicBookingAdvanceDays: settingsStore.publicBookingAdvanceDays,
   publicBookingDripWindowDays: settingsStore.publicBookingDripWindowDays,
   publicBookingDripMinutes: settingsStore.publicBookingDripMinutes,
@@ -1002,7 +995,6 @@ function selectWorkbookImportSheet(workbook) {
 async function saveSettings() {
   await settingsStore.updateSettings({
     taxRate: Number(settingsForm.taxRate),
-    practitionerInterval: Number(settingsForm.practitionerInterval),
     publicBookingAdvanceDays: Number(settingsForm.publicBookingAdvanceDays),
     publicBookingDripWindowDays: Number(settingsForm.publicBookingDripWindowDays),
     publicBookingDripMinutes: Number(settingsForm.publicBookingDripMinutes),
@@ -2548,17 +2540,6 @@ async function deleteTemplate(tmpl) {
               />
               <span style="margin-left: 8px; color: #888; font-size: 13px">
                 {{ t('admin.current') }}: {{ (settingsForm.taxRate * 100).toFixed(0) }}%
-              </span>
-            </el-form-item>
-            <el-form-item :label="t('admin.practitionerInterval')">
-              <el-input-number
-                v-model="settingsForm.practitionerInterval"
-                :min="5"
-                :max="60"
-                :step="5"
-              />
-              <span style="margin-left: 8px; color: #888; font-size: 13px">
-                {{ t('admin.intervalDesc', { min: settingsForm.practitionerInterval }) }}
               </span>
             </el-form-item>
             <el-form-item :label="t('admin.publicBookingAdvanceDays')">
