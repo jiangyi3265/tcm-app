@@ -30,6 +30,7 @@ import {
 } from '../../utils/historyCompareNavigation'
 import { GENDER_OPTIONS, formatGender, getGenderTagType, normalizeGender } from '../../utils/gender'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { writeStoredItem } from '../../utils/storage'
 
 const { t } = useI18n()
 
@@ -376,7 +377,7 @@ function quickCopyToNew(fields) {
       copyData.discountValue = src.discountValue
     }
   }
-  sessionStorage.setItem('tcm_copy_consult', JSON.stringify(sanitizeCopiedConsultationData(copyData)))
+  writeStoredItem('tcm_copy_consult', JSON.stringify(sanitizeCopiedConsultationData(copyData)))
   ElMessage.success(t('patientDetail.copiedToClipboard'))
   router.push(`/patients/${patientId}/consultations/new`)
 }

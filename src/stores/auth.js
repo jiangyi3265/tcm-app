@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { naturalCompareText } from '../utils/naturalSort'
-import { applyBootstrapToLocalStorage, authApi, bootstrapApi, usersApi } from '../utils/api'
-import { clearClinicCache, getStoredItem, readStoredJson, removeStoredKey, writeStoredJson } from '../utils/storage'
+import { applyBootstrapToLocalStorage, authApi, bootstrapApi, setAuthToken, usersApi } from '../utils/api'
+import { clearClinicCache, getStoredItem, readStoredJson, writeStoredJson } from '../utils/storage'
 
 const STORAGE_KEY = 'tcm_auth'
 const USERS_KEY = 'tcm_users'
@@ -59,7 +59,9 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const payload = await bootstrapApi.fetch()
       applyBootstrapToLocalStorage(payload)
-      users.value = readStoredJson(USERS_KEY, []) || []
+      users.value = Array.isArray(payload?.users)
+        ? payload.users
+        : readStoredJson(USERS_KEY, []) || []
       mergeCurrentUserFromUsers()
     } catch {
       // Keep the cached user list if the bootstrap refresh fails.
@@ -97,7 +99,7 @@ export const useAuthStore = defineStore('auth', () => {
       const result = await authApi.login(email, password)
 
       if (result.token) {
-        localStorage.setItem(TOKEN_KEY, result.token)
+        setAuthToken(result.token)
       }
 
       currentUser.value = result.user || null
@@ -133,7 +135,7 @@ export const useAuthStore = defineStore('auth', () => {
       void usersApi.recordApprenticeSession('logout').catch(() => {})
     }
     currentUser.value = null
-    removeStoredKey(TOKEN_KEY)
+    setAuthToken(null)
     clearClinicCache()
     saveState()
     users.value = []

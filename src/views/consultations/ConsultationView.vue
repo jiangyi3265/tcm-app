@@ -60,6 +60,7 @@ import {
 } from '../../utils/paymentMethods'
 import { resolveInvoicePaymentAfterSave } from '../../utils/invoicePaymentFlow'
 import { compressImageFile } from '../../utils/imageCompress'
+import { getStoredItem, removeStoredKey } from '../../utils/storage'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ConsultationComparePanel from './ConsultationComparePanel.vue'
 
@@ -885,7 +886,7 @@ onMounted(() => {
       applySavedConsultation(existing)
     }
   } else if (isNew) {
-    const copyRaw = sessionStorage.getItem('tcm_copy_consult')
+    const copyRaw = getStoredItem('tcm_copy_consult')
     if (copyRaw) {
       try {
         const copyData = sanitizeCopiedConsultationData(JSON.parse(copyRaw))
@@ -908,7 +909,7 @@ onMounted(() => {
       } catch (error) {
         console.warn('Failed to parse copied consultation data:', error)
       }
-      sessionStorage.removeItem('tcm_copy_consult')
+      removeStoredKey('tcm_copy_consult')
     }
 
     const patientAppts = appointmentsStore.getPatientAppointments(patientId)

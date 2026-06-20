@@ -14,12 +14,21 @@ export const CLINIC_CACHE_KEYS = [
   'tcm_herb_dict',
   'tcm_meridians',
   'tcm_templates',
+  'tcm_copy_consult',
 ]
 
 const SESSION_KEYS = new Set(CLINIC_CACHE_KEYS)
 
+function getBrowserStorage(name) {
+  try {
+    return typeof globalThis !== 'undefined' ? globalThis[name] || null : null
+  } catch {
+    return null
+  }
+}
+
 function storageFor(key) {
-  return SESSION_KEYS.has(key) ? sessionStorage : localStorage
+  return SESSION_KEYS.has(key) ? getBrowserStorage('sessionStorage') : getBrowserStorage('localStorage')
 }
 
 function isQuotaExceeded(error) {
@@ -32,7 +41,7 @@ function isQuotaExceeded(error) {
 
 function safeRemove(storage, key) {
   try {
-    storage.removeItem(key)
+    storage?.removeItem(key)
   } catch {
     // Storage cleanup should never block app rendering.
   }
@@ -45,6 +54,7 @@ function clearClinicCacheExcept(exceptKey = '') {
 }
 
 function safeSetItem(storage, key, value) {
+  if (!storage) return false
   try {
     storage.setItem(key, value)
     return true
@@ -64,22 +74,44 @@ function safeSetItem(storage, key, value) {
   }
 }
 
+function safeGetItem(storage, key) {
+  try {
+    return storage?.getItem(key) ?? null
+  } catch {
+    return null
+  }
+}
+
 export function getStoredItem(key) {
   const primary = storageFor(key)
-  const existing = primary.getItem(key)
+  const existing = safeGetItem(primary, key)
   if (existing !== null) return existing
 
   if (SESSION_KEYS.has(key)) {
-    const legacy = localStorage.getItem(key)
+    const local = getBrowserStorage('localStorage')
+    const legacy = safeGetItem(local, key)
     if (legacy !== null) {
       if (safeSetItem(primary, key, legacy)) {
-        safeRemove(localStorage, key)
+        safeRemove(local, key)
       }
       return legacy
     }
   }
 
   return null
+}
+
+export function writeStoredItem(key, value) {
+  const target = storageFor(key)
+  const written = safeSetItem(target, key, String(value ?? ''))
+  const session = getBrowserStorage('sessionStorage')
+  const local = getBrowserStorage('localStorage')
+  if (SESSION_KEYS.has(key) && written) {
+    safeRemove(local, key)
+  } else if (!SESSION_KEYS.has(key) && written) {
+    safeRemove(session, key)
+  }
+  return written
 }
 
 export function readStoredJson(key, fallback = null) {
@@ -93,19 +125,16 @@ export function readStoredJson(key, fallback = null) {
 }
 
 export function writeStoredJson(key, value) {
-  const target = storageFor(key)
-  const written = safeSetItem(target, key, JSON.stringify(value))
-  if (SESSION_KEYS.has(key)) {
-    safeRemove(localStorage, key)
-  } else if (written) {
-    safeRemove(sessionStorage, key)
+  try {
+    return writeStoredItem(key, JSON.stringify(value))
+  } catch {
+    return false
   }
-  return written
 }
 
 export function removeStoredKey(key) {
-  safeRemove(localStorage, key)
-  safeRemove(sessionStorage, key)
+  safeRemove(getBrowserStorage('localStorage'), key)
+  safeRemove(getBrowserStorage('sessionStorage'), key)
 }
 
 export function clearClinicCache() {

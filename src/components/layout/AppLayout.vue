@@ -3,8 +3,16 @@ import { RouterView, useRoute } from 'vue-router'
 import { ref, provide, onMounted, onUnmounted } from 'vue'
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
+import { usePatientsStore } from '../../stores/patients'
+import { useConsultationsStore } from '../../stores/consultations'
+import { useAppointmentsStore } from '../../stores/appointments'
+import { useInventoryStore } from '../../stores/inventory'
 
 const route = useRoute()
+const patientsStore = usePatientsStore()
+const consultationsStore = useConsultationsStore()
+const appointmentsStore = useAppointmentsStore()
+const inventoryStore = useInventoryStore()
 const sidebarCollapsed = ref(false)
 const isMobile = ref(false)
 
@@ -13,9 +21,19 @@ function checkMobile() {
   if (isMobile.value) sidebarCollapsed.value = true
 }
 
+async function refreshWorkspaceData() {
+  await Promise.allSettled([
+    patientsStore.refreshFromApi(),
+    consultationsStore.refreshFromApi(),
+    appointmentsStore.refreshFromApi(),
+    inventoryStore.refreshFromApi(),
+  ])
+}
+
 onMounted(() => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
+  void refreshWorkspaceData()
 })
 onUnmounted(() => window.removeEventListener('resize', checkMobile))
 

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { usePatientsStore } from '../../stores/patients'
@@ -68,6 +68,14 @@ watch(searchQuery, () => {
 watch(() => sortedPatients.value.length, (count) => {
   const maxPage = Math.max(1, Math.ceil(count / PAGE_SIZE))
   if (currentPage.value > maxPage) currentPage.value = maxPage
+})
+
+onMounted(() => {
+  void Promise.allSettled([
+    patientsStore.refreshFromApi(),
+    consultationsStore.refreshFromApi(),
+    appointmentsStore.refreshFromApi(),
+  ])
 })
 
 function patientNameKey(patient) {

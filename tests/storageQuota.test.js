@@ -2,16 +2,28 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   getStoredItem,
+  writeStoredItem,
   writeStoredJson,
 } from '../src/utils/storage.js'
 
 class MemoryStorage {
-  constructor(shouldFailSet = () => false) {
+  constructor(options = {}) {
     this.map = new Map()
-    this.shouldFailSet = shouldFailSet
+    if (typeof options === 'function') {
+      this.shouldFailSet = options
+      this.shouldFailGet = () => false
+      this.shouldFailRemove = () => false
+      return
+    }
+    this.shouldFailSet = options.shouldFailSet || (() => false)
+    this.shouldFailGet = options.shouldFailGet || (() => false)
+    this.shouldFailRemove = options.shouldFailRemove || (() => false)
   }
 
   getItem(key) {
+    if (this.shouldFailGet(key)) {
+      throw new Error('Storage read blocked')
+    }
     return this.map.has(key) ? this.map.get(key) : null
   }
 
@@ -25,6 +37,9 @@ class MemoryStorage {
   }
 
   removeItem(key) {
+    if (this.shouldFailRemove(key)) {
+      throw new Error('Storage remove blocked')
+    }
     this.map.delete(key)
   }
 }
@@ -68,4 +83,24 @@ test('legacy local cache is kept when migration into session storage fails', () 
 
   assert.equal(getStoredItem('tcm_inventory'), '[{"id":"legacy"}]')
   assert.equal(localStorage.getItem('tcm_inventory'), '[{"id":"legacy"}]')
+})
+
+test('clinic cache read falls back when session storage read is blocked', () => {
+  const sessionStorage = new MemoryStorage({ shouldFailGet: (key) => key === 'tcm_patients' })
+  const localStorage = new MemoryStorage()
+  installStorage({ sessionStorage, localStorage })
+  localStorage.setItem('tcm_patients', '[{"id":"legacy-patient"}]')
+
+  assert.equal(getStoredItem('tcm_patients'), '[{"id":"legacy-patient"}]')
+})
+
+test('plain storage read and write do not throw when local storage is blocked', () => {
+  const localStorage = new MemoryStorage({
+    shouldFailGet: (key) => key === 'tcm_token',
+    shouldFailSet: (key) => key === 'tcm_token',
+  })
+  installStorage({ sessionStorage: new MemoryStorage(), localStorage })
+
+  assert.equal(getStoredItem('tcm_token'), null)
+  assert.equal(writeStoredItem('tcm_token', 'token-value'), false)
 })

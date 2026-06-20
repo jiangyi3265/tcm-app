@@ -471,6 +471,7 @@ onMounted(() => {
   if (route.query.filter === 'low_stock') {
     lowStockFilter.value = true
   }
+  void inventoryStore.refreshFromApi()
 })
 
 function toggleLowStockFilter() {

@@ -1,15 +1,26 @@
-import { readStoredJson, writeStoredJson } from './storage'
+import { getStoredItem, readStoredJson, removeStoredKey, writeStoredItem, writeStoredJson } from './storage'
 
 const TOKEN_KEY = 'tcm_token'
 const AUTH_KEY = 'tcm_auth'
+let runtimeToken = null
 
 function getToken() {
-  return localStorage.getItem(TOKEN_KEY)
+  return runtimeToken || getStoredItem(TOKEN_KEY)
+}
+
+export function setAuthToken(token) {
+  runtimeToken = token || null
+  if (token) {
+    writeStoredItem(TOKEN_KEY, token)
+  } else {
+    removeStoredKey(TOKEN_KEY)
+  }
 }
 
 function clearSession() {
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(AUTH_KEY)
+  runtimeToken = null
+  removeStoredKey(TOKEN_KEY)
+  removeStoredKey(AUTH_KEY)
 }
 
 function buildQuery(params = {}) {
