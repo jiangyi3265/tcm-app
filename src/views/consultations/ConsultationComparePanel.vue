@@ -183,6 +183,7 @@ function isDiffChanged(key) {
     :title="t('compare.title')"
     fullscreen
     :close-on-click-modal="false"
+    :close-on-press-escape="true"
     class="compare-fullscreen-dialog"
   >
     <template v-if="historyList.length === 0">
@@ -209,6 +210,9 @@ function isDiffChanged(key) {
         </el-button>
         <el-button size="small" type="primary" @click="copyAll" style="margin-left: 16px">
           {{ t('compare.copyAllToCurrent') }}
+        </el-button>
+        <el-button size="small" @click="emit('update:visible', false)">
+          {{ t('common.close') }}
         </el-button>
       </div>
 

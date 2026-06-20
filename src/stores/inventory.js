@@ -79,6 +79,20 @@ export const useInventoryStore = defineStore('inventory', () => {
     return Boolean(item?.isActive && !item?.deletedAt && usage > 0 && quantity < usage)
   }
 
+  function preserveExistingUsage(nextItems, previousItems = items.value) {
+    const previousById = new Map(previousItems.map((item) => [String(item.id), item]))
+    return nextItems.map((item) => {
+      const previous = previousById.get(String(item.id))
+      const incomingUsage = numericStockValue(item.last30DaysUsage)
+      const previousUsage = numericStockValue(previous?.last30DaysUsage)
+
+      if (incomingUsage <= 0 && previousUsage > 0) {
+        return { ...item, last30DaysUsage: previousUsage }
+      }
+      return item
+    })
+  }
+
   const lowStockItems = computed(() => items.value.filter(isLowStockItem))
 
   const itemsByCategory = computed(() => {
@@ -165,14 +179,16 @@ export const useInventoryStore = defineStore('inventory', () => {
       last30DaysUsage: updated.last30DaysUsage ?? current.last30DaysUsage ?? 0,
     }
     saveState()
-    await refreshFromApi()
+    await refreshFromApi({ preserveUsage: true })
     return true
   }
 
-  async function refreshFromApi() {
+  async function refreshFromApi(options = {}) {
     try {
+      const previous = items.value
       const list = await inventoryApi.list({ includeDeleted: true })
-      items.value = list.map(normalizeInventoryItem)
+      const normalized = list.map(normalizeInventoryItem)
+      items.value = options.preserveUsage ? preserveExistingUsage(normalized, previous) : normalized
       saveState()
     } catch (e) {
       console.warn('库存刷新失败:', e.message)

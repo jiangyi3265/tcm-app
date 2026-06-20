@@ -1091,6 +1091,9 @@ const fileTree = computed(() => {
                 size="small"
                 @click="nextCompare"
               />
+              <el-button size="small" type="warning" @click="compareMode = false">
+                {{ t('patientDetail.exitCompare') }}
+              </el-button>
             </div>
             <div class="compare-grid">
               <el-card class="compare-panel compare-old">
