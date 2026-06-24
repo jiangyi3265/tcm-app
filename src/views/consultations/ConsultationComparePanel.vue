@@ -388,14 +388,18 @@ function isDiffChanged(key) {
   align-items: center;
   gap: 12px;
   padding: 8px 0;
+  flex-wrap: wrap;
 }
 .compare-nav-info {
-  flex: 1;
+  flex: 1 1 320px;
+  min-width: 0;
   text-align: center;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 .compare-section {
   margin-bottom: 20px;
+  overflow-x: auto;
 }
 .compare-section-header {
   display: flex;
@@ -410,22 +414,27 @@ function isDiffChanged(key) {
 .compare-cell-pair {
   display: flex;
   gap: 12px;
+  align-items: stretch;
 }
 .compare-old {
   flex: 1;
+  min-width: 0;
   padding: 6px 8px;
   background: #fef0f0;
   border-radius: 4px;
   font-size: 13px;
   min-height: 24px;
+  overflow-wrap: anywhere;
 }
 .compare-new {
   flex: 1;
+  min-width: 0;
   padding: 6px 8px;
   background: #f0f9eb;
   border-radius: 4px;
   font-size: 13px;
   min-height: 24px;
+  overflow-wrap: anywhere;
 }
 .diff-changed {
   color: #e6a23c;
@@ -441,5 +450,36 @@ function isDiffChanged(key) {
 }
 .compare-new-text {
   color: #529b2e;
+}
+
+@media (max-width: 1180px) {
+  .compare-nav {
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .compare-nav-info {
+    order: -1;
+    flex-basis: 100%;
+    text-align: left;
+  }
+
+  .compare-nav :deep(.el-button) {
+    margin-left: 0 !important;
+  }
+
+  .compare-section :deep(.el-table) {
+    min-width: 760px;
+  }
+}
+
+@media (max-width: 768px) {
+  .compare-cell-pair {
+    flex-direction: column;
+  }
+
+  .compare-section :deep(.el-table) {
+    min-width: 680px;
+  }
 }
 </style>

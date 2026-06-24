@@ -184,7 +184,14 @@ function applyHerbSelection(target, herbId) {
 }
 
 function syncDraftHerb(draftRef, herbId) {
-  draftRef.value = applyHerbSelection(draftRef.value, herbId)
+  const current = draftRef?.value && typeof draftRef.value === 'object' ? draftRef.value : draftRef
+  const next = applyHerbSelection(current, herbId)
+  if (draftRef?.value && typeof draftRef.value === 'object') {
+    draftRef.value = next
+  } else if (current && typeof current === 'object') {
+    Object.assign(current, next)
+  }
+  return next
 }
 
 function syncRowHerb(row, herbId) {
@@ -729,8 +736,24 @@ const publicAppBaseUrl = computed(() => {
 })
 const publicBookingUrl = computed(() => `${publicAppBaseUrl.value}/booking`)
 const publicBookingEmbedUrl = computed(() => `${publicBookingUrl.value}?embed=1`)
+const publicBookingEmbedOrigin = computed(() => {
+  try {
+    return new URL(publicBookingEmbedUrl.value).origin
+  } catch (error) {
+    return 'https://www.otcm.app'
+  }
+})
 const publicBookingIframeCode = computed(() =>
-  `<iframe src="${publicBookingEmbedUrl.value}" title="OTCM online booking" style="width:100%;min-height:960px;border:0;border-radius:8px;" loading="lazy"></iframe>`,
+  `<iframe id="otcm-booking-frame" src="${publicBookingEmbedUrl.value}" title="OTCM online booking" style="width:100%;height:960px;border:0;border-radius:8px;display:block;" loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+<script>
+window.addEventListener('message', function (event) {
+  if (event.origin !== '${publicBookingEmbedOrigin.value}') return;
+  if (!event.data || event.data.type !== 'otcm-booking-height') return;
+  var frame = document.getElementById('otcm-booking-frame');
+  var height = Math.max(720, Number(event.data.height) || 960);
+  if (frame) frame.style.height = height + 'px';
+});
+<\/script>`,
 )
 const stripeWebhookUrl = computed(() => `${publicAppBaseUrl.value}/api/stripe/webhook`)
 

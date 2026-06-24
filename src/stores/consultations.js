@@ -87,6 +87,7 @@ export const useConsultationsStore = defineStore('consultations', () => {
       consultationId: genConsultId(),
       patientId: data.patientId,
       practitionerId: data.practitionerId,
+      appointmentId: data.appointmentId || null,
       parentConsultationId: data.parentConsultationId || null,
       date: data.date || todayDate(),
       status: 'draft',

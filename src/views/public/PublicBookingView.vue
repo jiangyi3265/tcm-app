@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { publicBookingApi } from '../../utils/api'
@@ -34,6 +34,8 @@ const isEmbedded = computed(() => {
   const value = new URLSearchParams(window.location.search).get('embed')
   return ['1', 'true', 'yes'].includes(String(value || '').trim().toLowerCase())
 })
+let embedResizeObserver = null
+let embedResizeTimer = null
 
 const form = ref({
   firstName: '',
@@ -131,7 +133,7 @@ const selectedDaySlots = computed(() => {
     .slice()
     .sort((left, right) => left.startTime.localeCompare(right.startTime))
 })
-const selectedSlot = computed(() => scheduleSlots.value.find((slot) => slot.startTime === selectedSlotValue.value) || null)
+const selectedSlot = computed(() => scheduleSlots.value.find((slot) => getSlotKey(slot) === selectedSlotValue.value) || null)
 const selectedDateLabel = computed(() => {
   if (!selectedDateValue.value) return ''
   const parsed = dayjs(selectedDateValue.value)
@@ -150,6 +152,16 @@ function formatWeekday(value) {
 function formatShortDate(value) {
   const parsed = dayjs(value)
   return parsed.isValid() ? parsed.format('MM-DD') : value
+}
+
+function getSlotKey(slot) {
+  if (!slot) return ''
+  return [
+    slot.startTime || '',
+    slot.endTime || '',
+    slot.assignedPractitionerId ?? slot.practitionerId ?? '',
+    slot.roomId ?? slot.assignedRoomId ?? '',
+  ].map((part) => String(part || '')).join('|')
 }
 
 function prevWeek() {
@@ -205,6 +217,8 @@ function normalizeSlot(slot) {
     date: slot?.date || start.format('YYYY-MM-DD'),
     startTime: start.format('YYYY-MM-DD HH:mm:ss'),
     endTime: end.format('YYYY-MM-DD HH:mm:ss'),
+    roomId: slot?.roomId ?? slot?.assignedRoomId ?? null,
+    assignedRoomId: slot?.assignedRoomId ?? slot?.roomId ?? null,
     status,
     assignedPractitionerId: slot?.assignedPractitionerId ?? slot?.practitionerId ?? null,
     availablePractitionerIds: Array.isArray(slot?.availablePractitionerIds) ? slot.availablePractitionerIds : [],
@@ -262,8 +276,8 @@ function syncSelectionFromSchedule() {
   const nextSlots = Array.isArray(matchedDay?.slots)
     ? matchedDay.slots.filter((slot) => slot.status === 'available').sort((left, right) => left.startTime.localeCompare(right.startTime))
     : []
-  if (!nextSlots.some((slot) => slot.startTime === selectedSlotValue.value)) {
-    selectedSlotValue.value = nextSlots[0]?.startTime || ''
+  if (!nextSlots.some((slot) => getSlotKey(slot) === selectedSlotValue.value)) {
+    selectedSlotValue.value = nextSlots[0] ? getSlotKey(nextSlots[0]) : ''
   }
 }
 
@@ -275,7 +289,7 @@ function selectDate(day) {
 function selectSlot(slot) {
   if (!slot || slot.status !== 'available') return
   selectedDateValue.value = slot.date
-  selectedSlotValue.value = slot.startTime
+  selectedSlotValue.value = getSlotKey(slot)
 }
 
 function isSelectedDate(day) {
@@ -283,7 +297,40 @@ function isSelectedDate(day) {
 }
 
 function isSelectedSlot(slot) {
-  return selectedSlotValue.value === slot?.startTime
+  return selectedSlotValue.value === getSlotKey(slot)
+}
+
+function postEmbedHeight() {
+  if (!isEmbedded.value || typeof window === 'undefined' || window.parent === window) return
+  const doc = document.documentElement
+  const body = document.body
+  const height = Math.max(
+    doc?.scrollHeight || 0,
+    body?.scrollHeight || 0,
+    doc?.offsetHeight || 0,
+    body?.offsetHeight || 0,
+  )
+  window.parent.postMessage({ type: 'otcm-booking-height', height }, '*')
+}
+
+function scheduleEmbedHeightPost() {
+  if (!isEmbedded.value || typeof window === 'undefined') return
+  if (embedResizeTimer) window.clearTimeout(embedResizeTimer)
+  embedResizeTimer = window.setTimeout(() => {
+    embedResizeTimer = null
+    postEmbedHeight()
+  }, 50)
+}
+
+function setupEmbedHeightBridge() {
+  if (!isEmbedded.value || typeof window === 'undefined') return
+  nextTick(scheduleEmbedHeightPost)
+  if ('ResizeObserver' in window) {
+    embedResizeObserver = new ResizeObserver(scheduleEmbedHeightPost)
+    if (document.body) embedResizeObserver.observe(document.body)
+    if (document.documentElement) embedResizeObserver.observe(document.documentElement)
+  }
+  window.addEventListener('load', scheduleEmbedHeightPost)
 }
 
 async function loadOptions() {
@@ -321,8 +368,8 @@ watch(practitionerOptions, (items) => {
 })
 
 watch(selectedDateValue, () => {
-  if (!selectedDaySlots.value.some((slot) => slot.startTime === selectedSlotValue.value)) {
-    selectedSlotValue.value = selectedDaySlots.value[0]?.startTime || ''
+  if (!selectedDaySlots.value.some((slot) => getSlotKey(slot) === selectedSlotValue.value)) {
+    selectedSlotValue.value = selectedDaySlots.value[0] ? getSlotKey(selectedDaySlots.value[0]) : ''
   }
 })
 
@@ -454,8 +501,21 @@ function copyBookingUrl() {
   ElMessage.info(url)
 }
 
+watch(
+  [loading, scheduleLoading, scheduleDays, selectedDateValue, selectedSlotValue, successState],
+  () => { nextTick(scheduleEmbedHeightPost) },
+  { deep: true },
+)
+
 onMounted(() => {
   void loadOptions()
+  setupEmbedHeightBridge()
+})
+
+onBeforeUnmount(() => {
+  if (embedResizeTimer && typeof window !== 'undefined') window.clearTimeout(embedResizeTimer)
+  embedResizeObserver?.disconnect()
+  if (typeof window !== 'undefined') window.removeEventListener('load', scheduleEmbedHeightPost)
 })
 </script>
 
@@ -563,7 +623,7 @@ onMounted(() => {
           <div v-else class="time-block-list">
             <button
               v-for="slot in selectedDaySlots"
-              :key="slot.startTime"
+              :key="getSlotKey(slot)"
               type="button"
               class="time-block-button"
               :class="{ active: isSelectedSlot(slot) }"
