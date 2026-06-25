@@ -41,6 +41,7 @@ function normalizeScheduleParams(params = {}) {
 }
 
 async function request(path, { method = 'GET', body, auth = true, timeoutMs = 0 } = {}) {
+  const normalizedMethod = String(method || 'GET').toUpperCase()
   const headers = {
     'Content-Type': 'application/json',
   }
@@ -61,10 +62,11 @@ async function request(path, { method = 'GET', body, auth = true, timeoutMs = 0 
   let response
   try {
     response = await fetch(path, {
-      method,
+      method: normalizedMethod,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: controller?.signal,
+      ...(normalizedMethod === 'GET' ? { cache: 'no-store' } : {}),
     })
   } catch (error) {
     if (error?.name === 'AbortError') {

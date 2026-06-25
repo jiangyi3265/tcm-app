@@ -206,6 +206,9 @@ const aiInterimTranscript = ref('')
 const aiSpeechLang = ref(locale.value === 'zh-CN' ? 'zh-CN' : 'en-US')
 const aiLastApplied = ref(null)
 let aiRecognition = null
+let consultationSavePromise = null
+let consultationHydrationSeq = 0
+let flushingRxBeforeConsultationSave = false
 
 function cloneJson(value, fallback = null) {
   if (value === undefined) return fallback
@@ -309,6 +312,89 @@ function buildFormFromConsultation(record = {}) {
 function applySavedConsultation(record) {
   consultation.value = record
   form.value = buildFormFromConsultation(record)
+}
+
+const SERVER_METADATA_FIELDS = [
+  'id',
+  'consultationId',
+  'status',
+  'version',
+  'modifications',
+  'lockedAt',
+  'createdAt',
+  'updatedAt',
+  'deletedAt',
+  'completedAt',
+  'completedBy',
+  'reactivatedAt',
+  'reactivatedBy',
+  'reactivatedFromVersion',
+  'paidAmount',
+  'outstandingAmount',
+  'paymentStatus',
+  'paymentRecords',
+  'paymentMethod',
+  'paymentDate',
+  'stripePaymentIntentId',
+  'stripeCheckoutSessionId',
+  'dispensingCompleted',
+  'dispensingCompletedAt',
+  'dispensedBy',
+  'reportPdfUrl',
+  'reportPdfPath',
+  'consultationPdfUrl',
+  'consultationPdfPath',
+  'invoicePdfUrl',
+  'invoicePdfPath',
+]
+
+const PRESCRIPTION_SYNC_FIELDS = [
+  ...SERVER_METADATA_FIELDS,
+  'prescriptions',
+  'herbals',
+  'formulaName',
+  'prescriptionType',
+  'totalWithoutTax',
+  'taxAmount',
+  'totalAmount',
+]
+
+function copyRecordFieldsToForm(record, fieldNames) {
+  if (!record) return
+  const nextForm = buildFormFromConsultation(record)
+  fieldNames.forEach((field) => {
+    if (nextForm[field] !== undefined) {
+      form.value[field] = cloneJson(nextForm[field], nextForm[field])
+    }
+  })
+}
+
+function applySavedConsultationMetadata(record) {
+  if (!record) return
+  consultation.value = record
+  copyRecordFieldsToForm(record, SERVER_METADATA_FIELDS)
+  if (!form.value.id && record.id) form.value.id = record.id
+  if (!form.value.consultationId && record.consultationId) form.value.consultationId = record.consultationId
+}
+
+function applyPrescriptionSyncResult(record) {
+  if (!record) return
+  consultation.value = record
+  copyRecordFieldsToForm(record, PRESCRIPTION_SYNC_FIELDS)
+}
+
+function applyPrescriptionResultAndMaybeSync(record, requestSnapshot, requestStartedClean = false) {
+  const formUnchangedOutsideRequest = requestSnapshot && buildFormSnapshot() === requestSnapshot
+  applyPrescriptionSyncResult(record)
+  if (requestStartedClean && formUnchangedOutsideRequest) {
+    syncSavedSnapshot()
+  }
+  return requestStartedClean && formUnchangedOutsideRequest
+}
+
+function syncSavedSnapshotFromRequest(requestSnapshot) {
+  lastSavedSnapshot.value = requestSnapshot || buildFormSnapshot()
+  unsavedTrackingReady.value = true
 }
 
 function normalizeChiefComplaintDuration(value) {
@@ -875,6 +961,23 @@ async function saveHistoryMedStrict() {
   editingHistoryMed.value = false
 }
 
+async function hydrateCurrentConsultationFromApi(id, baselineSnapshot) {
+  const requestSeq = ++consultationHydrationSeq
+  try {
+    const fresh = await consultStore.refreshConsultationFromApi(id)
+    if (requestSeq !== consultationHydrationSeq || !fresh) return
+    if (buildFormSnapshot() === baselineSnapshot) {
+      applySavedConsultation(fresh)
+      refreshTongueImagePreview()
+      syncSavedSnapshot()
+    } else {
+      applySavedConsultationMetadata(fresh)
+    }
+  } catch (error) {
+    console.warn('Failed to refresh consultation detail:', error)
+  }
+}
+
 onMounted(() => {
   formulasStore.refreshFromApi().catch(() => {})
   if (isNew && (!form.value.currency || form.value.currency === 'CNY')) {
@@ -939,6 +1042,9 @@ onMounted(() => {
   }
   applyHistorySnapshotToForm()
   syncSavedSnapshot()
+  if (!isNew && consultId) {
+    hydrateCurrentConsultationFromApi(consultId, buildFormSnapshot())
+  }
   window.addEventListener('beforeunload', handleBeforeUnload)
 })
 
@@ -1397,13 +1503,25 @@ function syncRxFormFromConsultation(rxId) {
 
 async function ensureConsultationForPrescription() {
   if (currentConsultationId.value) return currentConsultationId.value
-  const created = await persistConsultationDraft({ silent: true, syncRoute: true })
+  const created = await persistConsultationDraft({ silent: true, syncRoute: true, flushRx: false })
   return created?.id || currentConsultationId.value
+}
+
+async function waitForConsultationSaveToFinish({ ignoreErrors = false } = {}) {
+  if (!consultationSavePromise) return
+  try {
+    await consultationSavePromise
+  } catch (error) {
+    if (!ignoreErrors) throw error
+  }
 }
 
 async function persistRxDraftPayload(payload) {
   const consultationId = await ensureConsultationForPrescription()
   if (!consultationId) throw new Error(t('consultation.saveBefore'))
+  if (!flushingRxBeforeConsultationSave) {
+    await waitForConsultationSaveToFinish()
+  }
   return consultStore.syncPrescription(consultationId, {
     prescription: payload,
     totals: buildRxTotals(),
@@ -1428,6 +1546,8 @@ async function syncPrescriptionDraft({ silent = true } = {}) {
   if (!shouldPersistRxDraft(payload)) return null
 
   const requestSnapshot = currentSnapshot
+  const requestConsultationSnapshot = buildFormSnapshot()
+  const requestStartedClean = !hasUnsavedConsultationChanges.value
   const requestSessionId = rxEditingSessionId.value
   pendingRxAutosave.value = false
   rxAutosaving.value = true
@@ -1440,8 +1560,7 @@ async function syncPrescriptionDraft({ silent = true } = {}) {
       activeSessionId: rxEditingSessionId.value,
       showDialog: showRxDialog.value,
     })) {
-      applySavedConsultation(updated)
-      syncSavedSnapshot()
+      applyPrescriptionResultAndMaybeSync(updated, requestConsultationSnapshot, requestStartedClean)
       if (buildRxDraftSnapshot() === requestSnapshot) {
         syncRxFormFromConsultation(payload.id)
       } else {
@@ -1497,6 +1616,8 @@ async function persistCopiedPrescriptions(sourcePrescriptions = []) {
 
   for (const prescription of sourcePrescriptions) {
     if (!prescription?.id) prescription.id = buildRxId()
+    const requestConsultationSnapshot = buildFormSnapshot()
+    const requestStartedClean = !hasUnsavedConsultationChanges.value
     const cloned = {
       ...prescription,
       items: (prescription.items || []).map((item) => ({ ...item })),
@@ -1507,8 +1628,7 @@ async function persistCopiedPrescriptions(sourcePrescriptions = []) {
       prescription: cloned,
       totals: buildRxTotals(),
     })
-    applySavedConsultation(updated)
-    syncSavedSnapshot()
+    applyPrescriptionResultAndMaybeSync(updated, requestConsultationSnapshot, requestStartedClean)
   }
 }
 
@@ -1542,18 +1662,58 @@ onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', handleViewportResize)
 })
 
-async function persistConsultationDraft({ silent = false, syncRoute = true } = {}) {
+async function flushRxDraftBeforeConsultationSave() {
+  if (!currentConsultationId.value || isReadOnly.value || suspendRxAutosave.value) {
+    return
+  }
+  clearRxAutosaveTimer()
+  flushingRxBeforeConsultationSave = true
+  try {
+    if (showRxDialog.value && hasUnsavedRxDialogChanges.value) {
+      await syncPrescriptionDraft({ silent: true })
+    }
+    await waitForRxAutosaveToFinish()
+  } finally {
+    flushingRxBeforeConsultationSave = false
+  }
+}
+
+async function persistConsultationDraft(options = {}) {
+  if (consultationSavePromise) {
+    await waitForConsultationSaveToFinish({ ignoreErrors: true })
+  }
+  const task = doPersistConsultationDraft(options)
+  consultationSavePromise = task
+  try {
+    return await task
+  } finally {
+    if (consultationSavePromise === task) {
+      consultationSavePromise = null
+    }
+  }
+}
+
+async function doPersistConsultationDraft({ silent = false, syncRoute = true, flushRx = true } = {}) {
   saving.value = true
   try {
+    if (flushRx) {
+      await flushRxDraftBeforeConsultationSave()
+    }
     applyHistorySnapshotToForm()
     const data = buildPersistPayload()
+    const requestSnapshot = JSON.stringify(data)
     const targetId = currentConsultationId.value
 
     if (!targetId) {
       const created = await consultStore.createConsultation(data)
-      applySavedConsultation(created)
-      refreshTongueImagePreview()
-      syncSavedSnapshot()
+      if (buildFormSnapshot() === requestSnapshot) {
+        applySavedConsultation(created)
+        refreshTongueImagePreview()
+        syncSavedSnapshot()
+      } else {
+        applySavedConsultationMetadata(created)
+        syncSavedSnapshotFromRequest(requestSnapshot)
+      }
       if (syncRoute) {
         await navigateWithoutUnsavedPrompt(() => router.replace(`/patients/${patientId}/consultations/${created.id}`))
       }
@@ -1567,9 +1727,14 @@ async function persistConsultationDraft({ silent = false, syncRoute = true } = {
     if (!updated) {
       throw new Error(t('common.operationFailed'))
     }
-    applySavedConsultation(updated)
-    refreshTongueImagePreview()
-    syncSavedSnapshot()
+    if (buildFormSnapshot() === requestSnapshot) {
+      applySavedConsultation(updated)
+      refreshTongueImagePreview()
+      syncSavedSnapshot()
+    } else {
+      applySavedConsultationMetadata(updated)
+      syncSavedSnapshotFromRequest(requestSnapshot)
+    }
     if (!silent) {
       ElMessage.success(t('consultation.saved'))
     }
@@ -1632,17 +1797,19 @@ async function saveRx() {
   try {
     await waitForRxAutosaveToFinish({ ignoreErrors: true })
     const editingPayload = buildPrescriptionPayload(rxForm.value, 'editing')
+    const syncRequestSnapshot = buildFormSnapshot()
+    const syncRequestStartedClean = !hasUnsavedConsultationChanges.value
     const synced = await persistRxDraftPayload(editingPayload)
-    applySavedConsultation(synced)
-    syncSavedSnapshot()
+    applyPrescriptionResultAndMaybeSync(synced, syncRequestSnapshot, syncRequestStartedClean)
     syncRxFormFromConsultation(editingPayload.id)
     const consultationId = synced?.id || currentConsultationId.value
     if (!consultationId) throw new Error(t('consultation.saveBefore'))
+    const completeRequestSnapshot = buildFormSnapshot()
+    const completeRequestStartedClean = !hasUnsavedConsultationChanges.value
     const updated = await consultStore.completePrescription(consultationId, editingPayload.id, {
       totals: buildRxTotals(buildTotalsSourceWithPrescriptionStatus(editingPayload.id, 'pending')),
     })
-    applySavedConsultation(updated)
-    syncSavedSnapshot()
+    applyPrescriptionResultAndMaybeSync(updated, completeRequestSnapshot, completeRequestStartedClean)
     showRxDialog.value = false
   } catch (e) {
     ElMessage.error(e.message || t('common.operationFailed'))
@@ -1663,11 +1830,12 @@ async function deleteRx(target) {
     return
   }
   try {
+    const requestSnapshot = buildFormSnapshot()
+    const requestStartedClean = !hasUnsavedConsultationChanges.value
     const updated = await consultStore.deletePrescription(currentConsultationId.value, targetRx.id, {
       totals: buildRxTotals(buildTotalsSourceWithPrescriptionStatus(targetRx.id, 'deleted')),
     })
-    applySavedConsultation(updated)
-    syncSavedSnapshot()
+    applyPrescriptionResultAndMaybeSync(updated, requestSnapshot, requestStartedClean)
   } catch (error) {
     ElMessage.error(error.message || t('common.operationFailed'))
   }
@@ -1684,11 +1852,12 @@ async function completeRxRow(row) {
       invalidateRxEditingSession()
       await waitForRxAutosaveToFinish({ ignoreErrors: true })
     }
+    const requestSnapshot = buildFormSnapshot()
+    const requestStartedClean = !hasUnsavedConsultationChanges.value
     const updated = await consultStore.completePrescription(currentConsultationId.value, row.id, {
       totals: buildRxTotals(buildTotalsSourceWithPrescriptionStatus(row.id, 'pending')),
     })
-    applySavedConsultation(updated)
-    syncSavedSnapshot()
+    applyPrescriptionResultAndMaybeSync(updated, requestSnapshot, requestStartedClean)
     if (isEditingSameRx) {
       showRxDialog.value = false
     }
@@ -1701,9 +1870,10 @@ async function completeRxRow(row) {
 async function reopenRxRow(row) {
   if (!row?.id || !currentConsultationId.value) return
   try {
+    const requestSnapshot = buildFormSnapshot()
+    const requestStartedClean = !hasUnsavedConsultationChanges.value
     const updated = await consultStore.reopenPrescription(currentConsultationId.value, row.id)
-    applySavedConsultation(updated)
-    syncSavedSnapshot()
+    applyPrescriptionResultAndMaybeSync(updated, requestSnapshot, requestStartedClean)
     ElMessage.success(t('consultation.rxReopened'))
   } catch (error) {
     ElMessage.error(error.message || t('common.operationFailed'))

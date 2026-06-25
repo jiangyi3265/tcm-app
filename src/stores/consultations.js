@@ -54,6 +54,21 @@ export const useConsultationsStore = defineStore('consultations', () => {
     return consultations.value
   }
 
+  async function refreshConsultationFromApi(id) {
+    if (!id) return null
+    const record = await consultationsApi.get(id)
+    if (!record) return null
+    const normalized = normalizeConsultation(record)
+    const idx = consultations.value.findIndex((c) => c.id === normalized.id)
+    if (idx === -1) {
+      consultations.value.push(normalized)
+    } else {
+      consultations.value[idx] = normalized
+    }
+    saveState()
+    return normalized
+  }
+
   async function refreshInventoryAfterPrescriptionChange() {
     try {
       await inventoryStore.refreshFromApi()
@@ -348,6 +363,7 @@ export const useConsultationsStore = defineStore('consultations', () => {
     getOutstandingAmount,
     getPaymentStatus,
     refreshFromApi,
+    refreshConsultationFromApi,
     getConsultation, getPatientConsultations, getPractitionerConsultations, getLastConsultation,
     createConsultation, updateConsultation, completeConsultation, reactivateConsultation, markAsPaid, updateInvoicePricing,
     deleteConsultation, restoreConsultation, physicalDeleteConsultation,
