@@ -199,6 +199,7 @@ const invoicePdfGenerating = ref(false)
 const emailSending = ref(false)
 const serverDocuments = ref([])
 const documentsLoading = ref(false)
+const pricingSettingsRefreshing = ref(false)
 const aiListening = ref(false)
 const aiAnalyzing = ref(false)
 const aiTranscript = ref('')
@@ -673,6 +674,24 @@ function normalizeServicePriceListSelection(selection) {
   return selected
 }
 
+async function refreshPricingSettingsIfNeeded({ force = false } = {}) {
+  if (pricingSettingsRefreshing.value) return
+  if (!force && settingsStore.activePriceLists.length > 0) return
+  pricingSettingsRefreshing.value = true
+  try {
+    await settingsStore.refreshFromApi()
+    form.value.servicePriceList = normalizeServicePriceListSelection(form.value.servicePriceList)
+  } catch (error) {
+    console.warn('Failed to refresh pricing settings:', error)
+  } finally {
+    pricingSettingsRefreshing.value = false
+  }
+}
+
+function onPricingSelectVisible(open) {
+  if (open) void refreshPricingSettingsIfNeeded()
+}
+
 function formatPerDoseSummary(row, quantity) {
   if (row.packetsPerDose != null && row.convertedQty != null && row.convertedUnit) {
     if (locale.value === 'zh-CN') {
@@ -979,6 +998,7 @@ async function hydrateCurrentConsultationFromApi(id, baselineSnapshot) {
 }
 
 onMounted(() => {
+  void refreshPricingSettingsIfNeeded({ force: true })
   formulasStore.refreshFromApi().catch(() => {})
   if (isNew && (!form.value.currency || form.value.currency === 'CNY')) {
     form.value.currency = settingsStore.currency || 'CAD'
@@ -1049,8 +1069,17 @@ onMounted(() => {
 })
 
 watch(activeTab, (tab) => {
+  if (tab === 'pricing') {
+    void refreshPricingSettingsIfNeeded()
+  }
   if (tab === 'documents') {
     loadConsultationFiles().catch(() => {})
+  }
+})
+
+watch(() => settingsStore.activePriceLists.length, (count) => {
+  if (count > 0) {
+    form.value.servicePriceList = normalizeServicePriceListSelection(form.value.servicePriceList)
   }
 })
 
@@ -3724,8 +3753,10 @@ async function handleSendPreviewEmail() {
                 :disabled="isReadOnly"
                 placeholder="Select price list"
                 clearable
+                :loading="pricingSettingsRefreshing"
                 size="small"
                 style="width:200px"
+                @visible-change="onPricingSelectVisible"
               >
                 <el-option
                   v-for="pl in settingsStore.activePriceLists"
@@ -3757,8 +3788,10 @@ async function handleSendPreviewEmail() {
                   :allow-create="false"
                   size="small"
                   :placeholder="t('consultation.serviceNamePlaceholder')"
+                  :loading="pricingSettingsRefreshing"
                   style="width:100%"
                   @change="onServiceSelect(row, $event)"
+                  @visible-change="onPricingSelectVisible"
                 >
                   <el-option
                     v-for="opt in priceListServiceOptions"

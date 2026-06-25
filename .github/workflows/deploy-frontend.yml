@@ -22,6 +22,7 @@ jobs:
       DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
       WEB_ROOT: /www/wwwroot/www.otcm.app
       VITE_PUBLIC_APP_BASE_URL: https://www.otcm.app
+      VITE_APP_VERSION: ${{ github.sha }}
 
     steps:
       - name: Checkout

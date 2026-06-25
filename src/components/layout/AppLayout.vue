@@ -7,12 +7,14 @@ import { usePatientsStore } from '../../stores/patients'
 import { useConsultationsStore } from '../../stores/consultations'
 import { useAppointmentsStore } from '../../stores/appointments'
 import { useInventoryStore } from '../../stores/inventory'
+import { useSettingsStore } from '../../stores/settings'
 
 const route = useRoute()
 const patientsStore = usePatientsStore()
 const consultationsStore = useConsultationsStore()
 const appointmentsStore = useAppointmentsStore()
 const inventoryStore = useInventoryStore()
+const settingsStore = useSettingsStore()
 const sidebarCollapsed = ref(false)
 const isMobile = ref(false)
 
@@ -27,6 +29,7 @@ async function refreshWorkspaceData() {
     consultationsStore.refreshFromApi(),
     appointmentsStore.refreshFromApi(),
     inventoryStore.refreshFromApi(),
+    settingsStore.refreshFromApi(),
   ])
 }
 

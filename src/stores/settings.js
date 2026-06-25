@@ -261,8 +261,10 @@ export const useSettingsStore = defineStore('settings', () => {
   // 每个医师的预约间隔: { [practitionerId]: minutes }
   const practitionerIntervals = ref({})
 
-  function init() {
-    const data = readStoredJson('tcm_settings', null)
+  let refreshPromise = null
+
+  function applySettingsBundle(bundle = {}) {
+    const data = bundle && typeof bundle === 'object' ? bundle : {}
     taxRate.value = data?.taxRate ?? 0.13
     rooms.value = normalizeRooms(data?.rooms || [])
     serviceTypes.value = normalizeServiceTypes(data?.serviceTypes || SERVICE_TYPES)
@@ -276,8 +278,8 @@ export const useSettingsStore = defineStore('settings', () => {
     clinicPhone.value = data?.clinicPhone || ''
     currency.value = data?.currency || DEFAULT_CURRENCY
     thirdPartyInvoicePng.value = data?.thirdPartyInvoicePng || data?.thirdPartySignature?.path || data?.thirdPartySignaturePath || ''
-    priceLists.value = data?.priceLists || []
-    customChiefComplaints.value = data?.customChiefComplaints || []
+    priceLists.value = Array.isArray(data?.priceLists) ? data.priceLists : []
+    customChiefComplaints.value = Array.isArray(data?.customChiefComplaints) ? data.customChiefComplaints : []
     patentMedicines.value = normalizeEditableList(data?.patentMedicines, DEFAULT_PATENT_MEDICINES)
     formulaCategories.value = normalizeEditableList(data?.formulaCategories, DEFAULT_FORMULA_CATEGORIES)
     differentiationNames.value = normalizeEditableList(data?.differentiationNames, DEFAULT_DIFFERENTIATION_NAMES)
@@ -300,6 +302,24 @@ export const useSettingsStore = defineStore('settings', () => {
     }
     stripeSettings.value = normalizeStripeSettings(data?.stripeSettings)
     practitionerIntervals.value = data?.practitionerIntervals || {}
+  }
+
+  function init() {
+    applySettingsBundle(readStoredJson('tcm_settings', null))
+  }
+
+  async function refreshFromApi() {
+    if (refreshPromise) return refreshPromise
+    refreshPromise = settingsApi.getBundle()
+      .then((data) => {
+        applySettingsBundle(data)
+        saveState()
+        return data
+      })
+      .finally(() => {
+        refreshPromise = null
+      })
+    return refreshPromise
   }
 
   function saveState() {
@@ -560,6 +580,7 @@ export const useSettingsStore = defineStore('settings', () => {
     updateServiceType,
     deleteServiceType,
     updateSettings,
+    refreshFromApi,
     addPriceList,
     updatePriceList,
     deletePriceList,

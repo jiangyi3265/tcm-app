@@ -11,6 +11,7 @@ import router from './router'
 import i18n from './i18n'
 import { applyBootstrapToLocalStorage, bootstrapApi } from './utils/api'
 import { getStoredItem } from './utils/storage'
+import { initAppVersionWatcher } from './utils/appVersion'
 
 async function preloadBootstrapData() {
   const token = getStoredItem('tcm_token')
@@ -24,6 +25,7 @@ async function preloadBootstrapData() {
 }
 
 await preloadBootstrapData()
+initAppVersionWatcher()
 
 const app = createApp(App)
 const pinia = createPinia()
