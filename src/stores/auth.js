@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { naturalCompareText } from '../utils/naturalSort'
-import { applyBootstrapToLocalStorage, authApi, bootstrapApi, setAuthToken, usersApi } from '../utils/api'
+import { authApi, setAuthToken, usersApi } from '../utils/api'
 import { clearClinicCache, getStoredItem, readStoredJson, writeStoredJson } from '../utils/storage'
 
 const STORAGE_KEY = 'tcm_auth'
@@ -48,29 +48,42 @@ function comparePractitioners(left, right) {
 export const useAuthStore = defineStore('auth', () => {
   const currentUser = ref(null)
   const users = ref([])
+  let usersRefreshPromise = null
 
-  async function loadUsers() {
+  async function loadUsers({ background = false } = {}) {
     users.value = readStoredJson(USERS_KEY, []) || []
     mergeCurrentUserFromUsers()
 
     const token = getStoredItem(TOKEN_KEY)
     if (!token) return
 
-    try {
-      const payload = await bootstrapApi.fetch()
-      applyBootstrapToLocalStorage(payload)
-      users.value = Array.isArray(payload?.users)
-        ? payload.users
-        : readStoredJson(USERS_KEY, []) || []
-      mergeCurrentUserFromUsers()
-    } catch {
-      // Keep the cached user list if the bootstrap refresh fails.
+    if (!usersRefreshPromise) {
+      usersRefreshPromise = (async () => {
+        const list = await usersApi.list()
+        users.value = Array.isArray(list)
+          ? list
+          : readStoredJson(USERS_KEY, []) || []
+        saveUsers()
+        mergeCurrentUserFromUsers()
+      })()
+        .catch(() => {
+          // Keep the cached user list if the bootstrap refresh fails.
+        })
+        .finally(() => {
+          usersRefreshPromise = null
+        })
     }
+
+    if (background) {
+      void usersRefreshPromise
+      return
+    }
+    await usersRefreshPromise
   }
 
   function init() {
     currentUser.value = readStoredJson(STORAGE_KEY, null)?.currentUser || null
-    void loadUsers()
+    void loadUsers({ background: true })
   }
 
   function saveState() {
@@ -105,21 +118,21 @@ export const useAuthStore = defineStore('auth', () => {
       currentUser.value = result.user || null
       saveState()
 
-      try {
-        const bootstrap = await bootstrapApi.fetch()
-        applyBootstrapToLocalStorage(bootstrap)
-      } catch {
-        // Allow login to succeed even if the bootstrap refresh fails.
+      if (result.user?.id && !users.value.some((user) => String(user.id) === String(result.user.id))) {
+        users.value = [result.user, ...users.value]
+        saveUsers()
       }
 
-      await loadUsers()
+      void loadUsers({ background: true })
       if (hasUserRole(currentUser.value, 'apprentice')) {
-        try {
-          const updated = await usersApi.recordApprenticeSession('login')
-          syncUser(updated)
-        } catch {
-          // Tracking should not block login.
-        }
+        void (async () => {
+          try {
+            const updated = await usersApi.recordApprenticeSession('login')
+            syncUser(updated)
+          } catch {
+            // Tracking should not block login.
+          }
+        })()
       }
       return { success: true }
     } catch (e) {

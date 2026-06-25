@@ -341,18 +341,44 @@ function getColdHeat(consult) {
 // ── 就诊历史对比 ──
 const compareMode = ref(false)
 const compareIndex = ref(0)
+const compareRefreshing = ref(false)
+const latestConsultation = computed(() => consultations.value[0] || null)
+const historicalConsultations = computed(() => consultations.value.slice(1))
 
 const compareConsultation = computed(() => {
-  if (!compareMode.value || consultations.value.length < 2) return null
-  return consultations.value[compareIndex.value]
+  if (!compareMode.value || historicalConsultations.value.length === 0) return null
+  return historicalConsultations.value[compareIndex.value] || null
 })
-const compareDisplayOrder = computed(() => getHistoryDisplayOrder(compareIndex.value, consultations.value.length))
+const compareDisplayOrder = computed(() => getHistoryDisplayOrder(compareIndex.value, historicalConsultations.value.length))
 
 function prevCompare() {
-  compareIndex.value = getOlderHistoryIndex(compareIndex.value, consultations.value.length)
+  compareIndex.value = getOlderHistoryIndex(compareIndex.value, historicalConsultations.value.length)
 }
 function nextCompare() {
   compareIndex.value = getNewerHistoryIndex(compareIndex.value)
+}
+
+async function refreshCompareHistory() {
+  if (compareRefreshing.value) return
+  compareRefreshing.value = true
+  try {
+    await consultationsStore.refreshFromApi()
+    if (compareIndex.value >= historicalConsultations.value.length) {
+      compareIndex.value = Math.max(0, historicalConsultations.value.length - 1)
+    }
+  } catch (error) {
+    console.warn('Failed to refresh patient consultation history:', error)
+  } finally {
+    compareRefreshing.value = false
+  }
+}
+
+function toggleCompareMode() {
+  compareMode.value = !compareMode.value
+  compareIndex.value = 0
+  if (compareMode.value) {
+    void refreshCompareHistory()
+  }
 }
 
 // ── 快速拷贝到新诊疗 ──
@@ -1063,7 +1089,8 @@ const fileTree = computed(() => {
                 v-if="consultations.length >= 2"
                 size="small"
                 :type="compareMode ? 'warning' : ''"
-                @click="compareMode = !compareMode; compareIndex = 0"
+                :loading="compareRefreshing"
+                @click="toggleCompareMode"
               >
                 <el-icon><Switch /></el-icon>
                 {{ compareMode ? t('patientDetail.exitCompare') : t('patientDetail.historyCompare') }}
@@ -1073,17 +1100,18 @@ const fileTree = computed(() => {
           </div>
 
           <!-- 对比模式 -->
-          <div v-if="compareMode && consultations.length >= 2" class="compare-mode">
+          <div v-if="compareMode && historicalConsultations.length > 0" v-loading="compareRefreshing" class="compare-mode">
             <div class="compare-nav">
               <el-button
-                :disabled="!canSelectOlderHistory(compareIndex, consultations.length)"
+                :disabled="!canSelectOlderHistory(compareIndex, historicalConsultations.length)"
                 :icon="'ArrowLeft'"
                 circle
                 size="small"
                 @click="prevCompare"
               />
               <span class="compare-label">
-                {{ formatDate(compareConsultation?.date) }} ↔ {{ formatDate(consultations[0]?.date) }}（{{ compareDisplayOrder }}/{{ consultations.length }}）
+                {{ formatDate(compareConsultation?.date) }} -> {{ formatDate(latestConsultation?.date) }}
+                ({{ compareDisplayOrder }} / {{ historicalConsultations.length }})
               </span>
               <el-button
                 :disabled="!canSelectNewerHistory(compareIndex)"
@@ -1126,27 +1154,27 @@ const fileTree = computed(() => {
               </el-card>
               <el-card class="compare-panel compare-new">
                 <template #header>
-                  <span style="color:#2d6a4f; font-weight:600">{{ t('patientDetail.latestRecord') }} · {{ formatDate(consultations[0]?.date) }}</span>
+                  <span style="color:#2d6a4f; font-weight:600">{{ t('patientDetail.latestRecord') }} - {{ formatDate(latestConsultation?.date) }}</span>
                 </template>
                 <el-descriptions :column="1" size="small" border>
-                  <el-descriptions-item :label="t('patientDetail.chiefComplaint')">{{ consultations[0]?.chiefComplaint || '-' }}</el-descriptions-item>
-                  <el-descriptions-item :label="t('patientDetail.coldHeat')">{{ consultations[0]?.diff?.coldHeat || '-' }}</el-descriptions-item>
-                  <el-descriptions-item :label="t('patientDetail.differentiation')">{{ consultations[0]?.differentiation || '-' }}</el-descriptions-item>
-                  <el-descriptions-item :label="t('patientDetail.previousReview')">{{ consultations[0]?.previousPrognosisReview || '-' }}</el-descriptions-item>
+                  <el-descriptions-item :label="t('patientDetail.chiefComplaint')">{{ latestConsultation?.chiefComplaint || '-' }}</el-descriptions-item>
+                  <el-descriptions-item :label="t('patientDetail.coldHeat')">{{ latestConsultation?.diff?.coldHeat || '-' }}</el-descriptions-item>
+                  <el-descriptions-item :label="t('patientDetail.differentiation')">{{ latestConsultation?.differentiation || '-' }}</el-descriptions-item>
+                  <el-descriptions-item :label="t('patientDetail.previousReview')">{{ latestConsultation?.previousPrognosisReview || '-' }}</el-descriptions-item>
                 </el-descriptions>
               </el-card>
             </div>
           </div>
 
           <!-- 诊疗记录表格 -->
-          <div v-if="consultations.length === 0" class="empty-consult">
+          <div v-if="!compareMode && consultations.length === 0" class="empty-consult">
             <el-empty :description="t('patientDetail.noConsultations')" :image-size="80" />
             <el-button v-if="canCreate" type="primary" @click="$router.push(`/patients/${patientId}/consultations/new`)">
               {{ t('patientDetail.createFirst') }}
             </el-button>
           </div>
           <el-table
-            v-else
+            v-else-if="!compareMode"
             :data="consultations"
             stripe
             row-key="id"

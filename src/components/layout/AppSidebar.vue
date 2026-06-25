@@ -40,8 +40,9 @@ const visibleMenus = computed(() =>
 )
 
 function navigate(path) {
-  router.push(path)
   if (props.mobile) toggleSidebar()
+  if (route.path === path) return
+  void router.push(path).catch(() => {})
 }
 
 function isActive(item) {

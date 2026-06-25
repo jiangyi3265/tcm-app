@@ -9,22 +9,8 @@ import en from 'element-plus/dist/locale/en.mjs'
 import App from './App.vue'
 import router from './router'
 import i18n from './i18n'
-import { applyBootstrapToLocalStorage, bootstrapApi } from './utils/api'
-import { getStoredItem } from './utils/storage'
 import { initAppVersionWatcher } from './utils/appVersion'
 
-async function preloadBootstrapData() {
-  const token = getStoredItem('tcm_token')
-  if (!token) return
-  try {
-    const payload = await bootstrapApi.fetch()
-    applyBootstrapToLocalStorage(payload)
-  } catch (error) {
-    // ignore preload failure and fallback to local cache
-  }
-}
-
-await preloadBootstrapData()
 initAppVersionWatcher()
 
 const app = createApp(App)

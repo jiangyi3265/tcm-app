@@ -1,6 +1,6 @@
 <script setup>
 import { RouterView, useRoute } from 'vue-router'
-import { ref, provide, onMounted, onUnmounted } from 'vue'
+import { ref, provide, onMounted, onUnmounted, watch } from 'vue'
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
 import { usePatientsStore } from '../../stores/patients'
@@ -17,6 +17,7 @@ const inventoryStore = useInventoryStore()
 const settingsStore = useSettingsStore()
 const sidebarCollapsed = ref(false)
 const isMobile = ref(false)
+const inventoryRouteNames = new Set(['inventory', 'pharmacy', 'consultation-new', 'consultation-detail'])
 
 function checkMobile() {
   isMobile.value = window.innerWidth < 768
@@ -28,17 +29,26 @@ async function refreshWorkspaceData() {
     patientsStore.refreshFromApi(),
     consultationsStore.refreshFromApi(),
     appointmentsStore.refreshFromApi(),
-    inventoryStore.refreshFromApi(),
     settingsStore.refreshFromApi(),
   ])
+}
+
+function refreshInventoryForCurrentRoute() {
+  if (!inventoryRouteNames.has(String(route.name || ''))) return
+  void inventoryStore.refreshFromApi().catch(() => {})
 }
 
 onMounted(() => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
   void refreshWorkspaceData()
+  refreshInventoryForCurrentRoute()
 })
 onUnmounted(() => window.removeEventListener('resize', checkMobile))
+
+watch(() => route.name, () => {
+  refreshInventoryForCurrentRoute()
+})
 
 function toggleSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value
