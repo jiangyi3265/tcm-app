@@ -382,18 +382,27 @@ function handleCommand(command) {
   object-fit: contain;
 }
 
-@media (max-width: 767px) {
-  .header-center {
-    display: none;
+@media (max-width: 1024px) {
+  .app-header {
+    padding: 0 12px;
   }
+
   .header-username {
     display: none;
   }
+
   .page-title {
     font-size: 14px;
   }
+
   .header-right {
     gap: 8px;
+  }
+}
+
+@media (max-width: 767px) {
+  .header-center {
+    display: none;
   }
 }
 </style>

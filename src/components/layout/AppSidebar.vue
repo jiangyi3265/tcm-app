@@ -126,7 +126,7 @@ function isActive(item) {
   justify-content: center;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 1024px) {
   .sidebar {
     position: fixed;
     z-index: 999;

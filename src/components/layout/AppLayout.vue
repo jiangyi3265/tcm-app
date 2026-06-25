@@ -20,7 +20,7 @@ const isMobile = ref(false)
 const inventoryRouteNames = new Set(['inventory', 'pharmacy', 'consultation-new', 'consultation-detail'])
 
 function checkMobile() {
-  isMobile.value = window.innerWidth < 768
+  isMobile.value = window.innerWidth <= 1024
   if (isMobile.value) sidebarCollapsed.value = true
 }
 
@@ -112,7 +112,7 @@ provide('toggleSidebar', toggleSidebar)
   z-index: 998;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 1024px) {
   .main-content {
     padding: 12px;
   }

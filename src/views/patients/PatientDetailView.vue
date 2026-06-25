@@ -381,6 +381,18 @@ function toggleCompareMode() {
   }
 }
 
+watch(historicalConsultations, (list) => {
+  if (!compareMode.value) return
+  if (list.length === 0) {
+    compareMode.value = false
+    compareIndex.value = 0
+    return
+  }
+  if (compareIndex.value >= list.length) {
+    compareIndex.value = list.length - 1
+  }
+})
+
 // ── 快速拷贝到新诊疗 ──
 function quickCopyToNew(fields) {
   const src = compareConsultation.value
@@ -398,9 +410,13 @@ function quickCopyToNew(fields) {
     }
     if (f === 'pricing') {
       copyData.services = JSON.parse(JSON.stringify(src.services || []))
+      copyData.servicePriceList = src.servicePriceList
       copyData.consultationFee = src.consultationFee
+      copyData.consultationFeeTaxable = src.consultationFeeTaxable
       copyData.discountType = src.discountType
       copyData.discountValue = src.discountValue
+      copyData.taxable = src.taxable
+      copyData.currency = src.currency
     }
   }
   writeStoredItem('tcm_copy_consult', JSON.stringify(sanitizeCopiedConsultationData(copyData)))
@@ -1661,8 +1677,14 @@ const fileTree = computed(() => {
 }
 .compare-label { font-size: 14px; color: #555; }
 .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.compare-old { border-left: 4px solid #bbb; }
-.compare-new { border-left: 4px solid #2d6a4f; }
+.compare-old {
+  border: 1px solid #dcdfe6;
+  background: #fcfcfc;
+}
+.compare-new {
+  border: 1px solid #b7dfc4;
+  background: #f6fbf8;
+}
 
 /* ── 空状态 ── */
 .empty-consult {
@@ -1755,6 +1777,41 @@ const fileTree = computed(() => {
 }
 .file-name { color: #555; flex: 1; }
 .file-date { color: #aaa; font-size: 12px; }
+
+@media (max-width: 1100px) {
+  .compare-mode {
+    padding: 12px;
+    border-radius: 8px;
+  }
+
+  .compare-nav {
+    justify-content: flex-start;
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .compare-label {
+    order: -1;
+    flex: 1 1 100%;
+    line-height: 1.5;
+  }
+
+  .compare-nav :deep(.el-button) {
+    min-height: 40px;
+    margin-left: 0 !important;
+  }
+
+  .compare-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .compare-panel :deep(.el-card__header),
+  .compare-panel :deep(.el-card__body) {
+    padding: 12px;
+  }
+}
 
 @media (max-width: 767px) {
   .patient-header,

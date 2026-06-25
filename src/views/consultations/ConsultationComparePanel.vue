@@ -28,6 +28,7 @@ const emit = defineEmits(['update:visible', 'copy-section', 'update-field'])
 const consultStore = useConsultationsStore()
 const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
+const compareRefreshing = ref(false)
 
 const historyList = computed(() =>
   consultStore
@@ -42,9 +43,30 @@ const selectedOrder = computed(() => getHistoryDisplayOrder(selectedIdx.value, h
 watch(
   () => props.visible,
   (v) => {
-    if (v) selectedIdx.value = 0
+    if (!v) return
+    selectedIdx.value = 0
+    void refreshHistoryList()
   },
 )
+
+watch(historyList, (list) => {
+  if (!props.visible) return
+  if (selectedIdx.value >= list.length) {
+    selectedIdx.value = Math.max(0, list.length - 1)
+  }
+})
+
+async function refreshHistoryList() {
+  if (compareRefreshing.value) return
+  compareRefreshing.value = true
+  try {
+    await consultStore.refreshFromApi()
+  } catch (error) {
+    console.warn('Failed to refresh consultation history for compare:', error)
+  } finally {
+    compareRefreshing.value = false
+  }
+}
 
 function prevHistory() {
   selectedIdx.value = getOlderHistoryIndex(selectedIdx.value, historyList.value.length)
@@ -185,6 +207,7 @@ function isDiffChanged(key) {
     :close-on-click-modal="false"
     :close-on-press-escape="true"
     class="compare-fullscreen-dialog"
+    v-loading="compareRefreshing"
   >
     <template v-if="historyList.length === 0">
       <el-empty :description="t('compare.noHistory')" />
@@ -465,6 +488,7 @@ function isDiffChanged(key) {
   }
 
   .compare-nav :deep(.el-button) {
+    min-height: 40px;
     margin-left: 0 !important;
   }
 
