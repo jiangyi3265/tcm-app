@@ -66,11 +66,29 @@ body {
   background: #888;
 }
 
+/* 触屏设备：加粗横向滚动条，便于在宽表格里横滑到右侧列 */
+@media (pointer: coarse) {
+  ::-webkit-scrollbar {
+    height: 12px;
+  }
+}
+
 /* 表格操作列按钮不换行（仅 fixed=right 列） */
 .el-table .el-table-fixed-column--right .cell {
   white-space: nowrap;
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+/* 触屏设备：操作列按钮允许换行（避免按钮被列宽裁掉点不到），并放大表格内按钮的点击热区 */
+@media (pointer: coarse) {
+  .el-table .el-table-fixed-column--right .cell {
+    white-space: normal;
+    flex-wrap: wrap;
+  }
+  .el-table .cell .el-button {
+    min-height: 36px;
+  }
 }
 </style>

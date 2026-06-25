@@ -689,7 +689,7 @@ async function reopenPrescription(row) {
   font-size: 13px;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 1024px) {
   .pharmacy-header,
   .rx-card-header,
   .rx-detail-header {

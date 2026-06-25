@@ -359,8 +359,18 @@ function handleCommand(command) {
 }
 
 .hamburger-btn {
-  padding: 4px;
+  padding: 8px;
   margin-right: 4px;
+  min-width: 40px;
+  min-height: 40px;
+}
+
+/* 触屏设备：放大顶栏圆形小按钮（告警/语言）的点击热区，避免点不中 */
+@media (pointer: coarse) {
+  .header-right :deep(.el-button.is-circle) {
+    width: 40px;
+    height: 40px;
+  }
 }
 
 .signature-preview {

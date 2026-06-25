@@ -203,10 +203,11 @@ function isDiffChanged(key) {
     :model-value="visible"
     @update:model-value="emit('update:visible', $event)"
     :title="t('compare.title')"
-    fullscreen
+    width="92%"
+    top="5vh"
     :close-on-click-modal="false"
     :close-on-press-escape="true"
-    class="compare-fullscreen-dialog"
+    class="compare-dialog"
     v-loading="compareRefreshing"
   >
     <template v-if="historyList.length === 0">
@@ -412,6 +413,10 @@ function isDiffChanged(key) {
   gap: 12px;
   padding: 8px 0;
   flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #fff;
 }
 .compare-nav-info {
   flex: 1 1 320px;
@@ -476,22 +481,6 @@ function isDiffChanged(key) {
 }
 
 @media (max-width: 1180px) {
-  .compare-nav {
-    align-items: stretch;
-    gap: 8px;
-  }
-
-  .compare-nav-info {
-    order: -1;
-    flex-basis: 100%;
-    text-align: left;
-  }
-
-  .compare-nav :deep(.el-button) {
-    min-height: 40px;
-    margin-left: 0 !important;
-  }
-
   .compare-section :deep(.el-table) {
     min-width: 760px;
   }
@@ -505,5 +494,17 @@ function isDiffChanged(key) {
   .compare-section :deep(.el-table) {
     min-width: 680px;
   }
+}
+</style>
+
+<!-- 非 scoped：el-dialog 被 teleport 到 body，需用全局选择器约束尺寸 -->
+<style>
+.compare-dialog {
+  max-width: 1100px;
+}
+.compare-dialog .el-dialog__body {
+  max-height: 78vh;
+  overflow-y: auto;
+  padding-top: 0;
 }
 </style>

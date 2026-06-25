@@ -4456,7 +4456,7 @@ async function handleSendPreviewEmail() {
   transition: all 0.3s ease;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 1024px) {
   .cv-wrap {
     padding-bottom: 12px;
   }

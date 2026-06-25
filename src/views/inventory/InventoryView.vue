@@ -824,7 +824,7 @@ async function openAdjustmentHistory(item) {
                 <span v-else>{{ row.gramsPerPacket ? row.gramsPerPacket + 'g' : '-' }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.operation')" width="190" fixed="right">
+            <el-table-column :label="t('common.operation')" width="240" fixed="right">
               <template #default="{ row }">
                 <div v-if="editingId === row.id">
                   <el-button size="small" type="primary" text @click="saveEdit(row.id)">{{ t('common.save') }}</el-button>
@@ -1096,7 +1096,7 @@ async function openAdjustmentHistory(item) {
   border-bottom: 1px solid #eee;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
   .inventory-stats { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .page-toolbar { flex-direction: column; align-items: stretch; }
   .page-toolbar > div { justify-content: flex-end; }

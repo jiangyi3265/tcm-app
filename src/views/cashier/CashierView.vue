@@ -628,7 +628,7 @@ async function handleSendPreviewEmail() {
 
 .inv-status { text-align: center; margin-top: 12px; }
 
-@media (max-width: 767px) {
+@media (max-width: 1024px) {
   .payment-header,
   .payment-patient,
   .payment-actions,

@@ -2347,7 +2347,7 @@ async function deleteTemplate(tmpl) {
           <el-table-column :label="t('admin.createdDate')" width="120">
             <template #default="{ row }">{{ formatDate(row.createdAt) }}</template>
           </el-table-column>
-          <el-table-column :label="t('admin.operation')" width="320" fixed="right">
+          <el-table-column :label="t('admin.operation')" width="380" fixed="right">
             <template #default="{ row }">
               <div v-if="editingUserId === row.id">
                 <el-button size="small" type="primary" text @click="saveEditUser">{{ t('common.save') }}</el-button>

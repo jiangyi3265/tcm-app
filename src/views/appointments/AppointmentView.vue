@@ -1245,7 +1245,7 @@ async function handleSendPreviewEmail() {
 .detail-label { min-width:72px; font-size:13px; font-weight:600; color:#666; }
 .detail-value { font-size:13px; color:#333; }
 
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
   .appt-toolbar, .schedule-meta, .toolbar-left, .toolbar-right, .schedule-editor-header, .detail-row { flex-direction:column; align-items:flex-start; }
   .toolbar-right { width:100%; }
   .toolbar-right :deep(.el-select), .toolbar-right :deep(.el-button) { width:100%; }
