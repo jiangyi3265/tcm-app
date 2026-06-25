@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, inject, onMounted } from 'vue'
+import { ref, computed, inject, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConsultationsStore } from '../../stores/consultations'
 import { usePatientsStore } from '../../stores/patients'
@@ -34,6 +34,10 @@ const selectedRow = ref(null)
 const showDetailDialog = ref(false)
 const drawerSize = computed(() => (isMobile.value ? '100%' : '560px'))
 const selectedPaymentMethod = ref('cash')
+const PAGE_SIZE = 20
+const editingPage = ref(1)
+const pendingPage = ref(1)
+const dispensedPage = ref(1)
 
 onMounted(() => {
   consultationsStore.refreshFromApi().catch((error) => {
@@ -100,6 +104,24 @@ const prescriptionRows = computed(() => {
 const editingRows = computed(() => prescriptionRows.value.filter((row) => row.rxStatus === 'editing'))
 const pendingRows = computed(() => prescriptionRows.value.filter((row) => row.rxStatus === 'pending'))
 const dispensedRows = computed(() => prescriptionRows.value.filter((row) => row.rxStatus === 'dispensed'))
+
+function pageRows(rows, page) {
+  const start = (page - 1) * PAGE_SIZE
+  return rows.slice(start, start + PAGE_SIZE)
+}
+
+const pagedEditingRows = computed(() => pageRows(editingRows.value, editingPage.value))
+const pagedPendingRows = computed(() => pageRows(pendingRows.value, pendingPage.value))
+const pagedDispensedRows = computed(() => pageRows(dispensedRows.value, dispensedPage.value))
+
+function clampPage(pageRef, count) {
+  const maxPage = Math.max(1, Math.ceil(count / PAGE_SIZE))
+  if (pageRef.value > maxPage) pageRef.value = maxPage
+}
+
+watch(() => editingRows.value.length, (count) => clampPage(editingPage, count))
+watch(() => pendingRows.value.length, (count) => clampPage(pendingPage, count))
+watch(() => dispensedRows.value.length, (count) => clampPage(dispensedPage, count))
 
 const paymentMethods = computed(() => getPaymentMethodOptions(t))
 
@@ -314,7 +336,7 @@ async function reopenPrescription(row) {
           <el-empty :description="t('pharmacy.noEditing')" />
         </div>
         <div v-else class="prescription-list">
-          <el-card v-for="row in editingRows" :key="row.id" class="rx-card" @click="viewDetail(row)">
+          <el-card v-for="row in pagedEditingRows" :key="row.id" class="rx-card" @click="viewDetail(row)">
             <div class="rx-card-header">
               <div class="rx-patient-info">
                 <el-avatar :size="40" style="background: var(--color-primary)">
@@ -344,6 +366,17 @@ async function reopenPrescription(row) {
             </div>
           </el-card>
         </div>
+        <div v-if="editingRows.length > 0" class="table-footer">
+          <span>Rows: {{ editingRows.length }}</span>
+          <el-pagination
+            v-model:current-page="editingPage"
+            background
+            small
+            layout="prev, pager, next"
+            :page-size="PAGE_SIZE"
+            :total="editingRows.length"
+          />
+        </div>
       </el-tab-pane>
 
       <el-tab-pane :label="t('pharmacy.pendingTab')" name="pending">
@@ -351,7 +384,7 @@ async function reopenPrescription(row) {
           <el-empty :description="t('pharmacy.noPending')" />
         </div>
         <div v-else class="prescription-list">
-          <el-card v-for="row in pendingRows" :key="row.id" class="rx-card" @click="viewDetail(row)">
+          <el-card v-for="row in pagedPendingRows" :key="row.id" class="rx-card" @click="viewDetail(row)">
             <div class="rx-card-header">
               <div class="rx-patient-info">
                 <el-avatar :size="40" style="background: var(--color-primary)">
@@ -392,6 +425,17 @@ async function reopenPrescription(row) {
             </div>
           </el-card>
         </div>
+        <div v-if="pendingRows.length > 0" class="table-footer">
+          <span>Rows: {{ pendingRows.length }}</span>
+          <el-pagination
+            v-model:current-page="pendingPage"
+            background
+            small
+            layout="prev, pager, next"
+            :page-size="PAGE_SIZE"
+            :total="pendingRows.length"
+          />
+        </div>
       </el-tab-pane>
 
       <el-tab-pane :label="t('pharmacy.dispensedTab')" name="dispensed">
@@ -399,7 +443,7 @@ async function reopenPrescription(row) {
           <el-empty :description="t('pharmacy.noDispensed')" />
         </div>
         <div v-else class="wide-table-wrap">
-          <el-table :data="dispensedRows" stripe>
+          <el-table :data="pagedDispensedRows" stripe>
             <el-table-column :label="t('pharmacy.patient')" min-width="100">
               <template #default="{ row }">{{ row.patient?.name }}</template>
             </el-table-column>
@@ -433,6 +477,17 @@ async function reopenPrescription(row) {
               </template>
             </el-table-column>
           </el-table>
+          <div class="table-footer">
+            <span>Rows: {{ dispensedRows.length }}</span>
+            <el-pagination
+              v-model:current-page="dispensedPage"
+              background
+              small
+              layout="prev, pager, next"
+              :page-size="PAGE_SIZE"
+              :total="dispensedRows.length"
+            />
+          </div>
         </div>
       </el-tab-pane>
     </el-tabs>
@@ -621,6 +676,17 @@ async function reopenPrescription(row) {
   gap: 6px;
   font-size: 13px;
   color: #555;
+}
+
+.table-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  color: #666;
+  font-size: 13px;
 }
 
 @media (max-width: 767px) {

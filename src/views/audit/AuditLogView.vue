@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { auditLogsApi } from '../../utils/api'
 import { formatDateTime } from '../../utils/dateUtils'
@@ -12,6 +12,8 @@ const logs = ref([])
 const filterType = ref('')
 const filterDays = ref(30)
 const searchQuery = ref('')
+const PAGE_SIZE = 20
+const currentPage = ref(1)
 
 const ACTION_LABELS = computed(() => ({
   CREATE: t('audit.actionCreate'),
@@ -105,6 +107,20 @@ const filteredLogs = computed(() => {
   return result
 })
 
+const pagedLogs = computed(() => {
+  const start = (currentPage.value - 1) * PAGE_SIZE
+  return filteredLogs.value.slice(start, start + PAGE_SIZE)
+})
+
+watch([filterType, filterDays, searchQuery], () => {
+  currentPage.value = 1
+})
+
+watch(() => filteredLogs.value.length, (count) => {
+  const maxPage = Math.max(1, Math.ceil(count / PAGE_SIZE))
+  if (currentPage.value > maxPage) currentPage.value = maxPage
+})
+
 async function loadLogs() {
   try {
     loading.value = true
@@ -164,7 +180,7 @@ function getRoleColor(role) {
         {{ t('audit.noLogs') }}
       </div>
       <div v-else class="log-timeline">
-        <div v-for="log in filteredLogs" :key="log.id" class="log-entry">
+        <div v-for="log in pagedLogs" :key="log.id" class="log-entry">
           <div class="log-dot" :class="ACTION_COLORS[log.action] || 'info'"></div>
           <div class="log-content">
             <div class="log-header">
@@ -185,6 +201,17 @@ function getRoleColor(role) {
             <div v-if="log.details" class="log-details">{{ log.details }}</div>
           </div>
         </div>
+      </div>
+      <div v-if="!loading && filteredLogs.length > 0" class="table-footer">
+        <span>{{ filteredLogs.length }} records</span>
+        <el-pagination
+          v-model:current-page="currentPage"
+          background
+          small
+          layout="prev, pager, next"
+          :page-size="PAGE_SIZE"
+          :total="filteredLogs.length"
+        />
       </div>
     </el-card>
   </div>
@@ -241,5 +268,18 @@ function getRoleColor(role) {
   font-size: 12px; color: #999; margin-top: 4px;
   padding: 6px 10px; background: #f9f9f9; border-radius: 6px;
   word-break: break-all;
+}
+
+.table-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+  color: #666;
+  font-size: 13px;
 }
 </style>

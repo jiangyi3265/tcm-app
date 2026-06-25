@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useConsultationsStore } from '../../stores/consultations'
@@ -20,6 +20,8 @@ const appointmentsStore = useAppointmentsStore()
 
 const searchQuery = ref('')
 const statusFilter = ref('all')
+const PAGE_SIZE = 20
+const currentPage = ref(1)
 
 const STATUS_TYPES = {
   draft: 'info',
@@ -120,6 +122,20 @@ const filteredConsultations = computed(() => {
   })
 })
 
+const pagedConsultations = computed(() => {
+  const start = (currentPage.value - 1) * PAGE_SIZE
+  return filteredConsultations.value.slice(start, start + PAGE_SIZE)
+})
+
+watch([searchQuery, statusFilter], () => {
+  currentPage.value = 1
+})
+
+watch(() => filteredConsultations.value.length, (count) => {
+  const maxPage = Math.max(1, Math.ceil(count / PAGE_SIZE))
+  if (currentPage.value > maxPage) currentPage.value = maxPage
+})
+
 function openConsultation(row) {
   if (!row?.patientId || !row?.id) return
   router.push(`/patients/${row.patientId}/consultations/${row.id}`)
@@ -155,7 +171,7 @@ function openConsultation(row) {
       </template>
 
       <el-table
-        :data="filteredConsultations"
+        :data="pagedConsultations"
         row-key="id"
         stripe
         style="cursor: pointer"
@@ -199,6 +215,17 @@ function openConsultation(row) {
           </template>
         </el-table-column>
       </el-table>
+      <div class="table-footer">
+        <span>{{ t('consultationList.totalCount', { count: filteredConsultations.length }) }}</span>
+        <el-pagination
+          v-model:current-page="currentPage"
+          background
+          small
+          layout="prev, pager, next"
+          :page-size="PAGE_SIZE"
+          :total="filteredConsultations.length"
+        />
+      </div>
     </el-card>
   </div>
 </template>
@@ -264,5 +291,16 @@ function openConsultation(row) {
 .amount-cell {
   font-weight: 600;
   color: #444;
+}
+
+.table-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  color: #666;
+  font-size: 13px;
 }
 </style>

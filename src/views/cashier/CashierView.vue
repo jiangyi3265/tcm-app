@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useConsultationsStore } from '../../stores/consultations'
@@ -38,6 +38,9 @@ const selectedConsult = ref(null)
 const showInvoiceDialog = ref(false)
 const selectedPaymentMethod = ref('cash')
 const emailSending = ref(false)
+const PAGE_SIZE = 20
+const pendingPage = ref(1)
+const historyPage = ref(1)
 
 function formatPatientAddress(patient = {}) {
   const parts = [
@@ -156,7 +159,26 @@ const paymentHistory = computed(() => {
       }))
     })
     .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
-    .slice(0, 100)
+})
+
+const pagedPendingPayments = computed(() => {
+  const start = (pendingPage.value - 1) * PAGE_SIZE
+  return pendingPayments.value.slice(start, start + PAGE_SIZE)
+})
+
+const pagedPaymentHistory = computed(() => {
+  const start = (historyPage.value - 1) * PAGE_SIZE
+  return paymentHistory.value.slice(start, start + PAGE_SIZE)
+})
+
+watch(() => pendingPayments.value.length, (count) => {
+  const maxPage = Math.max(1, Math.ceil(count / PAGE_SIZE))
+  if (pendingPage.value > maxPage) pendingPage.value = maxPage
+})
+
+watch(() => paymentHistory.value.length, (count) => {
+  const maxPage = Math.max(1, Math.ceil(count / PAGE_SIZE))
+  if (historyPage.value > maxPage) historyPage.value = maxPage
 })
 
 const paymentMethods = computed(() => getPaymentMethodOptions(t))
@@ -317,7 +339,7 @@ async function handleSendPreviewEmail() {
           <el-empty :description="t('cashier.noPending')" />
         </div>
         <div v-else class="payment-list">
-          <el-card v-for="c in pendingPayments" :key="c.id" class="payment-card">
+          <el-card v-for="c in pagedPendingPayments" :key="c.id" class="payment-card">
             <div class="payment-header">
               <div class="payment-patient">
                 <el-avatar :size="40" style="background: var(--color-primary)">
@@ -368,13 +390,24 @@ async function handleSendPreviewEmail() {
             </div>
           </el-card>
         </div>
+        <div v-if="pendingPayments.length > 0" class="table-footer">
+          <span>Rows: {{ pendingPayments.length }}</span>
+          <el-pagination
+            v-model:current-page="pendingPage"
+            background
+            small
+            layout="prev, pager, next"
+            :page-size="PAGE_SIZE"
+            :total="pendingPayments.length"
+          />
+        </div>
       </el-tab-pane>
 
       <el-tab-pane :label="t('cashier.historyTab')" name="history">
         <div v-if="paymentHistory.length === 0" class="empty-state">
           <el-empty :description="t('cashier.noHistory')" />
         </div>
-        <el-table v-else :data="paymentHistory" stripe>
+        <el-table v-else :data="pagedPaymentHistory" stripe>
           <el-table-column :label="t('cashier.patient')" min-width="100">
             <template #default="{ row }">{{ row.patient?.name }}</template>
           </el-table-column>
@@ -401,6 +434,17 @@ async function handleSendPreviewEmail() {
             </template>
           </el-table-column>
         </el-table>
+        <div v-if="paymentHistory.length > 0" class="table-footer">
+          <span>Rows: {{ paymentHistory.length }}</span>
+          <el-pagination
+            v-model:current-page="historyPage"
+            background
+            small
+            layout="prev, pager, next"
+            :page-size="PAGE_SIZE"
+            :total="paymentHistory.length"
+          />
+        </div>
       </el-tab-pane>
     </el-tabs>
 
@@ -560,6 +604,17 @@ async function handleSendPreviewEmail() {
 
 .payment-services { margin-bottom: 12px; }
 .payment-actions { text-align: right; display: flex; gap: 8px; justify-content: flex-end; }
+
+.table-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  color: #666;
+  font-size: 13px;
+}
 
 .invoice-view { font-size: 14px; }
 .inv-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
