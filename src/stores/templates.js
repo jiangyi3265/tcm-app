@@ -11,6 +11,13 @@ export const useTemplatesStore = defineStore('templates', () => {
   }
   function saveState() { writeStoredJson('tcm_templates', templates.value) }
 
+  async function refreshFromApi() {
+    const list = await templatesApi.list()
+    templates.value = Array.isArray(list) ? list : []
+    saveState()
+    return templates.value
+  }
+
   const activeTemplates = computed(() => templates.value.filter((t) => t.isActive && !t.deletedAt))
 
   function getTemplate(id) { return templates.value.find((t) => t.id === id) || null }
@@ -47,5 +54,5 @@ export const useTemplatesStore = defineStore('templates', () => {
 
   init()
 
-  return { templates, activeTemplates, deletedTemplates, getTemplate, addTemplate, updateTemplate, deleteTemplate, restoreTemplate, hardDeleteTemplate }
+  return { templates, activeTemplates, deletedTemplates, getTemplate, refreshFromApi, addTemplate, updateTemplate, deleteTemplate, restoreTemplate, hardDeleteTemplate }
 })

@@ -28,6 +28,14 @@ export const useAcupointsStore = defineStore('acupoints', () => {
   /** Get flat list of active acupoint names (for backward compat with ACUPUNCTURE_POINTS) */
   const acupointNames = computed(() => activeAcupoints.value.map((a) => a.name))
 
+  async function refreshFromApi() {
+    const list = await acupointsApi.list()
+    const normalized = normalizeAcupointList(list)
+    acupoints.value = normalized.length > 0 ? normalized : defaultAcupoints
+    saveState()
+    return acupoints.value
+  }
+
   function getAcupoint(id) {
     return normalizeAcupointList(acupoints.value).find((a) => a.id === id) || null
   }
@@ -96,6 +104,7 @@ export const useAcupointsStore = defineStore('acupoints', () => {
     activeAcupoints,
     acupointNames,
     deletedAcupoints,
+    refreshFromApi,
     getAcupoint,
     findByName,
     addAcupoint,

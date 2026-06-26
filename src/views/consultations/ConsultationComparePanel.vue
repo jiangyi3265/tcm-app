@@ -8,6 +8,7 @@ import { formatDate } from '../../utils/dateUtils'
 import { emptyDiff } from '../../utils/sampleData'
 import { localizeMixedJoinedValue, localizeMixedText } from '../../utils/localizeMixedText'
 import { buildCopiedTreatmentData } from '../../utils/consultationCopy'
+import { getActivePrescriptions, getPrescriptionStatus } from '../../utils/prescriptionWorkflow'
 import {
   canSelectNewerHistory,
   canSelectOlderHistory,
@@ -93,6 +94,10 @@ function copySection(section) {
     data.services = JSON.parse(JSON.stringify(selected.value.services || []))
     data.servicePriceList = selected.value.servicePriceList
     data.consultationFee = selected.value.consultationFee
+    data.consultationFeeTaxable = selected.value.consultationFeeTaxable
+    data.overrideTaxRate = selected.value.overrideTaxRate
+    data.includeRxAmount = selected.value.includeRxAmount
+    data.add3rdParty = selected.value.add3rdParty
     data.discountType = selected.value.discountType
     data.discountValue = selected.value.discountValue
     data.taxable = selected.value.taxable
@@ -120,6 +125,10 @@ function copyAll() {
   data.services = JSON.parse(JSON.stringify(selected.value.services || []))
   data.servicePriceList = selected.value.servicePriceList
   data.consultationFee = selected.value.consultationFee
+  data.consultationFeeTaxable = selected.value.consultationFeeTaxable
+  data.overrideTaxRate = selected.value.overrideTaxRate
+  data.includeRxAmount = selected.value.includeRxAmount
+  data.add3rdParty = selected.value.add3rdParty
   data.discountType = selected.value.discountType
   data.discountValue = selected.value.discountValue
   data.taxable = selected.value.taxable
@@ -141,6 +150,68 @@ function money(value, currency = null) {
   const code = currency || settingsStore.currency || 'CAD'
   const prefix = ['CAD', 'USD'].includes(code) ? '$' : `${code} `
   return `${prefix}${formatAmount(value)}`
+}
+
+function formatSide(value) {
+  const side = String(value || '').trim()
+  if (side === 'bilateral') return 'Bilateral'
+  if (side === 'left') return 'Left'
+  if (side === 'right') return 'Right'
+  return side || '-'
+}
+
+function getAcuRows(source = {}) {
+  return Array.isArray(source?.acupuncture) ? source.acupuncture.filter((row) => row?.point) : []
+}
+
+function getPrescriptionTypeLabel(type) {
+  const labels = {
+    powder: 'Powder',
+    raw_herbs: 'Raw herbs',
+    pills: 'Pills',
+    none: 'None',
+  }
+  return labels[type] || type || '-'
+}
+
+function getRxStatusLabel(rx) {
+  const status = getPrescriptionStatus(rx)
+  if (status === 'editing') return 'Editing'
+  if (status === 'pending') return 'Pending'
+  if (status === 'dispensed') return 'Dispensed'
+  if (status === 'legacy') return 'Legacy'
+  return status || '-'
+}
+
+function getRxRows(source = {}) {
+  const active = getActivePrescriptions(source)
+  if (active.length > 0) return active
+  const herbals = Array.isArray(source?.herbals) ? source.herbals : []
+  if (herbals.length === 0 || source?.prescriptionType === 'none') return []
+  return [{
+    formulaName: source.formulaName || '',
+    prescriptionType: source.prescriptionType || 'raw_herbs',
+    quantity: source.quantity || 1,
+    direction: source.direction || '',
+    whereToGet: source.whereToGet || '',
+    rxStatus: 'legacy',
+    items: herbals,
+    subtotal: Number(source.prescriptionSubtotal || source.rxSubtotal || 0),
+  }]
+}
+
+function getRxName(rx = {}) {
+  return rx.formulaName || rx.name || rx.prescriptionType || 'Prescription'
+}
+
+function getRxItems(rx = {}) {
+  return Array.isArray(rx.items) ? rx.items.filter((item) => item?.name || item?.herbName) : []
+}
+
+function formatDose(item = {}) {
+  const dosage = item.dosage ?? item.originalDosage ?? ''
+  const unit = item.unit || item.originalUnit || ''
+  return `${dosage || '-'}${unit || ''}`
 }
 
 // 辨证对比辅助
@@ -316,53 +387,102 @@ function isDiffChanged(key) {
       <div class="compare-section">
         <div class="compare-section-header">
           <h4>{{ t('compare.treatment') }}</h4>
+          <el-button size="small" type="primary" plain @click="copySection('treatment')">
+            {{ t('compare.copyToCurrent') }}
+          </el-button>
         </div>
         <!-- 针灸穴位 -->
-        <p><strong>{{ t('compare.acuPoints') }}</strong></p>
-        <div class="compare-cell-pair" style="margin-bottom: 8px">
-          <div class="compare-old">
-            <el-tag
-              v-for="(pt, idx) in selected.acupuncture || []"
-              :key="idx"
-              size="small"
-              style="margin: 2px"
-            >
-              {{ pt.point }} ({{ pt.side }})
-            </el-tag>
-            <span v-if="!selected.acupuncture?.length">-</span>
-          </div>
-          <div class="compare-new">
-            <el-tag
-              v-for="(pt, idx) in currentForm.acupuncture || []"
-              :key="idx"
-              size="small"
-              style="margin: 2px"
-            >
-              {{ pt.point }} ({{ pt.side }})
-            </el-tag>
-            <span v-if="!currentForm.acupuncture?.length">-</span>
-          </div>
-        </div>
-        <!-- 处方 -->
-        <p><strong>{{ t('compare.rxType') }}</strong></p>
-        <div class="compare-cell-pair" style="margin-bottom: 8px">
-          <div class="compare-old">{{ selected.prescriptionType || 'none' }} — {{ selected.formulaName || '-' }}</div>
-          <div class="compare-new">{{ currentForm.prescriptionType || 'none' }} — {{ currentForm.formulaName || '-' }}</div>
-        </div>
-        <!-- 药材 -->
-        <p><strong>{{ t('compare.herbList') }}</strong></p>
-        <div class="compare-cell-pair">
-          <div class="compare-old">
-            <div v-for="(h, i) in selected.herbals || []" :key="i" class="herbal-item">
-              {{ h.name }} {{ h.dosage }}{{ h.unit }}
+        <div class="treatment-compare-grid">
+          <div class="treatment-panel history">
+            <div class="treatment-panel-title">{{ t('compare.historyRecord') }}</div>
+            <div class="treatment-block">
+              <div class="treatment-block-title">
+                {{ t('compare.acuPoints') }}
+                <span>{{ getAcuRows(selected).length }}</span>
+              </div>
+              <div v-if="getAcuRows(selected).length" class="acu-list">
+                <div v-for="(pt, idx) in getAcuRows(selected)" :key="idx" class="acu-row">
+                  <span class="acu-point">{{ pt.point }}</span>
+                  <span class="acu-side">{{ formatSide(pt.side) }}</span>
+                  <span class="acu-notes">{{ pt.notes || '-' }}</span>
+                </div>
+              </div>
+              <div v-else class="empty-line">-</div>
             </div>
-            <span v-if="!selected.herbals?.length">-</span>
-          </div>
-          <div class="compare-new">
-            <div v-for="(h, i) in currentForm.herbals || []" :key="i" class="herbal-item">
-              {{ h.name }} {{ h.dosage }}{{ h.unit }}
+
+            <div class="treatment-block">
+              <div class="treatment-block-title">
+                {{ t('consultation.prescription') }}
+                <span>{{ getRxRows(selected).length }}</span>
+              </div>
+              <div v-if="getRxRows(selected).length" class="rx-list">
+                <div v-for="(rx, idx) in getRxRows(selected)" :key="rx.id || idx" class="compare-rx-card">
+                  <div class="rx-card-head">
+                    <div>
+                      <div class="rx-title">{{ getRxName(rx) }}</div>
+                      <div class="rx-meta">
+                        {{ getPrescriptionTypeLabel(rx.prescriptionType) }}
+                        / Qty {{ rx.quantity || 1 }}
+                        / {{ getRxStatusLabel(rx) }}
+                      </div>
+                    </div>
+                    <div class="rx-amount">{{ money(rx.subtotal, selected.currency) }}</div>
+                  </div>
+                  <div v-if="getRxItems(rx).length" class="rx-items">
+                    <span v-for="(item, itemIdx) in getRxItems(rx)" :key="item.id || itemIdx">
+                      {{ item.name || item.herbName }} {{ formatDose(item) }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="empty-line">-</div>
             </div>
-            <span v-if="!currentForm.herbals?.length">-</span>
+          </div>
+
+          <div class="treatment-panel current">
+            <div class="treatment-panel-title">{{ t('compare.currentRecord') }}</div>
+            <div class="treatment-block">
+              <div class="treatment-block-title">
+                {{ t('compare.acuPoints') }}
+                <span>{{ getAcuRows(currentForm).length }}</span>
+              </div>
+              <div v-if="getAcuRows(currentForm).length" class="acu-list">
+                <div v-for="(pt, idx) in getAcuRows(currentForm)" :key="idx" class="acu-row">
+                  <span class="acu-point">{{ pt.point }}</span>
+                  <span class="acu-side">{{ formatSide(pt.side) }}</span>
+                  <span class="acu-notes">{{ pt.notes || '-' }}</span>
+                </div>
+              </div>
+              <div v-else class="empty-line">-</div>
+            </div>
+
+            <div class="treatment-block">
+              <div class="treatment-block-title">
+                {{ t('consultation.prescription') }}
+                <span>{{ getRxRows(currentForm).length }}</span>
+              </div>
+              <div v-if="getRxRows(currentForm).length" class="rx-list">
+                <div v-for="(rx, idx) in getRxRows(currentForm)" :key="rx.id || idx" class="compare-rx-card">
+                  <div class="rx-card-head">
+                    <div>
+                      <div class="rx-title">{{ getRxName(rx) }}</div>
+                      <div class="rx-meta">
+                        {{ getPrescriptionTypeLabel(rx.prescriptionType) }}
+                        / Qty {{ rx.quantity || 1 }}
+                        / {{ getRxStatusLabel(rx) }}
+                      </div>
+                    </div>
+                    <div class="rx-amount">{{ money(rx.subtotal, currentForm.currency) }}</div>
+                  </div>
+                  <div v-if="getRxItems(rx).length" class="rx-items">
+                    <span v-for="(item, itemIdx) in getRxItems(rx)" :key="item.id || itemIdx">
+                      {{ item.name || item.herbName }} {{ formatDose(item) }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="empty-line">-</div>
+            </div>
           </div>
         </div>
       </div>
@@ -479,8 +599,132 @@ function isDiffChanged(key) {
 .compare-new-text {
   color: #529b2e;
 }
+.treatment-compare-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+.treatment-panel {
+  min-width: 0;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  background: #fafafa;
+  padding: 12px;
+}
+.treatment-panel.current {
+  border-color: #b7dfc4;
+  background: #f6fbf8;
+}
+.treatment-panel-title {
+  margin-bottom: 10px;
+  color: #2d6a4f;
+  font-weight: 600;
+}
+.treatment-block + .treatment-block {
+  margin-top: 12px;
+}
+.treatment-block-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: #606266;
+  font-size: 13px;
+  font-weight: 600;
+}
+.treatment-block-title span {
+  color: #909399;
+  font-weight: 500;
+}
+.acu-list,
+.rx-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.acu-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 88px minmax(120px, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 7px 8px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+}
+.acu-point {
+  color: #303133;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.acu-side {
+  color: #409eff;
+}
+.acu-notes {
+  color: #606266;
+  overflow-wrap: anywhere;
+}
+.compare-rx-card {
+  padding: 9px 10px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  background: #fff;
+}
+.rx-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+.rx-title {
+  color: #303133;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.rx-meta {
+  margin-top: 3px;
+  color: #909399;
+  font-size: 12px;
+}
+.rx-amount {
+  color: #2d6a4f;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.rx-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.rx-items span {
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: #f5f7fa;
+  color: #606266;
+  font-size: 12px;
+}
+.empty-line {
+  padding: 8px;
+  border: 1px dashed #dcdfe6;
+  border-radius: 6px;
+  background: #fff;
+  color: #c0c4cc;
+  font-size: 13px;
+}
 
 @media (max-width: 1180px) {
+  .treatment-compare-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .acu-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
   .compare-section :deep(.el-table) {
     min-width: 760px;
   }

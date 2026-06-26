@@ -8,6 +8,8 @@ import { useConsultationsStore } from '../../stores/consultations'
 import { useAppointmentsStore } from '../../stores/appointments'
 import { useInventoryStore } from '../../stores/inventory'
 import { useSettingsStore } from '../../stores/settings'
+import { useTemplatesStore } from '../../stores/templates'
+import { useAcupointsStore } from '../../stores/acupoints'
 
 const route = useRoute()
 const patientsStore = usePatientsStore()
@@ -15,6 +17,8 @@ const consultationsStore = useConsultationsStore()
 const appointmentsStore = useAppointmentsStore()
 const inventoryStore = useInventoryStore()
 const settingsStore = useSettingsStore()
+const templatesStore = useTemplatesStore()
+const acupointsStore = useAcupointsStore()
 const sidebarCollapsed = ref(false)
 const isMobile = ref(false)
 const inventoryRouteNames = new Set(['inventory', 'pharmacy', 'consultation-new', 'consultation-detail'])
@@ -30,6 +34,8 @@ async function refreshWorkspaceData() {
     consultationsStore.refreshFromApi(),
     appointmentsStore.refreshFromApi(),
     settingsStore.refreshFromApi(),
+    templatesStore.refreshFromApi(),
+    acupointsStore.refreshFromApi(),
   ])
 }
 

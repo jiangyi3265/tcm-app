@@ -1000,6 +1000,8 @@ async function hydrateCurrentConsultationFromApi(id, baselineSnapshot) {
 onMounted(() => {
   void refreshPricingSettingsIfNeeded({ force: true })
   formulasStore.refreshFromApi().catch(() => {})
+  templatesStore.refreshFromApi().catch(() => {})
+  acupointsStore.refreshFromApi().catch(() => {})
   if (isNew && (!form.value.currency || form.value.currency === 'CNY')) {
     form.value.currency = settingsStore.currency || 'CAD'
   }
@@ -3575,10 +3577,10 @@ async function handleSendPreviewEmail() {
               <span class="sec-header">Acu Points</span>
               <div v-if="!isReadOnly" style="display:flex;gap:8px;align-items:center">
                 <el-select
-                  v-if="templatesStore.activeTemplates.length > 0"
-                  placeholder="Apply Template"
+                  :placeholder="templatesStore.activeTemplates.length > 0 ? 'Apply Template' : 'No templates'"
                   size="small"
                   filterable
+                  :disabled="templatesStore.activeTemplates.length === 0"
                   style="width:180px"
                   @change="applyAcuTemplate"
                   :model-value="null"
