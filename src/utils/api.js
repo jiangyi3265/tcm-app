@@ -1,4 +1,5 @@
 import { getStoredItem, readStoredJson, removeStoredKey, writeStoredItem, writeStoredJson } from './storage'
+import { managedFileResource } from './managedFileResource.js'
 
 const TOKEN_KEY = 'tcm_token'
 const AUTH_KEY = 'tcm_auth'
@@ -490,14 +491,9 @@ export const templatesApi = {
 
 async function resolveFileUrl(path) {
   if (!path) throw new Error('Missing file path')
-  if (/^(blob:|data:|https?:)/.test(path)) return path
-  if (path.startsWith('/api/public/files/access')) return path
-  if (
-    path.startsWith('/profile/')
-    || path.startsWith('hospital-private/')
-    || path.startsWith('/hospital-private/')
-  ) {
-    const payload = await request(`/api/files/access-url?resource=${encodeURIComponent(path)}`)
+  const resource = managedFileResource(path)
+  if (resource) {
+    const payload = await request(`/api/files/access-url?resource=${encodeURIComponent(resource)}`)
     return payload.url || path
   }
   return path
