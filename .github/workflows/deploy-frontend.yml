@@ -1,64 +1,54 @@
-name: Deploy Frontend
+name: Deploy Production Frontend
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [master]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
-  group: deploy-frontend
-  cancel-in-progress: true
+  group: production-frontend
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy:
+    if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
-
+    timeout-minutes: 15
     env:
-      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
-      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-      WEB_ROOT: /www/wwwroot/www.otcm.app
-      VITE_PUBLIC_APP_BASE_URL: https://www.otcm.app
+      VITE_PUBLIC_APP_BASE_URL: https://yuanyuanyiyuan.oksja.cn
       VITE_APP_VERSION: ${{ github.sha }}
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-
       - name: Install dependencies
         run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      - name: Configure SSH
+      - name: Test and build
+        run: |
+          node --test tests/*.test.js
+          npm run build
+      - name: Publish to production
         shell: bash
+        env:
+          PRODUCTION_DEPLOY_KEY: ${{ secrets.PRODUCTION_DEPLOY_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_USER" ] || [ -z "$DEPLOY_SSH_KEY" ]; then
-            echo "::error::Missing DEPLOY_HOST, DEPLOY_USER, or DEPLOY_SSH_KEY secret."
-            exit 1
-          fi
+          umask 077
+          test -n "$PRODUCTION_DEPLOY_KEY"
           mkdir -p ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -p "${DEPLOY_PORT:-22}" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
-
-      - name: Upload dist
-        shell: bash
-        run: |
-          set -euo pipefail
-          PORT="${DEPLOY_PORT:-22}"
-          tar -C dist -czf /tmp/otcm-frontend-dist.tar.gz .
-          ssh -p "$PORT" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$WEB_ROOT'"
-          scp -P "$PORT" /tmp/otcm-frontend-dist.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:/tmp/otcm-frontend-dist.tar.gz"
-          ssh -p "$PORT" "$DEPLOY_USER@$DEPLOY_HOST" "tar -xzf /tmp/otcm-frontend-dist.tar.gz -C '$WEB_ROOT' && nginx -t && (systemctl reload nginx || service nginx reload || /etc/init.d/nginx reload || /www/server/nginx/sbin/nginx -s reload)"
+          printf '%s\n' "$PRODUCTION_DEPLOY_KEY" | tr -d '\r' > ~/.ssh/production_key
+          cp .github/production_known_hosts ~/.ssh/production_hosts
+          tar -C dist -czf /tmp/yuanyuan-frontend.tar.gz .
+          SHA256=$(sha256sum /tmp/yuanyuan-frontend.tar.gz | cut -d ' ' -f 1)
+          ssh -i ~/.ssh/production_key -o BatchMode=yes -o ConnectTimeout=20 \
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/production_hosts \
+            root@152.136.191.51 "deploy $GITHUB_SHA $SHA256" < /tmp/yuanyuan-frontend.tar.gz
+      - name: Remove deployment key
+        if: always()
+        run: rm -f ~/.ssh/production_key
