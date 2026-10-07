@@ -7,8 +7,10 @@ import { usePatientsStore } from '../../stores/patients'
 import { useAppointmentsStore } from '../../stores/appointments'
 import { useInventoryStore } from '../../stores/inventory'
 import { statisticsApi } from '../../utils/api'
+import { useSettingsStore } from '../../stores/settings'
+import { classifyPaidRevenue } from '../../utils/revenueCategories'
 import { formatDate, dayjs } from '../../utils/dateUtils'
-import { getPaymentRecords, getPaymentStatus, getBillablePrescriptionTotal } from '../../utils/prescriptionWorkflow'
+import { getPaymentRecords, getPaymentStatus } from '../../utils/prescriptionWorkflow'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -16,6 +18,7 @@ const consultationsStore = useConsultationsStore()
 const patientsStore = usePatientsStore()
 const appointmentsStore = useAppointmentsStore()
 const inventoryStore = useInventoryStore()
+const settingsStore = useSettingsStore()
 
 const CURRENCY_SYMBOLS = { CAD: '$', USD: '$' }
 const cs = computed(() => {
@@ -190,6 +193,7 @@ const exportConsultations = computed(() => {
 
 const exportSummary = computed(() => {
   let acupunctureIncome = 0
+  let consultationIncome = 0
   let herbIncome = 0
   let otherServiceIncome = 0
   let totalTax = 0
@@ -201,40 +205,17 @@ const exportSummary = computed(() => {
     const paidAmount = payments.reduce((s, p) => s + Number(p.amount || 0), 0)
     if (paidAmount === 0) continue
 
-    const tax = Number(c.taxAmount || 0)
+    const breakdown = classifyPaidRevenue(c, paidAmount, settingsStore.serviceTypes, settingsStore.serviceRevenueCategories)
+    const tax = breakdown.tax
     totalTax += tax
     totalPaid += paidAmount
 
-    // Classify services
-    let consultAcuIncome = 0
-    let consultHerbIncome = 0
-    let consultOtherIncome = 0
-    const services = c.services || []
-    for (const svc of services) {
-      const amount = Number(svc.amount || svc.price || 0) * Number(svc.quantity || 1)
-      const key = svc.serviceKey || svc.key || ''
-      if (key.includes('acupuncture') || key.includes('acu')) {
-        consultAcuIncome += amount
-      } else if (key.includes('herb') || key.includes('formula') || key.includes('chinese_medicine')) {
-        consultHerbIncome += amount
-      } else {
-        consultOtherIncome += amount
-      }
-    }
-
-    // If no services breakdown, classify by prescriptionType
-    if (services.length === 0) {
-      const fee = Number(c.consultationFee || 0)
-      const rxTotal = Number(c.totalWithoutTax || paidAmount - tax) - fee
-      if (c.prescriptionType && c.prescriptionType !== 'none') {
-        consultHerbIncome += rxTotal > 0 ? rxTotal : 0
-        consultAcuIncome += fee
-      } else {
-        consultAcuIncome += paidAmount - tax
-      }
-    }
+    const consultAcuIncome = breakdown.acupuncture
+    const consultHerbIncome = breakdown.herbs
+    const consultOtherIncome = breakdown.others
 
     acupunctureIncome += consultAcuIncome
+    consultationIncome += breakdown.consultation
     herbIncome += consultHerbIncome
     otherServiceIncome += consultOtherIncome
 
@@ -245,6 +226,7 @@ const exportSummary = computed(() => {
       patientName: patient?.name || c.patientId || '',
       practitionerName: practitioner?.name || c.practitionerId || '',
       acupunture: consultAcuIncome,
+      consultation: breakdown.consultation,
       herbs: consultHerbIncome,
       other: consultOtherIncome,
       tax,
@@ -253,7 +235,7 @@ const exportSummary = computed(() => {
     })
   }
 
-  return { acupunctureIncome, herbIncome, otherServiceIncome, totalTax, totalPaid, rows }
+  return { acupunctureIncome, consultationIncome, herbIncome, otherServiceIncome, totalTax, totalPaid, rows }
 })
 
 function downloadRevenueCsv() {
@@ -261,14 +243,14 @@ function downloadRevenueCsv() {
   if (!rows.length) return
   const headers = [
     t('statistics.exportDate'), t('statistics.exportPatient'), t('statistics.exportPractitioner'),
-    t('statistics.exportAcupuncture'), t('statistics.exportHerbs'), t('statistics.exportOther'),
+    t('statistics.exportAcupuncture'), t('statistics.exportConsultation'), t('statistics.exportHerbs'), t('statistics.exportOther'),
     t('statistics.exportTax'), t('statistics.exportTotal'), t('statistics.exportPaymentMethod'),
   ]
   const csvRows = [headers.join(',')]
   for (const r of rows) {
     csvRows.push([
       r.date, `"${r.patientName}"`, `"${r.practitionerName}"`,
-      r.acupunture.toFixed(2), r.herbs.toFixed(2), r.other.toFixed(2),
+      r.acupunture.toFixed(2), r.consultation.toFixed(2), r.herbs.toFixed(2), r.other.toFixed(2),
       r.tax.toFixed(2), r.total.toFixed(2), `"${r.paymentMethod}"`,
     ].join(','))
   }
@@ -276,7 +258,7 @@ function downloadRevenueCsv() {
   const s = exportSummary.value
   csvRows.push('')
   csvRows.push([t('statistics.exportSummary'), '', '',
-    s.acupunctureIncome.toFixed(2), s.herbIncome.toFixed(2), s.otherServiceIncome.toFixed(2),
+    s.acupunctureIncome.toFixed(2), s.consultationIncome.toFixed(2), s.herbIncome.toFixed(2), s.otherServiceIncome.toFixed(2),
     s.totalTax.toFixed(2), s.totalPaid.toFixed(2), '',
   ].join(','))
 
@@ -496,6 +478,10 @@ onMounted(async () => {
           <div class="es-card herbs">
             <div class="es-label">{{ t('statistics.herbIncome') }}</div>
             <div class="es-value">{{ cs }}{{ formatMoney(exportSummary.herbIncome) }}</div>
+          </div>
+          <div class="es-card acupuncture">
+            <div class="es-label">{{ t('statistics.exportConsultation') }}</div>
+            <div class="es-value">{{ cs }}{{ formatMoney(exportSummary.consultationIncome) }}</div>
           </div>
           <div class="es-card other" v-if="exportSummary.otherServiceIncome > 0">
             <div class="es-label">{{ t('statistics.otherIncome') }}</div>

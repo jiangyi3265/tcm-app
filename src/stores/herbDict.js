@@ -3,9 +3,24 @@ import { ref, computed } from 'vue'
 import { herbDictApi } from '../utils/api'
 import { readStoredJson, writeStoredJson } from '../utils/storage'
 import defaultHerbs from '../utils/herbsData.json'
+import { useFormulasStore } from './formulas'
+import { useInventoryStore } from './inventory'
 
 export const useHerbDictStore = defineStore('herbDict', () => {
   const herbs = ref([])
+  let refreshPromise = null
+  let revision = 0
+
+  async function refreshFromApi() {
+    if (refreshPromise) return refreshPromise
+    const requestRevision = revision
+    refreshPromise = herbDictApi.list().then((list) => {
+      if (requestRevision !== revision) return
+      herbs.value = list
+      saveState()
+    }).finally(() => { refreshPromise = null })
+    return refreshPromise
+  }
 
   function init() {
     const stored = readStoredJson('tcm_herb_dict', []) || []
@@ -37,33 +52,43 @@ export const useHerbDictStore = defineStore('herbDict', () => {
 
   async function addHerb(data) {
     const created = await herbDictApi.create(data)
+    revision += 1
     herbs.value.unshift(created); saveState(); return created
   }
   async function updateHerb(id, data) {
     const updated = await herbDictApi.update(id, data)
+    revision += 1
     const idx = herbs.value.findIndex((h) => h.id === id)
     if (idx !== -1) herbs.value[idx] = updated
-    saveState(); return updated
+    saveState()
+    await Promise.allSettled([
+      useFormulasStore().refreshFromApi(),
+      useInventoryStore().refreshFromApi(),
+    ])
+    return updated
   }
   async function deleteHerb(id) {
     const updated = await herbDictApi.softDelete(id)
+    revision += 1
     const idx = herbs.value.findIndex((h) => h.id === id)
     if (idx !== -1) herbs.value[idx] = updated
     saveState()
   }
   async function restoreHerb(id) {
     const updated = await herbDictApi.restore(id)
+    revision += 1
     const idx = herbs.value.findIndex((h) => h.id === id)
     if (idx !== -1) herbs.value[idx] = updated
     saveState()
   }
   async function hardDeleteHerb(id) {
     await herbDictApi.hardDelete(id)
+    revision += 1
     herbs.value = herbs.value.filter((h) => h.id !== id)
     saveState()
   }
 
   init()
 
-  return { herbs, activeHerbs, deletedHerbs, categories, getHerb, findByName, addHerb, updateHerb, deleteHerb, restoreHerb, hardDeleteHerb }
+  return { herbs, activeHerbs, deletedHerbs, categories, getHerb, findByName, addHerb, updateHerb, deleteHerb, restoreHerb, hardDeleteHerb, refreshFromApi }
 })

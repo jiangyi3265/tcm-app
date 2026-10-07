@@ -337,6 +337,12 @@ export const stripeApi = {
 }
 
 export const inventoryApi = {
+  async recognizeInvoice(file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    return requestMultipart('/api/inventory/invoices/recognize', formData, 'Invoice recognition failed')
+  },
+  confirmInvoice(body) { return request('/api/inventory/invoices/confirm', { method: 'POST', body }) },
   list(options = {}) {
     const params = buildQuery({ includeDeleted: options.includeDeleted ? true : undefined })
     return request(`/api/inventory${params}`)
@@ -467,6 +473,11 @@ export const herbDictApi = {
   softDelete(id) { return request(`/api/herb-dict/${id}/delete`, { method: 'PATCH' }) },
   restore(id) { return request(`/api/herb-dict/${id}/restore`, { method: 'PATCH' }) },
   hardDelete(id) { return request(`/api/herb-dict/${id}`, { method: 'DELETE' }) },
+}
+
+export const aiSettingsApi = {
+  get() { return request('/api/ai/settings') },
+  update(body) { return request('/api/ai/settings', { method: 'PUT', body }) },
 }
 
 export const meridiansApi = {

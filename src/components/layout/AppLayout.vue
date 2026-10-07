@@ -10,6 +10,7 @@ import { useInventoryStore } from '../../stores/inventory'
 import { useSettingsStore } from '../../stores/settings'
 import { useTemplatesStore } from '../../stores/templates'
 import { useAcupointsStore } from '../../stores/acupoints'
+import { useHerbDictStore } from '../../stores/herbDict'
 
 const route = useRoute()
 const patientsStore = usePatientsStore()
@@ -19,9 +20,15 @@ const inventoryStore = useInventoryStore()
 const settingsStore = useSettingsStore()
 const templatesStore = useTemplatesStore()
 const acupointsStore = useAcupointsStore()
+const herbDictStore = useHerbDictStore()
 const sidebarCollapsed = ref(false)
 const isMobile = ref(false)
-const inventoryRouteNames = new Set(['inventory', 'pharmacy', 'consultation-new', 'consultation-detail'])
+const inventoryRouteNames = new Set(['inventory', 'pharmacy', 'formulas', 'consultation-new', 'consultation-detail'])
+const lightweightRoutes = new Set(['inventory', 'formulas', 'audit-logs'])
+const clinicalRoutes = new Set(['admin', 'consultation-new', 'consultation-detail'])
+let coreDataLoaded = false
+let clinicalDataLoaded = false
+let settingsLoaded = false
 
 function checkMobile() {
   isMobile.value = window.innerWidth <= 1024
@@ -29,14 +36,21 @@ function checkMobile() {
 }
 
 async function refreshWorkspaceData() {
-  await Promise.allSettled([
-    patientsStore.refreshFromApi(),
-    consultationsStore.refreshFromApi(),
-    appointmentsStore.refreshFromApi(),
-    settingsStore.refreshFromApi(),
-    templatesStore.refreshFromApi(),
-    acupointsStore.refreshFromApi(),
-  ])
+  const name = String(route.name || '')
+  const requests = [herbDictStore.refreshFromApi()]
+  if (!settingsLoaded) {
+    settingsLoaded = true
+    requests.push(settingsStore.refreshFromApi())
+  }
+  if (!lightweightRoutes.has(name) && !coreDataLoaded) {
+    coreDataLoaded = true
+    requests.push(patientsStore.refreshFromApi(), consultationsStore.refreshFromApi(), appointmentsStore.refreshFromApi())
+  }
+  if (clinicalRoutes.has(name) && !clinicalDataLoaded) {
+    clinicalDataLoaded = true
+    requests.push(templatesStore.refreshFromApi(), acupointsStore.refreshFromApi())
+  }
+  await Promise.allSettled(requests)
 }
 
 function refreshInventoryForCurrentRoute() {
@@ -53,6 +67,7 @@ onMounted(() => {
 onUnmounted(() => window.removeEventListener('resize', checkMobile))
 
 watch(() => route.name, () => {
+  void refreshWorkspaceData()
   refreshInventoryForCurrentRoute()
 })
 

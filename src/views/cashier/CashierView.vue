@@ -14,6 +14,7 @@ import { useEmailSimulator } from '../../utils/emailSimulator'
 import { consultationsApi, filesApi } from '../../utils/api'
 import { runStripeTerminalPayment } from '../../utils/stripeTerminalPayment'
 import {
+  getActivePrescriptions,
   getLatestPaymentTime,
   getOutstandingAmount,
   getPaidAmount,
@@ -482,9 +483,9 @@ async function handleSendPreviewEmail() {
             </template>
           </el-table-column>
         </el-table>
-        <div v-if="(selectedConsult.prescriptions || []).length > 0" style="margin-top:12px">
+        <div v-if="getActivePrescriptions(selectedConsult).length > 0" style="margin-top:12px">
           <div style="font-weight:600; color:#555; margin-bottom:6px">药品收费</div>
-          <el-table :data="selectedConsult.prescriptions || []" size="small">
+          <el-table :data="getActivePrescriptions(selectedConsult)" size="small">
             <el-table-column :label="'方剂'" min-width="120">
               <template #default="{ row }">{{ row.formulaName || '-' }}</template>
             </el-table-column>

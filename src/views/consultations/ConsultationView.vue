@@ -14,6 +14,7 @@ import { useAcupointsStore } from '../../stores/acupoints'
 import { useHerbDictStore } from '../../stores/herbDict'
 import { useTemplatesStore } from '../../stores/templates'
 import { hasPermission, getAuthorizedServiceKeys } from '../../utils/permissions'
+import { getRevenueCategory } from '../../utils/revenueCategories'
 import { formatDate, formatDateTime, todayDate } from '../../utils/dateUtils'
 import { getCountryLabel, getProvinceLabel } from '../../utils/countryRegionOptions'
 import { TCM_OPTIONS, CHIEF_COMPLAINTS, emptyDiff, normalizeDiff } from '../../utils/sampleData'
@@ -1112,7 +1113,7 @@ let rxAutosavePromise = null
 const formulaSuggestions = computed(() => {
   if (!formulaSearch.value || formulaSearch.value.trim() === '') return []
   const q = formulaSearch.value.trim().toLowerCase()
-  return (formulasStore.formulas || []).filter(f => f.name && f.name.toLowerCase().includes(q))
+  return formulasStore.activeFormulas.filter(f => f.name && f.name.toLowerCase().includes(q))
 })
 const rxForm = ref({
   id: '',
@@ -2323,8 +2324,10 @@ const priceListServiceOptions = computed(() => {
         key: value,
         value,
         name,
+        serviceKey: Object.keys(settingsStore.serviceTypes).find((key) => normalizeServiceMatchText(settingsStore.serviceTypes[key].label) === normalizeServiceMatchText(name)) || '',
+        revenueCategory: getRevenueCategory({ name }, settingsStore.serviceTypes, settingsStore.serviceRevenueCategories),
         price: Number(item.price || 0),
-        taxable: item.taxable !== false,
+        taxable: ['herbs', 'others'].includes(getRevenueCategory({ name }, settingsStore.serviceTypes, settingsStore.serviceRevenueCategories)),
         priceListName: priceList.name || '',
         showSource,
       })
@@ -2339,6 +2342,8 @@ function onServiceSelect(row, selectedValue) {
     row.name = match.name
     row.price = match.price
     row.taxable = match.taxable
+    row.serviceKey = match.serviceKey
+    row.revenueCategory = match.revenueCategory
   }
 }
 

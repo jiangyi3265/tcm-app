@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useInventoryStore } from '../../stores/inventory'
@@ -12,10 +12,12 @@ import { hasPermission } from '../../utils/permissions'
 import { bindHerbSelection, getInventoryHerbMeta } from '../../utils/herbBinding'
 import { parseCsvText, rowsToObjects, toNumber } from '../../utils/csvImport'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import InventoryInvoiceImport from '../../components/InventoryInvoiceImport.vue'
 
 const { t, te, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
+const isMobile = inject('isMobile', ref(false))
 
 const inventoryStore = useInventoryStore()
 const authStore = useAuthStore()
@@ -28,6 +30,7 @@ const roles = computed(() => authStore.roles)
 const canEdit = computed(() => hasPermission(roles.value, 'inventory.edit'))
 
 const activeTab = ref('powder')
+const showInvoiceImport = ref(false)
 const lowStockFilter = ref(false)
 const searchQuery = ref('')
 const PAGE_SIZE = 20
@@ -238,7 +241,7 @@ function formatUsageAmount(value) {
 
 function syncHerbBinding(target, herbId) {
   const herb = herbById.value.get(herbId) || herbById.value.get(String(herbId)) || null
-  return bindHerbSelection(target, herb)
+  return herb ? bindHerbSelection(target, herb) : { ...target }
 }
 
 function handlePatentMedicineSelection(target, name) {
@@ -472,6 +475,7 @@ onMounted(() => {
     lowStockFilter.value = true
   }
   void inventoryStore.refreshFromApi()
+  void herbDictStore.refreshFromApi().catch((error) => ElMessage.error(error.message))
 })
 
 function toggleLowStockFilter() {
@@ -677,6 +681,7 @@ async function openAdjustmentHistory(item) {
         </el-button>
       </div>
       <div style="display:flex;gap:8px">
+        <el-button v-if="roles.includes('admin') && activeTab !== 'pills'" @click="showInvoiceImport = !showInvoiceImport">{{ t('invoiceImport.title') }}</el-button>
         <el-button
           v-if="canEdit"
           type="danger"
@@ -699,6 +704,7 @@ async function openAdjustmentHistory(item) {
     </div>
 
     <!-- 分类标签页 -->
+    <InventoryInvoiceImport v-if="showInvoiceImport" :category="activeTab" :branch-id="branchesStore.currentBranchId" :currency="settingsStore.currency" @close="showInvoiceImport = false" />
     <el-card class="inventory-card">
       <el-tabs v-model="activeTab">
         <el-tab-pane v-for="(config, key) in CATEGORY_CONFIG" :key="key" :label="config.label" :name="key">
@@ -824,7 +830,7 @@ async function openAdjustmentHistory(item) {
                 <span v-else>{{ row.gramsPerPacket ? row.gramsPerPacket + 'g' : '-' }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.operation')" width="240" fixed="right">
+            <el-table-column :label="t('common.operation')" width="240" :fixed="isMobile ? false : 'right'">
               <template #default="{ row }">
                 <div v-if="editingId === row.id">
                   <el-button size="small" type="primary" text @click="saveEdit(row.id)">{{ t('common.save') }}</el-button>
@@ -1052,10 +1058,13 @@ async function openAdjustmentHistory(item) {
 
 .page-toolbar {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   margin-bottom: 16px;
   gap: 12px;
 }
+
+.page-toolbar > div { flex-wrap: wrap; min-width: 0; }
 
 .inventory-card { border-radius: 12px; }
 

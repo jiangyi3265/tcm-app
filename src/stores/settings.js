@@ -237,6 +237,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const taxRate = ref(0.13)
   const rooms = ref([])
   const serviceTypes = ref({ ...SERVICE_TYPES })
+  const serviceRevenueCategories = ref({})
   const practitionerInterval = ref(20)
   const publicBookingAdvanceDays = ref(15)
   const publicBookingDripWindowDays = ref(7)
@@ -268,6 +269,7 @@ export const useSettingsStore = defineStore('settings', () => {
     taxRate.value = data?.taxRate ?? 0.13
     rooms.value = normalizeRooms(data?.rooms || [])
     serviceTypes.value = normalizeServiceTypes(data?.serviceTypes || SERVICE_TYPES)
+    serviceRevenueCategories.value = data?.serviceRevenueCategories || {}
     practitionerInterval.value = data?.practitionerInterval ?? 20
     publicBookingAdvanceDays.value = data?.publicBookingAdvanceDays ?? 15
     publicBookingDripWindowDays.value = data?.publicBookingDripWindowDays ?? 7
@@ -327,6 +329,7 @@ export const useSettingsStore = defineStore('settings', () => {
       taxRate: taxRate.value,
       rooms: rooms.value,
       serviceTypes: serviceTypes.value,
+      serviceRevenueCategories: serviceRevenueCategories.value,
       practitionerInterval: practitionerInterval.value,
       publicBookingAdvanceDays: publicBookingAdvanceDays.value,
       publicBookingDripWindowDays: publicBookingDripWindowDays.value,
@@ -439,6 +442,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function updateSettings(updates) {
     if (updates.taxRate !== undefined) taxRate.value = updates.taxRate
+    if (updates.serviceRevenueCategories !== undefined) serviceRevenueCategories.value = updates.serviceRevenueCategories
     if (updates.practitionerInterval !== undefined) practitionerInterval.value = updates.practitionerInterval
     if (updates.publicBookingAdvanceDays !== undefined) publicBookingAdvanceDays.value = updates.publicBookingAdvanceDays
     if (updates.publicBookingDripWindowDays !== undefined) publicBookingDripWindowDays.value = updates.publicBookingDripWindowDays
@@ -549,6 +553,7 @@ export const useSettingsStore = defineStore('settings', () => {
     rooms,
     activeRooms,
     serviceTypes,
+    serviceRevenueCategories,
     practitionerInterval,
     publicBookingAdvanceDays,
     publicBookingDripWindowDays,

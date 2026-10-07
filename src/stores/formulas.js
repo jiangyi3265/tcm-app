@@ -8,6 +8,22 @@ const TOKEN_KEY = 'tcm_token'
 
 export const useFormulasStore = defineStore('formulas', () => {
   const formulas = ref([])
+  let refreshPromise = null
+  let revision = 0
+
+  function upsertFormula(formula) {
+    revision += 1
+    const index = formulas.value.findIndex((item) => item.id === formula.id)
+    if (index === -1) formulas.value.unshift(formula)
+    else formulas.value[index] = formula
+    saveState()
+  }
+
+  async function loadFormula(id) {
+    const formula = await formulasApi.get(id)
+    upsertFormula(formula)
+    return formula
+  }
 
   function init() {
     const saved = readStoredJson('tcm_formulas', null)
@@ -61,51 +77,44 @@ export const useFormulasStore = defineStore('formulas', () => {
 
   async function addFormula(data) {
     const created = await formulasApi.create(data)
-    formulas.value.unshift(created)
-    saveState()
-    // 从后端重新刷新确保数据一致性
-    refreshFromApi().catch(() => {})
+    upsertFormula(created)
     return created
   }
 
   async function updateFormula(id, data) {
     const updated = await formulasApi.update(id, data)
-    const idx = formulas.value.findIndex((f) => f.id === id)
-    if (idx !== -1) formulas.value[idx] = updated
-    saveState()
-    // 从后端重新刷新确保数据一致性
-    refreshFromApi().catch(() => {})
+    upsertFormula(updated)
     return updated
   }
 
   async function deleteFormula(id) {
     const updated = await formulasApi.softDelete(id)
-    const idx = formulas.value.findIndex((f) => f.id === id)
-    if (idx !== -1) formulas.value[idx] = updated
-    saveState()
+    upsertFormula(updated)
   }
 
   async function restoreFormula(id) {
     const updated = await formulasApi.restore(id)
-    const idx = formulas.value.findIndex((f) => f.id === id)
-    if (idx !== -1) formulas.value[idx] = updated
-    saveState()
+    upsertFormula(updated)
   }
 
   async function hardDeleteFormula(id) {
     await formulasApi.hardDelete(id)
+    revision += 1
     formulas.value = formulas.value.filter((f) => f.id !== id)
     saveState()
   }
 
   async function refreshFromApi() {
-    try {
-      const list = await formulasApi.list()
+    if (refreshPromise) return refreshPromise
+    const requestRevision = revision
+    refreshPromise = formulasApi.list().then((list) => {
+      if (requestRevision !== revision) return
       formulas.value = list
       saveState()
-    } catch (e) {
-      console.warn('方剂刷新失败:', e.message)
-    }
+    }).catch((error) => {
+      console.warn('方剂刷新失败:', error.message)
+    }).finally(() => { refreshPromise = null })
+    return refreshPromise
   }
 
   const deletedFormulas = computed(() => formulas.value.filter((f) => f.deletedAt))
@@ -117,6 +126,7 @@ export const useFormulasStore = defineStore('formulas', () => {
     activeFormulas,
     deletedFormulas,
     getFormula,
+    loadFormula,
     findByName,
     addFormula,
     updateFormula,

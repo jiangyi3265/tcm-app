@@ -26,7 +26,9 @@ const PAGE_SIZE = 20
 const currentPage = ref(1)
 const requestedEditId = computed(() => String(route.query.edit || ''))
 const editTargetFormula = computed(() => requestedEditId.value ? formulasStore.getFormula(requestedEditId.value) : null)
-const isDedicatedEditMode = computed(() => Boolean(requestedEditId.value && editTargetFormula.value))
+const isDedicatedEditMode = computed(() => Boolean(requestedEditId.value))
+const loadingEdit = ref(false)
+const editError = ref('')
 
 const FORMULA_CATEGORIES = [
   { value: '调和剂', key: 'harmonizing' },
@@ -68,8 +70,8 @@ function applyHerbSelection(target, herbId) {
   return bindHerbSelection(target, herbDictStore.getHerb(herbId), { nameKey: 'herbName' })
 }
 
-function syncDraftHerb(draftRef, herbId) {
-  draftRef.value = applyHerbSelection(draftRef.value, herbId)
+function syncDraftHerb(draft, herbId) {
+  Object.assign(draft, applyHerbSelection(draft, herbId))
 }
 
 function syncRowHerb(row, herbId) {
@@ -87,7 +89,7 @@ function validateFormulaHerbs(items = []) {
 // ── 过滤 ──
 const filteredFormulas = computed(() => {
   if (isDedicatedEditMode.value) {
-    return [editTargetFormula.value]
+    return editTargetFormula.value ? [editTargetFormula.value] : []
   }
   let list = formulasStore.activeFormulas
   if (filterCategory.value) {
@@ -185,18 +187,27 @@ function openEditWindow(formula) {
   window.open(target.href, '_blank', 'noopener')
 }
 
-watch(
-  () => [route.query.edit, formulasStore.formulas.length],
-  ([editId]) => {
-    if (!editId || editing.value) return
-    const formula = formulasStore.getFormula(String(editId))
-    if (formula) startEdit(formula)
-  },
-  { immediate: true },
-)
+let editRequest = 0
+watch(requestedEditId, async (editId) => {
+  const request = ++editRequest
+  editing.value = false
+  expandedId.value = null
+  editError.value = ''
+  if (!editId) return
+  loadingEdit.value = true
+  try {
+    const formula = await formulasStore.loadFormula(editId)
+    if (request === editRequest) startEdit(formula)
+  } catch (error) {
+    if (request === editRequest) editError.value = error.message || t('formulaView.saveFailed')
+  } finally {
+    if (request === editRequest) loadingEdit.value = false
+  }
+}, { immediate: true })
 
 onMounted(() => {
-  formulasStore.refreshFromApi().catch(() => {})
+  void herbDictStore.refreshFromApi().catch((error) => ElMessage.error(error.message))
+  if (!requestedEditId.value) void formulasStore.refreshFromApi()
 })
 
 function cancelEdit() {
@@ -321,6 +332,8 @@ const categoryCountEntries = computed(() => {
 
 <template>
   <div class="formula-view" :class="{ 'dedicated-edit': isDedicatedEditMode }">
+    <el-alert v-if="editError" :title="editError" type="error" :closable="false" />
+    <el-skeleton v-if="loadingEdit" :rows="5" animated />
     <!-- 顶部统计 -->
     <div v-if="!isDedicatedEditMode" class="fv-stats">
       <div class="fv-stat-card main">
@@ -421,7 +434,7 @@ const categoryCountEntries = computed(() => {
     </transition>
 
     <!-- 方剂列表 -->
-    <div class="fv-list">
+    <div v-show="!loadingEdit" class="fv-list">
       <div v-for="formula in pagedFormulas" :key="formula.id" class="fv-card" :class="{ expanded: expandedId === formula.id }">
         <!-- 方剂卡头 -->
         <div class="fv-card-header" @click="!isDedicatedEditMode && toggleExpand(formula)">

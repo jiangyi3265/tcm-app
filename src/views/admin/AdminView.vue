@@ -31,7 +31,8 @@ import { EMAIL_TEMPLATE_KEYS, EMAIL_TEMPLATE_REGISTRY, EMAIL_TEMPLATE_VARIABLES,
 import { naturalCompareText, naturalSortedUnique } from '../../utils/naturalSort'
 import { compressImageFile } from '../../utils/imageCompress'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { authApi, bootstrapApi, filesApi, usersApi } from '../../utils/api'
+import { authApi, bootstrapApi, filesApi, usersApi, aiSettingsApi } from '../../utils/api'
+import { getRevenueCategory, REVENUE_CATEGORIES } from '../../utils/revenueCategories'
 import * as XLSX from 'xlsx'
 
 const { t } = useI18n()
@@ -54,7 +55,22 @@ const activeTab = ref('users')
 onMounted(() => {
   consultationsStore.refreshDeletedPrescriptions?.().catch(() => {})
   resetStripeSettingsForm()
+  loadAiSettings().catch((error) => ElMessage.error(error.message))
 })
+
+const aiSettingsForm = reactive({ apiKey: '', model: 'deepseek-flash', configured: false, apiKeyMasked: '' })
+const savingAiSettings = ref(false)
+async function loadAiSettings() {
+  Object.assign(aiSettingsForm, await aiSettingsApi.get(), { apiKey: '' })
+}
+async function saveAiSettings() {
+  savingAiSettings.value = true
+  try {
+    Object.assign(aiSettingsForm, await aiSettingsApi.update({ apiKey: aiSettingsForm.apiKey, model: aiSettingsForm.model }), { apiKey: '' })
+    ElMessage.success(t('aiSettings.saved'))
+  } catch (error) { ElMessage.error(error.message) }
+  finally { savingAiSettings.value = false }
+}
 
 const herbOptions = computed(() => herbDictStore.activeHerbs)
 const CURRENCY_OPTIONS = [
@@ -1443,6 +1459,18 @@ async function updateRoomTags(room, tags) {
 
 // ========== Service type settings ==========
 const serviceEditForm = ref({})
+
+async function changeRevenueCategory(service, category) {
+  try {
+    await settingsStore.updateSettings({
+      serviceRevenueCategories: { ...settingsStore.serviceRevenueCategories, [service.key]: category },
+    })
+    await settingsStore.updateServiceType(service.key, { taxable: ['herbs', 'others'].includes(category) })
+    ElMessage.success(t('admin.saved'))
+  } catch (error) {
+    ElMessage.error(error.message || t('formulaView.saveFailed'))
+  }
+}
 const editingServiceKey = ref(null)
 const showAddServiceDialog = ref(false)
 const newServiceForm = ref({
@@ -2647,6 +2675,26 @@ async function deleteTemplate(tmpl) {
             </el-form>
           </div>
           <el-divider />
+          <h4>{{ t('aiSettings.title') }}</h4>
+          <p class="settings-help">{{ t('aiSettings.description') }}</p>
+          <el-form :model="aiSettingsForm" label-width="160px">
+            <el-form-item label="API Key">
+              <el-input v-model="aiSettingsForm.apiKey" type="password" show-password autocomplete="new-password" :placeholder="aiSettingsForm.apiKeyMasked || t('aiSettings.keyPlaceholder')" style="max-width:520px" />
+              <span style="margin-left:12px">{{ aiSettingsForm.configured ? t('aiSettings.configured') : t('aiSettings.notConfigured') }}</span>
+            </el-form-item>
+            <el-form-item :label="t('aiSettings.model')">
+              <el-select v-model="aiSettingsForm.model" style="max-width:520px">
+                <el-option value="deepseek-flash" label="DeepSeek Flash" />
+                <el-option value="deepseek-pro" label="DeepSeek Pro" />
+                <el-option value="deepseek-v4-flash" label="DeepSeek V4 Flash" />
+                <el-option value="deepseek-v4-pro" label="DeepSeek V4 Pro" />
+                <el-option value="deepseek-chat" label="DeepSeek Chat" />
+                <el-option value="deepseek-reasoner" label="DeepSeek Reasoner" />
+              </el-select>
+            </el-form-item>
+            <el-form-item><el-button type="primary" :loading="savingAiSettings" @click="saveAiSettings">{{ t('common.save') }}</el-button></el-form-item>
+          </el-form>
+          <el-divider />
           <h4>Stripe POS 设置</h4>
           <p class="settings-help">
             Stripe POS 使用的 Publishable Key、Secret Key、Webhook Secret、Reader ID 都可在这里替换；密钥保存后只显示掩码。
@@ -2937,6 +2985,15 @@ async function deleteTemplate(tmpl) {
                 <el-input v-model="serviceEditForm.label" size="small" style="width: 120px" />
               </div>
               <span v-else>{{ row.label }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('admin.revenueCategory')" min-width="165">
+            <template #default="{ row }">
+              <el-select :model-value="getRevenueCategory(row, settingsStore.serviceTypes, settingsStore.serviceRevenueCategories)"
+                size="small" @change="changeRevenueCategory(row, $event)">
+                <el-option v-for="category in REVENUE_CATEGORIES" :key="category" :value="category"
+                  :label="t(`admin.revenueCategories.${category}`)" />
+              </el-select>
             </template>
           </el-table-column>
           <el-table-column :label="t('admin.totalDuration')" width="140">

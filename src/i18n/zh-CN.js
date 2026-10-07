@@ -923,6 +923,19 @@ export default {
   },
 
   // ── 库存管理 ──
+  aiSettings: {
+    title: 'DeepSeek AI 设置',
+    description: '用于问诊辅助和发票识别。密钥留空会保留已保存的密钥，发票识别使用 DeepSeek Flash。',
+    keyPlaceholder: '请输入 DeepSeek API Key', configured: '已配置', notConfigured: '未配置', model: '问诊模型', saved: 'AI 设置已保存',
+  },
+  invoiceImport: {
+    title: '导入采购发票', description: '上传 PDF 或图片，核对药材、数量和折扣前单价后更新库存。',
+    chooseFile: '选择发票', fileLimit: '请选择不超过 10 MB 的发票。', invoiceName: '发票药材名称', dictionaryHerb: '药材字典匹配',
+    target: '更新目标库存', newInventory: '新建库存条目', quantity: '入库数量', unit: '库存单位', purchasePrice: '折扣前采购单价',
+    sellingPrice: '销售单价 ×2', gramsPerPacket: '每单位克数', confirm: '确认并更新库存', success: '发票已入库',
+    reviewHint: '请核对单位和币种。数量仅追加一次，采购价格会覆盖原价格，销售价格按采购价格的两倍设置。',
+    unitChanged: '库存单位与发票不同，请按所选库存单位重新核对并填写数量和单价。',
+  },
   inventory: {
     // 分类
     powder: '粉剂',
@@ -1285,6 +1298,8 @@ export default {
     rxPreference: '处方倾向',
     createdDate: '创建日期',
     appointmentInterval: '预约间隔(min)',
+    revenueCategory: '财报种类',
+    revenueCategories: { acupuncture: '针灸（无 HST）', consultation: '问诊（无 HST）', herbs: '草药（有 HST）', others: '其他（有 HST）' },
     allBranches: '全部',
     realName: '真实姓名',
     loginEmail: '登录邮箱',
@@ -1718,6 +1733,7 @@ export default {
     exportPatient: '患者',
     exportPractitioner: '医师',
     exportAcupuncture: '针灸收入',
+    exportConsultation: '问诊收入',
     exportHerbs: '药物收入',
     exportOther: '其他收入',
     exportTax: '税额',

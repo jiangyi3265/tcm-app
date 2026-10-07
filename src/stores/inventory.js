@@ -83,10 +83,9 @@ export const useInventoryStore = defineStore('inventory', () => {
     const previousById = new Map(previousItems.map((item) => [String(item.id), item]))
     return nextItems.map((item) => {
       const previous = previousById.get(String(item.id))
-      const incomingUsage = numericStockValue(item.last30DaysUsage)
       const previousUsage = numericStockValue(previous?.last30DaysUsage)
 
-      if (incomingUsage <= 0 && previousUsage > 0) {
+      if (item.last30DaysUsage == null && previousUsage > 0) {
         return { ...item, last30DaysUsage: previousUsage }
       }
       return item
