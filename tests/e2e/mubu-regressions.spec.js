@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test'
 
-async function fixture(page) {
+async function fixture(page, { stockHerbId = 'server-herb', dictionaryEmpty = false } = {}) {
   const herb = { id: 'server-herb', name: '通草', pinyin: 'Tong Cao', isActive: true }
-  const stock = { id: 'stock', herbDictId: herb.id, name: herb.name, category: 'powder', unit: 'bag', quantity: 111, gramsPerPacket: 6, pricePerUnit: 4, isActive: true, last30DaysUsage: 0 }
+  const stock = { id: 'stock', herbDictId: stockHerbId, name: herb.name, category: 'powder', unit: 'bag', quantity: 111, gramsPerPacket: 6, pricePerUnit: 4, isActive: true, last30DaysUsage: 0 }
   const formulas = [
     { id: 'first', name: 'First formula', isActive: true, items: [{ herbDictId: herb.id, herbName: herb.name, dosage: 6, unit: 'g' }] },
     { id: 'second', name: 'Second formula', isActive: true, items: [{ herbDictId: herb.id, herbName: herb.name, dosage: 10, unit: 'g' }] },
@@ -22,7 +22,7 @@ async function fixture(page) {
     const method = route.request().method()
     if (method === 'GET') reads.push(path)
     let body = []
-    if (path === '/api/herb-dict') body = [herb]
+    if (path === '/api/herb-dict') body = dictionaryEmpty ? [] : [herb]
     else if (path === '/api/formulas') {
       if (method === 'POST') { body = { ...route.request().postDataJSON(), id: 'created' }; formulas.push(body); writes.push(body) }
       else body = formulas
@@ -99,6 +99,30 @@ test('invoice preview maps a herb and sends original purchase price once', async
   expect(writes).toHaveLength(1)
   expect(writes[0].items[0]).toMatchObject({ herbDictId: 'server-herb', inventoryId: 'stock', quantity: 3, purchasePrice: 2.5 })
   expect(errors).toEqual([])
+})
+
+test('editing legacy inventory replaces an obsolete dictionary ID with its unique current herb', async ({ page }) => {
+  const { writes } = await fixture(page, { stockHerbId: 'obsolete-dictionary-id' })
+  await page.goto('/inventory')
+  const row = page.locator('.inventory-card .el-table__body tr').filter({ hasText: '通草' }).first()
+  await row.getByRole('button', { name: 'Edit', exact: true }).click()
+  await expect(row.locator('.el-select').first()).toContainText('通草')
+  await row.getByRole('spinbutton').last().fill('10')
+  await row.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect.poll(() => writes.length).toBe(1)
+  expect(writes[0]).toMatchObject({ herbDictId: 'server-herb', name: '通草', quantity: 111, gramsPerPacket: 10 })
+})
+
+test('existing unbound powder remains editable without erasing its name or quantity', async ({ page }) => {
+  const { writes } = await fixture(page, { stockHerbId: null, dictionaryEmpty: true })
+  await page.goto('/inventory')
+  const row = page.locator('.inventory-card .el-table__body tr').filter({ hasText: '通草' }).first()
+  await row.getByRole('button', { name: 'Edit', exact: true }).click()
+  await expect(row.locator('.el-select').first()).toContainText('通草')
+  await row.getByRole('spinbutton').last().fill('10')
+  await row.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect.poll(() => writes.length).toBe(1)
+  expect(writes[0]).toMatchObject({ name: '通草', quantity: 111, gramsPerPacket: 10 })
 })
 
 test('AI settings shows a mask and preserves the key when left blank', async ({ page }) => {

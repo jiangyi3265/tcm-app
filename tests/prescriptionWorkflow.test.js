@@ -5,7 +5,20 @@ import {
   getPaidAmount,
   getOutstandingAmount,
   getPaymentStatus,
+  getActivePrescriptions,
+  getBillablePrescriptionTotal,
 } from '../src/utils/prescriptionWorkflow.js'
+
+test('all supported recycle markers exclude a prescription from invoices and revenue', () => {
+  const consultation = { prescriptions: [
+    { id: 'active', rxStatus: 'pending', subtotal: 15 },
+    { id: 'date-deleted', rxStatus: 'pending', subtotal: 30, deletedAt: '2026-10-01' },
+    { id: 'status-deleted', rxStatus: 'deleted', subtotal: 40 },
+    { id: 'legacy-deleted', rxStatus: 'pending', subtotal: 50, deleted: true },
+  ] }
+  assert.deepEqual(getActivePrescriptions(consultation).map((rx) => rx.id), ['active'])
+  assert.equal(getBillablePrescriptionTotal(consultation), 15)
+})
 
 test('legacy 已付款但无 paymentRecords 时生成合成记录', () => {
   const consultation = {

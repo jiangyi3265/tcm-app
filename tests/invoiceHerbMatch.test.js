@@ -18,3 +18,15 @@ test('fuzzy and ambiguous matches require manual selection', () => {
   assert.equal(exactInvoiceHerb('Tong Cao', [...herbs, { id: '4', name: '通草 B', pinyin: 'Tong Cao', isActive: true }]), null)
   assert.equal(exactInvoiceHerb('', herbs), null)
 })
+
+test('legacy bilingual names match the exact Chinese or pinyin part, preserving preparations', () => {
+  const dictionary = [
+    { id: 'tc', name: '通草(Tong Cao)', isActive: true },
+    { id: 'gc', name: '炙甘草(Zhi Gan Cao)', isActive: true },
+  ]
+  assert.equal(exactInvoiceHerb('通草', dictionary)?.id, 'tc')
+  assert.equal(exactInvoiceHerb('Tong Cao', dictionary)?.id, 'tc')
+  assert.equal(exactInvoiceHerb('炙甘草', dictionary)?.id, 'gc')
+  assert.equal(exactInvoiceHerb('甘草', dictionary), null)
+  assert.equal(exactInvoiceHerb('通草', [...dictionary, { id: 'duplicate', name: '通草（Tong Cao）', isActive: true }]), null)
+})

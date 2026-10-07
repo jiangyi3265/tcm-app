@@ -50,7 +50,7 @@ async function recognize(upload) {
   if (!file || file.size > 10 * 1024 * 1024) return ElMessage.error(t('invoiceImport.fileLimit'))
   busy.value = true; error.value = ''; imported.value = false; preview.value = null; rows.value = []
   try {
-    await herbs.refreshFromApi()
+    await herbs.refreshFromApi({ force: true })
     preview.value = await inventoryApi.recognizeInvoice(file)
     invoiceCurrency.value = preview.value.currency || props.currency
     rows.value = preview.value.items.map((line) => {
@@ -71,7 +71,7 @@ async function confirm() {
   try {
     await inventoryApi.confirmInvoice({ invoiceId: preview.value.invoiceId, currency: invoiceCurrency.value, items: rows.value })
     imported.value = true
-    await inventory.refreshFromApi()
+    await inventory.refreshFromApi({ force: true })
     ElMessage.success(t('invoiceImport.success'))
   } catch (failure) { error.value = failure.message }
   finally { busy.value = false }

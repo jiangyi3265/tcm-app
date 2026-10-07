@@ -5,6 +5,8 @@ import { readStoredJson, writeStoredJson } from '../utils/storage'
 
 export const useInventoryStore = defineStore('inventory', () => {
   const items = ref([])
+  let refreshPromise = null
+  let revision = 0
 
   function normalizeInventoryCategory(category) {
     const text = String(category || '').trim().toLowerCase().replace(/[-\s]+/g, '_')
@@ -52,6 +54,14 @@ export const useInventoryStore = defineStore('inventory', () => {
 
   function saveState() {
     writeStoredJson('tcm_inventory', items.value)
+  }
+
+  function upsertItem(item) {
+    revision += 1
+    const index = items.value.findIndex((current) => current.id === item.id)
+    if (index === -1) items.value.push(item)
+    else items.value[index] = item
+    saveState()
   }
 
   function getItem(id) {
@@ -117,10 +127,7 @@ export const useInventoryStore = defineStore('inventory', () => {
       isActive: true,
     }
     const created = normalizeInventoryItem(await inventoryApi.create(newItem))
-    items.value.push(created)
-    saveState()
-    // 从后端重新刷新确保数据一致性
-    await refreshFromApi()
+    upsertItem(created)
     return created
   }
 
@@ -128,10 +135,7 @@ export const useInventoryStore = defineStore('inventory', () => {
     const idx = items.value.findIndex((i) => i.id === id)
     if (idx !== -1) {
       const updated = normalizeInventoryItem(await inventoryApi.update(id, updates))
-      items.value[idx] = updated
-      saveState()
-      // 从后端重新刷新确保数据一致性
-      await refreshFromApi()
+      upsertItem(updated)
       return updated
     }
     return null
@@ -139,22 +143,17 @@ export const useInventoryStore = defineStore('inventory', () => {
 
   async function deleteItem(id) {
     const updated = normalizeInventoryItem(await inventoryApi.softDelete(id))
-    const idx = items.value.findIndex((i) => i.id === id)
-    if (idx !== -1) items.value[idx] = updated
-    saveState()
-    await refreshFromApi()
+    upsertItem(updated)
   }
 
   async function restoreItem(id) {
     const updated = normalizeInventoryItem(await inventoryApi.restore(id))
-    const idx = items.value.findIndex((i) => i.id === id)
-    if (idx !== -1) items.value[idx] = updated
-    saveState()
-    await refreshFromApi()
+    upsertItem(updated)
   }
 
   async function physicalDeleteItem(id) {
     await inventoryApi.hardDelete(id)
+    revision += 1
     items.value = items.value.filter((i) => i.id !== id)
     saveState()
     return true
@@ -172,33 +171,35 @@ export const useInventoryStore = defineStore('inventory', () => {
     if (idx === -1) return false
     const current = items.value[idx]
     const updated = normalizeInventoryItem(await inventoryApi.adjust(id, delta, reason))
-    items.value[idx] = {
+    upsertItem({
       ...current,
       ...updated,
       last30DaysUsage: updated.last30DaysUsage ?? current.last30DaysUsage ?? 0,
-    }
-    saveState()
-    await refreshFromApi({ preserveUsage: true })
+    })
     return true
   }
 
   async function refreshFromApi(options = {}) {
-    try {
-      const previous = items.value
-      const list = await inventoryApi.list({ includeDeleted: true })
+    if (options.force) revision += 1
+    if (refreshPromise && !options.force) return refreshPromise
+    const requestRevision = revision
+    const pending = inventoryApi.list({ includeDeleted: true }).then((list) => {
+      if (requestRevision !== revision) return
       const normalized = list.map(normalizeInventoryItem)
-      items.value = options.preserveUsage ? preserveExistingUsage(normalized, previous) : normalized
+      items.value = options.preserveUsage ? preserveExistingUsage(normalized) : normalized
       saveState()
-    } catch (e) {
+    }).catch((e) => {
       console.warn('库存刷新失败:', e.message)
-    }
+    }).finally(() => { if (refreshPromise === pending) refreshPromise = null })
+    refreshPromise = pending
+    return pending
   }
 
   // 根据处方扣减库存
   async function deductFromPrescription(herbals, prescriptionType) {
     const result = await inventoryApi.deductPrescription(herbals, prescriptionType)
     if (result.success) {
-      await refreshFromApi()
+      await refreshFromApi({ force: true })
     }
     return result
   }
@@ -207,12 +208,12 @@ export const useInventoryStore = defineStore('inventory', () => {
   async function restoreFromPrescription(herbals, prescriptionType) {
     await inventoryApi.restorePrescription(herbals, prescriptionType)
     if (prescriptionType === 'none' || !herbals.length) return
-    await refreshFromApi()
+    await refreshFromApi({ force: true })
   }
 
   async function batchImport(itemsList) {
     const result = await inventoryApi.batchImport(itemsList)
-    await refreshFromApi()
+    await refreshFromApi({ force: true })
     return result
   }
 

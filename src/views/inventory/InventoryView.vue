@@ -13,6 +13,7 @@ import { bindHerbSelection, getInventoryHerbMeta } from '../../utils/herbBinding
 import { parseCsvText, rowsToObjects, toNumber } from '../../utils/csvImport'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import InventoryInvoiceImport from '../../components/InventoryInvoiceImport.vue'
+import { exactInvoiceHerb } from '../../utils/invoiceHerbMatch'
 
 const { t, te, locale } = useI18n()
 const route = useRoute()
@@ -363,12 +364,12 @@ function herbLookupTokens(herb) {
 
 function resolveInventoryHerbDictId(item = {}) {
   if (item.category === 'pills') return item.name || ''
-  if (item.herbDictId) return item.herbDictId
+  if (item.herbDictId && herbById.value.has(item.herbDictId)) return item.herbDictId
   for (const value of [item.name, item.alias, item.aliases, item.pinyin]) {
-    const matched = herbByLookupToken.value.get(normalizeLookupToken(value))
+    const matched = exactInvoiceHerb(value, herbDictStore.activeHerbs) || herbByLookupToken.value.get(normalizeLookupToken(value))
     if (matched?.id) return matched.id
   }
-  return null
+  return item.herbDictId || null
 }
 
 function stockQuantityClass(item) {
@@ -587,7 +588,11 @@ function startEdit(item) {
 async function saveEdit(id) {
   try {
     editForm.value = syncInventoryNameBinding(editForm.value, editForm.value.herbDictId)
-    if (editForm.value.category === 'pills' ? !editForm.value.name : !editForm.value.herbDictId) {
+    const original = inventoryStore.getItem(id)
+    const preservedLegacyPowder = original?.category === 'powder'
+      && !herbById.value.has(original.herbDictId)
+      && editForm.value.name === original.name
+    if (editForm.value.category === 'pills' ? !editForm.value.name : !editForm.value.herbDictId && !preservedLegacyPowder) {
       return ElMessage.warning(t('inventory.selectHerbRequired'))
     }
     const payload = buildInventoryPayload(editForm.value, editForm.value.category)
@@ -733,6 +738,8 @@ async function openAdjustmentHistory(item) {
                     :placeholder="editForm.name || t('inventory.selectHerbRequired')"
                     @change="handleEditHerbChange"
                   >
+                    <el-option v-if="editForm.herbDictId && activeTab !== 'pills' && !herbById.has(editForm.herbDictId)"
+                      :value="editForm.herbDictId" :label="editForm.name" disabled />
                     <el-option v-for="item in itemNameOptions" :key="item.value" :label="item.label" :value="item.value" />
                   </el-select>
                 </div>

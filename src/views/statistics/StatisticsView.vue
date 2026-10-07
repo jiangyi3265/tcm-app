@@ -9,6 +9,7 @@ import { useInventoryStore } from '../../stores/inventory'
 import { statisticsApi } from '../../utils/api'
 import { useSettingsStore } from '../../stores/settings'
 import { classifyPaidRevenue } from '../../utils/revenueCategories'
+import { revenuePaymentsInRange, revenueCsvCell } from '../../utils/revenueReport'
 import { formatDate, dayjs } from '../../utils/dateUtils'
 import { getPaymentRecords, getPaymentStatus } from '../../utils/prescriptionWorkflow'
 
@@ -182,14 +183,7 @@ function setExportPreset(preset) {
   }
 }
 
-const exportConsultations = computed(() => {
-  const [start, end] = exportDateRange.value || []
-  if (!start || !end) return []
-  return allConsultations.value.filter(c => {
-    const d = c.date || ''
-    return d >= start && d <= end
-  })
-})
+const exportPayments = computed(() => revenuePaymentsInRange(allConsultations.value, exportDateRange.value || []))
 
 const exportSummary = computed(() => {
   let acupunctureIncome = 0
@@ -200,10 +194,9 @@ const exportSummary = computed(() => {
   let totalPaid = 0
   const rows = []
 
-  for (const c of exportConsultations.value) {
-    const payments = getPaymentRecords(c)
-    const paidAmount = payments.reduce((s, p) => s + Number(p.amount || 0), 0)
-    if (paidAmount === 0) continue
+  for (const payment of exportPayments.value) {
+    const c = payment.consultation
+    const paidAmount = payment.amount
 
     const breakdown = classifyPaidRevenue(c, paidAmount, settingsStore.serviceTypes, settingsStore.serviceRevenueCategories)
     const tax = breakdown.tax
@@ -222,7 +215,7 @@ const exportSummary = computed(() => {
     const patient = patientsStore.getPatient(c.patientId)
     const practitioner = authStore.users.find(u => u.id === c.practitionerId)
     rows.push({
-      date: c.date || '',
+      date: payment.date,
       patientName: patient?.name || c.patientId || '',
       practitionerName: practitioner?.name || c.practitionerId || '',
       acupunture: consultAcuIncome,
@@ -231,7 +224,7 @@ const exportSummary = computed(() => {
       other: consultOtherIncome,
       tax,
       total: paidAmount,
-      paymentMethod: payments.map(p => p.method || '').join(', '),
+      paymentMethod: payment.methods.join(', '),
     })
   }
 
@@ -249,9 +242,9 @@ function downloadRevenueCsv() {
   const csvRows = [headers.join(',')]
   for (const r of rows) {
     csvRows.push([
-      r.date, `"${r.patientName}"`, `"${r.practitionerName}"`,
+      r.date, revenueCsvCell(r.patientName), revenueCsvCell(r.practitionerName),
       r.acupunture.toFixed(2), r.consultation.toFixed(2), r.herbs.toFixed(2), r.other.toFixed(2),
-      r.tax.toFixed(2), r.total.toFixed(2), `"${r.paymentMethod}"`,
+      r.tax.toFixed(2), r.total.toFixed(2), revenueCsvCell(r.paymentMethod),
     ].join(','))
   }
   // Summary row

@@ -1,10 +1,19 @@
 const token = (value) => String(value || '').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]/gu, '')
 
+function dictionaryNames(herb) {
+  const name = String(herb.name || '').trim()
+  // Legacy dictionaries often put pinyin in the name rather than its own field.
+  // Only split a Chinese name followed by Latin pinyin; retain preparation names.
+  const bilingual = name.match(/^([\p{Script=Han}\s]+)[(（]([\p{Script=Latin}\s'’-]+)[)）]$/u)
+  const aliases = [herb.alias, herb.aliases].flatMap((value) => Array.isArray(value) ? value : String(value || '').split(/[;,，、；]/))
+  return [name, ...(bilingual ? bilingual.slice(1) : []), herb.pinyin, herb.latinName, ...aliases].map(token).filter(Boolean)
+}
+
 export function invoiceHerbSuggestions(name, herbs = []) {
   const query = token(name)
   if (!query) return []
   return herbs.filter((herb) => herb.isActive && !herb.deletedAt).map((herb) => {
-    const names = [herb.name, herb.pinyin, herb.latinName, ...String(herb.alias || '').split(/[;,，、；]/)].map(token).filter(Boolean)
+    const names = dictionaryNames(herb)
     const score = names.some((value) => value === query) ? 2
       : names.some((value) => value.length >= 3 && (query.includes(value) || value.includes(query))) ? 1 : 0
     return { herb, score }

@@ -104,17 +104,19 @@ export const useFormulasStore = defineStore('formulas', () => {
     saveState()
   }
 
-  async function refreshFromApi() {
-    if (refreshPromise) return refreshPromise
+  async function refreshFromApi({ force = false } = {}) {
+    if (force) revision += 1
+    if (refreshPromise && !force) return refreshPromise
     const requestRevision = revision
-    refreshPromise = formulasApi.list().then((list) => {
+    const pending = formulasApi.list().then((list) => {
       if (requestRevision !== revision) return
       formulas.value = list
       saveState()
     }).catch((error) => {
       console.warn('方剂刷新失败:', error.message)
-    }).finally(() => { refreshPromise = null })
-    return refreshPromise
+    }).finally(() => { if (refreshPromise === pending) refreshPromise = null })
+    refreshPromise = pending
+    return pending
   }
 
   const deletedFormulas = computed(() => formulas.value.filter((f) => f.deletedAt))

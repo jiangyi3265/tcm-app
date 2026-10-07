@@ -10,16 +10,20 @@ export const useHerbDictStore = defineStore('herbDict', () => {
   const herbs = ref([])
   let refreshPromise = null
   let revision = 0
+  const loaded = ref(false)
 
-  async function refreshFromApi() {
-    if (refreshPromise) return refreshPromise
+  async function refreshFromApi({ force = false } = {}) {
+    if (force) revision += 1
+    if (refreshPromise && !force) return refreshPromise
     const requestRevision = revision
-    refreshPromise = herbDictApi.list().then((list) => {
+    const pending = herbDictApi.list().then((list) => {
       if (requestRevision !== revision) return
       herbs.value = list
+      loaded.value = true
       saveState()
-    }).finally(() => { refreshPromise = null })
-    return refreshPromise
+    }).finally(() => { if (refreshPromise === pending) refreshPromise = null })
+    refreshPromise = pending
+    return pending
   }
 
   function init() {
@@ -33,6 +37,11 @@ export const useHerbDictStore = defineStore('herbDict', () => {
     }
   }
   function saveState() { writeStoredJson('tcm_herb_dict', herbs.value) }
+
+  async function finishInitialLoad() {
+    if (loaded.value) return
+    await refreshFromApi({ force: true }).catch((error) => console.warn('草药字典刷新失败:', error.message))
+  }
 
   const activeHerbs = computed(() => herbs.value.filter((h) => h.isActive && !h.deletedAt))
   const deletedHerbs = computed(() => herbs.value.filter((h) => h.deletedAt))
@@ -53,7 +62,10 @@ export const useHerbDictStore = defineStore('herbDict', () => {
   async function addHerb(data) {
     const created = await herbDictApi.create(data)
     revision += 1
-    herbs.value.unshift(created); saveState(); return created
+    herbs.value.unshift(created)
+    saveState()
+    await finishInitialLoad()
+    return created
   }
   async function updateHerb(id, data) {
     const updated = await herbDictApi.update(id, data)
@@ -61,9 +73,10 @@ export const useHerbDictStore = defineStore('herbDict', () => {
     const idx = herbs.value.findIndex((h) => h.id === id)
     if (idx !== -1) herbs.value[idx] = updated
     saveState()
+    await finishInitialLoad()
     await Promise.allSettled([
-      useFormulasStore().refreshFromApi(),
-      useInventoryStore().refreshFromApi(),
+      useFormulasStore().refreshFromApi({ force: true }),
+      useInventoryStore().refreshFromApi({ force: true }),
     ])
     return updated
   }
@@ -73,6 +86,7 @@ export const useHerbDictStore = defineStore('herbDict', () => {
     const idx = herbs.value.findIndex((h) => h.id === id)
     if (idx !== -1) herbs.value[idx] = updated
     saveState()
+    await finishInitialLoad()
   }
   async function restoreHerb(id) {
     const updated = await herbDictApi.restore(id)
@@ -80,15 +94,17 @@ export const useHerbDictStore = defineStore('herbDict', () => {
     const idx = herbs.value.findIndex((h) => h.id === id)
     if (idx !== -1) herbs.value[idx] = updated
     saveState()
+    await finishInitialLoad()
   }
   async function hardDeleteHerb(id) {
     await herbDictApi.hardDelete(id)
     revision += 1
     herbs.value = herbs.value.filter((h) => h.id !== id)
     saveState()
+    await finishInitialLoad()
   }
 
   init()
 
-  return { herbs, activeHerbs, deletedHerbs, categories, getHerb, findByName, addHerb, updateHerb, deleteHerb, restoreHerb, hardDeleteHerb, refreshFromApi }
+  return { herbs, loaded, activeHerbs, deletedHerbs, categories, getHerb, findByName, addHerb, updateHerb, deleteHerb, restoreHerb, hardDeleteHerb, refreshFromApi }
 })

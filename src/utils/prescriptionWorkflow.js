@@ -32,7 +32,7 @@ function buildLegacyPaymentRecord(consultation) {
 }
 
 export function getPrescriptionStatus(prescription) {
-  if (!prescription || prescription.deletedAt) return 'deleted'
+  if (!prescription || prescription.deletedAt || prescription.deleted === true) return 'deleted'
   if (prescription.rxStatus) return prescription.rxStatus
   if (prescription.dispensingCompleted) return 'dispensed'
   return 'editing'

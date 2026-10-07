@@ -60,7 +60,7 @@ const formulaCategoryOptions = computed(() => [
   })),
 ])
 
-const herbOptions = computed(() => herbDictStore.activeHerbs)
+const herbOptions = computed(() => herbDictStore.loaded ? herbDictStore.activeHerbs : [])
 
 function createHerbDraft() {
   return { herbDictId: null, herbName: '', dosage: 0, unit: 'g', notes: '' }
@@ -405,6 +405,8 @@ const categoryCountEntries = computed(() => {
             <el-col :span="8">
               <el-select
                 v-model="newHerb.herbDictId"
+                :disabled="!herbDictStore.loaded"
+                :loading="!herbDictStore.loaded"
                 filterable
                 :placeholder="t('inventory.selectHerbRequired')"
                 size="small"
@@ -570,6 +572,8 @@ const categoryCountEntries = computed(() => {
                     <el-col :span="8">
                       <el-select
                         v-model="editHerb.herbDictId"
+                        :disabled="!herbDictStore.loaded"
+                        :loading="!herbDictStore.loaded"
                         filterable
                         :placeholder="t('inventory.selectHerbRequired')"
                         size="small"
@@ -589,6 +593,8 @@ const categoryCountEntries = computed(() => {
                       <template #default="{ row }">
                         <el-select
                           v-model="row.herbDictId"
+                          :disabled="!herbDictStore.loaded"
+                          :loading="!herbDictStore.loaded"
                           filterable
                           :placeholder="row.herbName || t('inventory.selectHerbRequired')"
                           size="small"
