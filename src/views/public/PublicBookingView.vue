@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { publicBookingApi } from '../../utils/api'
 import { dayjs, formatDate, formatTime } from '../../utils/dateUtils'
 import { SERVICE_TYPES } from '../../utils/sampleData'
+import clinicLogo from '../../assets/otcm-logo.png'
 
 const { t } = useI18n()
 
@@ -522,6 +523,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="public-booking-page" :class="{ embedded: isEmbedded }">
     <div v-if="successState" class="public-card success-card">
+      <img :src="clinicLogo" class="clinic-logo" alt="OTCM Acupuncture" width="389" height="232" />
       <h1>{{ t('publicBooking.successTitle') }}</h1>
       <p>{{ t('publicBooking.successIntro') }}</p>
       <p>{{ t('publicBooking.successTime', { time: successTimeLabel }) }}</p>
@@ -530,6 +532,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else class="public-card">
+      <img :src="clinicLogo" class="clinic-logo" alt="OTCM Acupuncture" width="389" height="232" />
       <div class="page-head">
         <div>
           <h1>{{ t('publicBooking.pageTitle') }}</h1>
@@ -594,9 +597,6 @@ onBeforeUnmount(() => {
                 >
                   <div class="date-card-top">
                     <span>{{ formatWeekday(day.date) }}</span>
-                    <span class="release-badge" :class="{ full: day.releaseMode !== 'drip' }">
-                      {{ t(day.releaseMode === 'drip' ? 'publicBooking.releaseModeDrip' : 'publicBooking.releaseModeFull') }}
-                    </span>
                   </div>
                   <div class="date-day">{{ formatShortDate(day.date) }}</div>
                   <div class="date-meta">
@@ -697,6 +697,19 @@ onBeforeUnmount(() => {
 
 .success-card {
   text-align: center;
+}
+
+.clinic-logo {
+  display: block;
+  width: 160px;
+  max-width: 100%;
+  height: auto;
+  margin-bottom: 20px;
+}
+
+.success-card .clinic-logo {
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .page-head {
@@ -847,22 +860,6 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: #64748b;
   line-height: 1.5;
-}
-
-.release-badge {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  padding: 2px 8px;
-  background: #fff7ed;
-  color: #c2410c;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.release-badge.full {
-  background: #eefbf0;
-  color: #166534;
 }
 
 .time-block-list {
