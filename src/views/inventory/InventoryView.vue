@@ -1034,6 +1034,7 @@ async function openAdjustmentHistory(item) {
 
     <!-- 调整历史对话框 -->
     <el-drawer v-model="showHistoryDialog" :title="t('inventory.adjustHistory') + (historyItemName ? ' - ' + historyItemName : '')" size="min(800px, 100vw)" direction="rtl">
+      <p style="margin-bottom:12px; color:#606266; font-size:13px">{{ t('inventory.historyCoverage') }}</p>
       <el-alert v-if="historyError" :title="historyError" type="error" :closable="false" show-icon />
       <el-button v-if="historyError" @click="openAdjustmentHistory(historyItem)">{{ t('publicBooking.retry') }}</el-button>
       <el-table :data="adjustmentHistory" v-loading="historyLoading" stripe max-height="400">

@@ -1087,6 +1087,7 @@ export default {
     // 调整历史
     adjustHistory: '调整记录',
     itemHistory: '用量记录',
+    historyCoverage: '处方扣减和回补从启用此记录功能后开始留存，之前的处方变动不包含在此列表中。',
     historyTime: '时间',
     historyItem: '药材',
     historyOperator: '操作人',

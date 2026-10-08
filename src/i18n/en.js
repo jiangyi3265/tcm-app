@@ -1086,6 +1086,7 @@ export default {
     // Adjustment history
     adjustHistory: 'Adjustment History',
     itemHistory: 'History',
+    historyCoverage: 'Prescription deductions and returns are recorded from the time this history feature was enabled. Earlier prescription movements are not included.',
     historyTime: 'Time',
     historyItem: 'Item',
     historyOperator: 'Operator',
