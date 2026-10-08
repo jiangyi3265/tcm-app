@@ -40,12 +40,17 @@ async function fixture(page) {
 
 for (const width of [390, 768]) {
   test(`patient list and new patient form are usable at ${width}px`, async ({ page }) => {
-    const { writes, errors } = await fixture(page)
+    const { writes, reads, errors } = await fixture(page)
     await page.setViewportSize({ width, height: 900 })
     await page.goto('/patients')
     await expect(page.getByRole('columnheader', { name: 'Date of Birth' })).toHaveCount(0)
     await expect(page.getByRole('columnheader', { name: 'Created Date' })).toHaveCount(0)
     await expect(page.locator('.patient-name-cell')).toContainText('Example')
+    await page.waitForLoadState('networkidle')
+    for (const path of ['/api/patients', '/api/consultations', '/api/appointments']) {
+      expect(reads.filter((entry) => entry === path)).toHaveLength(1)
+    }
+    expect(reads).not.toContain('/api/herb-dict')
     expect((await page.locator('.patient-name-cell').boundingBox()).width).toBeGreaterThan(200)
     await page.getByRole('button', { name: 'New Patient', exact: true }).click()
     const drawer = page.locator('.patient-create-drawer')

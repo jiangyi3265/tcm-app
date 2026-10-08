@@ -24,7 +24,8 @@ const herbDictStore = useHerbDictStore()
 const sidebarCollapsed = ref(false)
 const isMobile = ref(false)
 const inventoryRouteNames = new Set(['inventory', 'pharmacy', 'formulas', 'consultation-new', 'consultation-detail'])
-const lightweightRoutes = new Set(['inventory', 'formulas', 'audit-logs'])
+// The patient list refreshes its own core data; avoid issuing the same three requests twice.
+const lightweightRoutes = new Set(['inventory', 'formulas', 'audit-logs', 'patients'])
 const clinicalRoutes = new Set(['admin', 'consultation-new', 'consultation-detail'])
 let coreDataLoaded = false
 let clinicalDataLoaded = false
@@ -37,7 +38,8 @@ function checkMobile() {
 
 async function refreshWorkspaceData() {
   const name = String(route.name || '')
-  const requests = [herbDictStore.refreshFromApi()]
+  const requests = []
+  if (inventoryRouteNames.has(name) || name === 'admin') requests.push(herbDictStore.refreshFromApi())
   if (!settingsLoaded) {
     settingsLoaded = true
     requests.push(settingsStore.refreshFromApi())
