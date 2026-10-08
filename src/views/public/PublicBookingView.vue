@@ -18,6 +18,8 @@ const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 const loading = ref(true)
 const scheduleLoading = ref(false)
+const optionsError = ref(false)
+const scheduleError = ref(false)
 const submitting = ref(false)
 const serviceTypes = ref([])
 const practitioners = ref([])
@@ -332,10 +334,10 @@ function setupEmbedHeightBridge() {
 
 async function loadOptions() {
   loading.value = true
+  optionsError.value = false
   try {
     const response = await publicBookingApi.options()
-    const nextServiceTypes = normalizeServiceTypes(response?.serviceTypes)
-    serviceTypes.value = nextServiceTypes.length > 0 ? nextServiceTypes : normalizeServiceTypes(SERVICE_TYPES)
+    serviceTypes.value = normalizeServiceTypes(response?.serviceTypes)
     practitioners.value = Array.isArray(response?.practitioners) ? response.practitioners : []
 
     const nextSettings = normalizePublicBookingSettings(response?.publicBooking)
@@ -345,11 +347,11 @@ async function loadOptions() {
 
     currentWeek.value = alignWeekStart(publicWindowStart.value)
 
-    if (!form.value.serviceType && serviceTypes.value.length > 0) {
-      form.value.serviceType = serviceTypes.value[0].key
+    if (!serviceTypes.value.some((service) => service.key === form.value.serviceType)) {
+      form.value.serviceType = serviceTypes.value[0]?.key || ''
     }
-  } catch (error) {
-    ElMessage.error(error.message || t('publicBooking.loadFailed'))
+  } catch {
+    optionsError.value = true
   } finally {
     loading.value = false
   }
@@ -362,7 +364,7 @@ watch(practitionerOptions, (items) => {
   if (!form.value.practitionerId && items.length === 1) {
     form.value.practitionerId = items[0].id
   }
-})
+}, { flush: 'sync' })
 
 watch(selectedDateValue, () => {
   if (!selectedDaySlots.value.some((slot) => getSlotKey(slot) === selectedSlotValue.value)) {
@@ -374,6 +376,7 @@ let scheduleRequestId = 0
 
 async function loadSchedule() {
   const requestId = ++scheduleRequestId
+  scheduleError.value = false
   selectedDateValue.value = ''
   selectedSlotValue.value = ''
   if (!form.value.serviceType) {
@@ -403,13 +406,13 @@ async function loadSchedule() {
     scheduleDays.value = normalizeScheduleDays(response)
     scheduleSlots.value = collectSlots(response)
     syncSelectionFromSchedule()
-  } catch (error) {
+  } catch {
     if (requestId !== scheduleRequestId) return
     scheduleDays.value = []
     scheduleSlots.value = []
     selectedDateValue.value = ''
     selectedSlotValue.value = ''
-    ElMessage.error(error.message || t('publicBooking.loadFailed'))
+    scheduleError.value = true
   } finally {
     if (requestId === scheduleRequestId) scheduleLoading.value = false
   }
@@ -548,6 +551,15 @@ onBeforeUnmount(() => {
 
       <el-skeleton v-if="loading" :rows="6" animated />
 
+      <div v-else-if="optionsError" class="schedule-empty booking-notice" role="alert">
+        <p>{{ t('publicBooking.loadFailed') }}</p>
+        <el-button @click="loadOptions">{{ t('publicBooking.retry') }}</el-button>
+      </div>
+
+      <div v-else-if="!serviceTypes.length" class="schedule-empty booking-notice" role="status">
+        {{ t('publicBooking.noServicesAvailable') }}
+      </div>
+
       <el-form v-else :model="form" :disabled="submitting" label-position="top" class="public-form">
         <section class="booking-section">
           <h2>Choose a Service</h2>
@@ -584,6 +596,10 @@ onBeforeUnmount(() => {
 
           <div class="date-strip">
             <div v-if="scheduleLoading" class="schedule-empty">{{ t('common.loading') }}</div>
+            <div v-else-if="scheduleError" class="schedule-empty booking-notice" role="alert">
+              <p>{{ t('publicBooking.scheduleLoadFailed') }}</p>
+              <el-button @click="loadSchedule">{{ t('publicBooking.retry') }}</el-button>
+            </div>
             <template v-else>
               <div v-if="!scheduleDays.length" class="schedule-empty">
                 {{ t('publicBooking.noAvailableDates') }}
@@ -615,7 +631,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <section class="booking-section time-blocks">
+        <section v-if="!scheduleError" class="booking-section time-blocks">
           <div>
             <h2>{{ t('publicBooking.timeBlocksTitle') }}</h2>
             <p>{{ t('publicBooking.timeBlocksSubtitle') }}</p>
@@ -639,7 +655,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <div class="grid two-col selection-grid">
+        <div v-if="!scheduleError" class="grid two-col selection-grid">
           <div class="selected-slot-panel">
             <div class="selected-slot-title">{{ t('publicBooking.selectedDateTitle') }}</div>
             <div v-if="selectedDateLabel" class="selected-slot-detail">{{ selectedDateLabel }}</div>
@@ -753,6 +769,14 @@ onBeforeUnmount(() => {
 
 .public-form {
   margin-top: 22px;
+}
+
+.public-card > .booking-notice {
+  margin-top: 22px;
+}
+
+.booking-notice :deep(.el-button) {
+  margin-top: 12px;
 }
 
 .booking-section {
