@@ -541,6 +541,7 @@ export default {
   },
 
   publicBooking: {
+    backToClinic: '返回 OTCM 官网',
     pageTitle: '在线预约',
     pageSubtitle: '请选择服务，再选择合适的预约日期和时间。',
     loadFailed: '无法加载预约选项',
@@ -819,6 +820,7 @@ export default {
     herbName: '药材名',
     herbNamePlaceholder: '药材名',
     herbCount: '味',
+    packets: '包',
     dosage: '剂量',
     unit: '单位',
     dispensed: '已发药',
@@ -1084,6 +1086,7 @@ export default {
 
     // 调整历史
     adjustHistory: '调整记录',
+    itemHistory: '用量记录',
     historyTime: '时间',
     historyItem: '药材',
     historyOperator: '操作人',
@@ -1658,6 +1661,8 @@ export default {
 
   // ── 诊疗对比面板 ──
   compare: {
+    olderRecord: '上一条历史记录',
+    newerRecord: '下一条历史记录',
     title: '诊疗对比',
     noHistory: '该患者暂无历史诊疗记录',
     copyAllToCurrent: '全部拷贝到当前',

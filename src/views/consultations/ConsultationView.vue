@@ -64,6 +64,7 @@ import { compressImageFile } from '../../utils/imageCompress'
 import { getStoredItem, removeStoredKey } from '../../utils/storage'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ConsultationComparePanel from './ConsultationComparePanel.vue'
+import { summarizePrescription } from '../../utils/prescriptionSummary'
 
 const { t, locale } = useI18n()
 
@@ -1683,9 +1684,7 @@ function handleViewportResize() {
   if (typeof window !== 'undefined') viewportHeight.value = window.innerHeight
 }
 const rxTableMaxHeight = computed(() =>
-  isMobile.value
-    ? Math.max(280, Math.round(viewportHeight.value * 0.55))
-    : Math.max(640, viewportHeight.value - 230),
+  Math.max(560, viewportHeight.value - 230),
 )
 onMounted(() => {
   if (typeof window !== 'undefined') window.addEventListener('resize', handleViewportResize)
@@ -1956,6 +1955,14 @@ function addRxItem() {
 
 function removeRxItem(idx) {
   rxForm.value.items.splice(idx, 1)
+}
+
+function prescriptionSummaryLabel(prescription) {
+  const summary = summarizePrescription(prescription)
+  const amounts = Object.entries(summary.quantities).map(([unit, amount]) =>
+    `${amount} ${['包', 'bag', 'packet', 'packets'].includes(unit) ? t('consultation.packets') : unit}`,
+  ).join(' / ')
+  return `${summary.herbCount}${t('consultation.herbCount')}${amounts ? ` · ${amounts}` : ''}`
 }
 
 const rxSubtotal = computed(() =>
@@ -3649,7 +3656,8 @@ async function handleSendPreviewEmail() {
             <el-table :data="visiblePrescriptions" size="small" empty-text="We didn't find anything to show here">
               <el-table-column label="Name" min-width="200">
                 <template #default="{ row }">
-                  <span class="rx-name-cell">{{ row.formulaName || t('common.customFormula') }} - {{ row.items?.length || 0 }}{{ t('consultation.herbCount') }}</span>
+                  <span class="rx-name-cell">{{ row.formulaName || t('common.customFormula') }}</span>
+                  <div class="rx-summary">{{ prescriptionSummaryLabel(row) }}</div>
                   <el-tag v-if="row.prescriptionType && row.prescriptionType !== 'none'" size="small" :type="row.prescriptionType === 'powder' ? 'warning' : row.prescriptionType === 'pills' ? '' : 'success'" style="margin-left:4px">
                     {{ getPrescriptionTypeLabel(row.prescriptionType) }}
                   </el-tag>
@@ -4211,7 +4219,7 @@ async function handleSendPreviewEmail() {
 
         <!-- Prescription Items (image27) -->
         <div class="subsection-header">
-            <span class="subsec-label">Prescription Items</span>
+            <span class="subsec-label">Prescription Items <span class="rx-summary">{{ prescriptionSummaryLabel(rxForm) }}</span></span>
           <div>
             <el-button size="small" @click="addRxItem"><el-icon><Plus /></el-icon> {{ t('consultation.addHerb') }}</el-button>
           </div>
@@ -4402,7 +4410,9 @@ async function handleSendPreviewEmail() {
 .subsec-label { font-size: 13px; font-weight: 600; color: #444; }
 .wide-table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .rx-table-wrap { overflow-x: visible; }
-.rx-items-table :deep(.el-table__cell) { padding: 4px 0; }
+.rx-summary { font-size: 13px; color: #606266; font-weight: 400; }
+.rx-items-table :deep(.el-table__cell) { padding: 2px 0; }
+.rx-items-table :deep(.cell .el-button) { min-height: 24px; height: 24px; }
 .rx-items-table :deep(.rx-action-cell .cell) { padding-left: 0; padding-right: 0; text-align: center; }
 
 .discount-btns { display: flex; gap: 4px; }

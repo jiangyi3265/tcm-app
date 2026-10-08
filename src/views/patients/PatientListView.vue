@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, inject } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { usePatientsStore } from '../../stores/patients'
@@ -20,6 +20,7 @@ const patientsStore = usePatientsStore()
 const consultationsStore = useConsultationsStore()
 const appointmentsStore = useAppointmentsStore()
 const authStore = useAuthStore()
+const isMobile = inject('isMobile', ref(false))
 
 const searchQuery = ref('')
 const showAddDialog = ref(false)
@@ -268,7 +269,7 @@ function displayPhone(patient) {
         <el-table-column
           prop="name"
           :label="t('patients.name')"
-          min-width="100"
+          min-width="240"
           sortable="custom"
           :sort-orders="['ascending', 'descending']"
         >
@@ -292,7 +293,7 @@ function displayPhone(patient) {
         <el-table-column v-if="!hidePatientContact" :label="t('patients.phone')" width="140">
           <template #default="{ row }">{{ displayPhone(row) }}</template>
         </el-table-column>
-        <el-table-column v-if="!isApprenticeReadonly" :label="t('patients.dateOfBirth')" width="120">
+        <el-table-column v-if="!isApprenticeReadonly && !isMobile" :label="t('patients.dateOfBirth')" width="120">
           <template #default="{ row }">{{ row.dateOfBirth || '-' }}</template>
         </el-table-column>
         <el-table-column v-if="!isApprenticeReadonly" :label="t('patients.consent')" width="120">
@@ -302,10 +303,10 @@ function displayPhone(patient) {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isApprenticeReadonly" :label="t('patients.createdDate')" width="120">
+        <el-table-column v-if="!isApprenticeReadonly && !isMobile" :label="t('patients.createdDate')" width="120">
           <template #default="{ row }">{{ formatDate(row.createdAt) }}</template>
         </el-table-column>
-        <el-table-column :label="t('patients.operation')" width="100" fixed="right">
+        <el-table-column :label="t('patients.operation')" width="100" :fixed="isMobile ? false : 'right'">
           <template #default="{ row }">
             <el-button size="small" text type="primary" @click.stop="goToPatient(row)">
               {{ t('patients.view') }}
@@ -327,26 +328,26 @@ function displayPhone(patient) {
     </el-card>
 
     <!-- 新建病人对话框 -->
-    <el-drawer v-model="showAddDialog" :title="t('patients.newPatientDialog')" size="680px" direction="rtl" :close-on-press-escape="true">
-      <el-form :model="newPatient" label-width="100px" size="small">
+    <el-drawer v-model="showAddDialog" :title="t('patients.newPatientDialog')" size="min(680px, 100vw)" direction="rtl" :close-on-press-escape="true" class="patient-create-drawer">
+      <el-form :model="newPatient" label-width="100px" :label-position="isMobile ? 'top' : 'right'" size="small">
         <div class="form-section-title">{{ t('patients.basicInfo') }}</div>
         <el-row :gutter="12">
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="t('patients.lastName')" required>
               <el-input v-model="newPatient.lastName" placeholder="Last Name" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="t('patients.firstName')" required>
               <el-input v-model="newPatient.firstName" placeholder="First Name" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="t('patients.middleName')">
               <el-input v-model="newPatient.middleName" placeholder="Middle Name" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="t('patients.gender')">
               <el-radio-group v-model="newPatient.gender">
                 <el-radio v-for="option in GENDER_OPTIONS" :key="option.value" :value="option.value">
@@ -355,12 +356,12 @@ function displayPhone(patient) {
               </el-radio-group>
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="t('patients.dateOfBirth')">
               <el-input v-model="newPatient.dateOfBirth" placeholder="YYYY/MM/DD" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="t('patients.jobTitle')">
               <el-input v-model="newPatient.jobTitle" placeholder="Job Title" />
             </el-form-item>
@@ -396,22 +397,22 @@ function displayPhone(patient) {
               <el-input v-model="newPatient.email2" :placeholder="t('patients.secondEmail')" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="t('patients.mobilePhone')">
               <el-input v-model="newPatient.mobilePhone" placeholder="Mobile Phone" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="t('patients.businessPhone')">
               <el-input v-model="newPatient.businessPhone" placeholder="Business Phone" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="t('patients.fax')">
               <el-input v-model="newPatient.fax" placeholder="Fax" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="t('patients.preferredContact')">
               <el-select v-model="newPatient.preferredContact" style="width:100%">
                 <el-option v-for="opt in PREFERRED_CONTACT_OPTIONS" :key="opt" :label="opt" :value="opt" />
@@ -427,24 +428,24 @@ function displayPhone(patient) {
               <el-input v-model="newPatient.addressStreet" placeholder="Street Address" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="t('patients.city')">
               <el-input v-model="newPatient.addressCity" placeholder="City" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="t('patients.postalCode')">
               <el-input v-model="newPatient.addressPostal" placeholder="Postal Code" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="t('patients.province')">
               <el-select v-model="newPatient.addressState" filterable style="width:100%">
                 <el-option v-for="p in provinceOptions" :key="p.value" :label="p.label" :value="p.value" />
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="t('patients.country')">
               <el-select v-model="newPatient.addressCountry" filterable style="width:100%">
                 <el-option v-for="p in countryOptions" :key="p.value" :label="p.label" :value="p.value" />
@@ -469,7 +470,7 @@ function displayPhone(patient) {
               />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="t('patients.primaryPractitioner')">
               <el-select
                 v-if="isAdmin"
@@ -487,7 +488,7 @@ function displayPhone(patient) {
               <el-input v-else :model-value="selectedPractitionerName" disabled />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :xs="24" :sm="12">
             <el-form-item :label="t('common.notes')">
               <el-input v-model="newPatient.notes" :placeholder="t('patients.notesPlaceholder')" />
             </el-form-item>
@@ -501,7 +502,7 @@ function displayPhone(patient) {
     </el-drawer>
 
     <!-- 合并档案对话框 -->
-    <el-drawer v-model="showMergeDialog" :title="t('patients.mergeDialog')" size="500px" direction="rtl">
+    <el-drawer v-model="showMergeDialog" :title="t('patients.mergeDialog')" size="min(500px, 100vw)" direction="rtl">
       <el-alert type="warning" show-icon :closable="false" style="margin-bottom: 16px">
         {{ t('patients.mergeWarning') }}
       </el-alert>
@@ -548,6 +549,12 @@ function displayPhone(patient) {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.patient-name-cell > div:last-child { min-width: 0; overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+  .patient-create-drawer :deep(.el-radio-group) { gap: 8px; }
 }
 
 .table-footer {

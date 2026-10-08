@@ -530,6 +530,7 @@ onBeforeUnmount(() => {
   <div ref="bookingPage" class="public-booking-page" :class="{ embedded: isEmbedded }">
     <div v-if="successState" class="public-card success-card">
       <img :src="clinicLogo" class="clinic-logo" alt="OTCM Acupuncture" width="389" height="232" />
+      <a class="clinic-home-link" href="https://otcm.ca/" target="_top">{{ t('publicBooking.backToClinic') }}</a>
       <h1>{{ t('publicBooking.successTitle') }}</h1>
       <p>{{ t('publicBooking.successIntro') }}</p>
       <p>{{ t('publicBooking.successTime', { time: successTimeLabel }) }}</p>
@@ -539,6 +540,7 @@ onBeforeUnmount(() => {
 
     <div v-else class="public-card">
       <img :src="clinicLogo" class="clinic-logo" alt="OTCM Acupuncture" width="389" height="232" />
+      <a class="clinic-home-link" href="https://otcm.ca/" target="_top">{{ t('publicBooking.backToClinic') }}</a>
       <div class="page-head">
         <div>
           <h1>{{ t('publicBooking.pageTitle') }}</h1>
@@ -700,6 +702,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.clinic-home-link { display: inline-block; margin: 0 0 16px; color: #2d6a4f; font-size: 14px; }
 .public-booking-page {
   min-height: 100vh;
   padding: 32px 16px;

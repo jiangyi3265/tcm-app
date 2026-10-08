@@ -67,6 +67,14 @@ body {
 }
 
 /* 触屏设备：加粗横向滚动条，便于在宽表格里横滑到右侧列 */
+/* A 16px input font prevents iOS focus zoom while keeping pinch zoom available. */
+@media (max-width: 1024px) {
+  input, textarea, select,
+  .el-input__inner, .el-textarea__inner, .el-select__input {
+    font-size: 16px !important;
+  }
+}
+
 @media (pointer: coarse) {
   ::-webkit-scrollbar {
     height: 12px;

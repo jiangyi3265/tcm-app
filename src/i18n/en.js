@@ -540,6 +540,7 @@ export default {
   },
 
   publicBooking: {
+    backToClinic: 'Back to OTCM website',
     pageTitle: 'Online Booking',
     pageSubtitle: 'Please select a service first, and then select your preferred date and time.',
     loadFailed: 'Unable to load booking options',
@@ -818,6 +819,7 @@ export default {
     herbName: 'Herb Name',
     herbNamePlaceholder: 'Herb name',
     herbCount: ' herbs',
+    packets: 'packets',
     dosage: 'Dosage',
     unit: 'Unit',
     dispensed: 'Dispensed',
@@ -1083,6 +1085,7 @@ export default {
 
     // Adjustment history
     adjustHistory: 'Adjustment History',
+    itemHistory: 'History',
     historyTime: 'Time',
     historyItem: 'Item',
     historyOperator: 'Operator',
@@ -1652,6 +1655,8 @@ export default {
 
   // ── Compare Panel ──
   compare: {
+    olderRecord: 'Older record',
+    newerRecord: 'Newer record',
     title: 'Consultation Comparison',
     noHistory: 'No historical consultation records for this patient',
     copyAllToCurrent: 'Copy All to Current',

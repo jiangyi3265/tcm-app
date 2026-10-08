@@ -279,6 +279,7 @@ function isDiffChanged(key) {
     :close-on-click-modal="false"
     :close-on-press-escape="true"
     class="compare-dialog"
+    append-to-body
     v-loading="compareRefreshing"
   >
     <template v-if="historyList.length === 0">
@@ -288,7 +289,7 @@ function isDiffChanged(key) {
     <template v-else-if="selected">
       <!-- 历史记录切换 -->
       <div class="compare-nav">
-        <el-button :disabled="!canSelectOlderHistory(selectedIdx, historyList.length)" circle size="small" @click="prevHistory">
+        <el-button :aria-label="t('compare.olderRecord')" :disabled="!canSelectOlderHistory(selectedIdx, historyList.length)" circle size="small" @click="prevHistory">
           <el-icon><arrow-left /></el-icon>
         </el-button>
         <span class="compare-nav-info">
@@ -300,7 +301,7 @@ function isDiffChanged(key) {
             ({{ selectedOrder }} / {{ historyList.length }})
           </span>
         </span>
-        <el-button :disabled="!canSelectNewerHistory(selectedIdx)" circle size="small" @click="nextHistory">
+        <el-button :aria-label="t('compare.newerRecord')" :disabled="!canSelectNewerHistory(selectedIdx)" circle size="small" @click="nextHistory">
           <el-icon><arrow-right /></el-icon>
         </el-button>
         <el-button size="small" type="primary" @click="copyAll" style="margin-left: 16px">

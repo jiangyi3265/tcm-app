@@ -48,6 +48,9 @@ const batchImporting = ref(false)
 const adjustmentHistory = ref([])
 const historyLoading = ref(false)
 const historyItemName = ref('')
+const historyError = ref('')
+const historyItem = ref(null)
+let historyRequestId = 0
 const detailItem = ref(null)
 const adjustItem = ref(null)
 const adjustDelta = ref(0)
@@ -642,15 +645,20 @@ async function handleBatchImport() {
 }
 
 async function openAdjustmentHistory(item) {
+  const requestId = ++historyRequestId
+  historyItem.value = item
   historyItemName.value = item ? item.name : ''
+  historyError.value = ''
+  adjustmentHistory.value = []
   historyLoading.value = true
   showHistoryDialog.value = true
   try {
-    adjustmentHistory.value = await inventoryStore.getAdjustmentHistory(item?.id || null)
+    const rows = await inventoryStore.getAdjustmentHistory(item?.id || null)
+    if (requestId === historyRequestId) adjustmentHistory.value = rows
   } catch (e) {
-    adjustmentHistory.value = []
+    if (requestId === historyRequestId) historyError.value = e.message || t('common.operationFailed')
   } finally {
-    historyLoading.value = false
+    if (requestId === historyRequestId) historyLoading.value = false
   }
 }
 </script>
@@ -837,7 +845,7 @@ async function openAdjustmentHistory(item) {
                 <span v-else>{{ row.gramsPerPacket ? row.gramsPerPacket + 'g' : '-' }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.operation')" width="240" :fixed="isMobile ? false : 'right'">
+            <el-table-column :label="t('common.operation')" width="320" :fixed="isMobile ? false : 'right'">
               <template #default="{ row }">
                 <div v-if="editingId === row.id">
                   <el-button size="small" type="primary" text @click="saveEdit(row.id)">{{ t('common.save') }}</el-button>
@@ -845,6 +853,7 @@ async function openAdjustmentHistory(item) {
                 </div>
                 <div v-else>
                   <el-button size="small" text @click="openDetail(row)">{{ t('inventory.detail') }}</el-button>
+                  <el-button size="small" text @click="openAdjustmentHistory(row)">{{ t('inventory.itemHistory') }}</el-button>
                   <el-button v-if="canEdit" size="small" text @click="openAdjust(row)">{{ t('inventory.adjustStock') }}</el-button>
                   <el-button v-if="canEdit" size="small" text type="primary" @click="startEdit(row)">{{ t('common.edit') }}</el-button>
                   <el-button v-if="canEdit" size="small" text type="danger" @click="deleteItem(row)">{{ t('inventory.disableItem') }}</el-button>
@@ -1024,7 +1033,9 @@ async function openAdjustmentHistory(item) {
     </el-drawer>
 
     <!-- 调整历史对话框 -->
-    <el-drawer v-model="showHistoryDialog" :title="t('inventory.adjustHistory') + (historyItemName ? ' - ' + historyItemName : '')" size="700px" direction="rtl">
+    <el-drawer v-model="showHistoryDialog" :title="t('inventory.adjustHistory') + (historyItemName ? ' - ' + historyItemName : '')" size="min(800px, 100vw)" direction="rtl">
+      <el-alert v-if="historyError" :title="historyError" type="error" :closable="false" show-icon />
+      <el-button v-if="historyError" @click="openAdjustmentHistory(historyItem)">{{ t('publicBooking.retry') }}</el-button>
       <el-table :data="adjustmentHistory" v-loading="historyLoading" stripe max-height="400">
         <el-table-column prop="createdAt" :label="t('inventory.historyTime')" width="180">
           <template #default="{ row }">{{ formatHistoryTime(row.createdAt) }}</template>
