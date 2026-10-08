@@ -18,6 +18,7 @@ const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 const loading = ref(true)
 const scheduleLoading = ref(false)
+const submitting = ref(false)
 const serviceTypes = ref([])
 const practitioners = ref([])
 const scheduleDays = ref([])
@@ -25,6 +26,7 @@ const scheduleSlots = ref([])
 const selectedDateValue = ref('')
 const selectedSlotValue = ref('')
 const successState = ref(null)
+const bookingPage = ref(null)
 const publicBookingSettings = ref({ ...DEFAULT_PUBLIC_BOOKING })
 const publicWindowStart = ref(dayjs().format('YYYY-MM-DD'))
 const publicWindowEnd = ref(dayjs().add(DEFAULT_PUBLIC_BOOKING.advanceDays - 1, 'day').format('YYYY-MM-DD'))
@@ -166,14 +168,15 @@ function getSlotKey(slot) {
 }
 
 function prevWeek() {
-  if (canGoPrevWeek.value) currentWeek.value = weekStart.value.subtract(7, 'day').toDate()
+  if (!submitting.value && canGoPrevWeek.value) currentWeek.value = weekStart.value.subtract(7, 'day').toDate()
 }
 
 function nextWeek() {
-  if (canGoNextWeek.value) currentWeek.value = weekStart.value.add(7, 'day').toDate()
+  if (!submitting.value && canGoNextWeek.value) currentWeek.value = weekStart.value.add(7, 'day').toDate()
 }
 
 function goToday() {
+  if (submitting.value) return
   currentWeek.value = alignWeekStart(publicWindowStart.value || dayjs())
 }
 
@@ -283,12 +286,12 @@ function syncSelectionFromSchedule() {
 }
 
 function selectDate(day) {
-  if (!day || (day.availableCount || 0) < 1) return
+  if (submitting.value || scheduleLoading.value || !day || (day.availableCount || 0) < 1) return
   selectedDateValue.value = day.date
 }
 
 function selectSlot(slot) {
-  if (!slot || slot.status !== 'available') return
+  if (submitting.value || scheduleLoading.value || !slot || slot.status !== 'available') return
   selectedDateValue.value = slot.date
   selectedSlotValue.value = getSlotKey(slot)
 }
@@ -302,15 +305,9 @@ function isSelectedSlot(slot) {
 }
 
 function postEmbedHeight() {
-  if (!isEmbedded.value || typeof window === 'undefined' || window.parent === window) return
-  const doc = document.documentElement
-  const body = document.body
-  const height = Math.max(
-    doc?.scrollHeight || 0,
-    body?.scrollHeight || 0,
-    doc?.offsetHeight || 0,
-    body?.offsetHeight || 0,
-  )
+  if (!isEmbedded.value || typeof window === 'undefined' || window.parent === window || !bookingPage.value) return
+  // Measure the content, since document height cannot shrink below the current iframe viewport.
+  const height = Math.ceil(bookingPage.value.getBoundingClientRect().height)
   window.parent.postMessage({ type: 'otcm-booking-height', height }, '*')
 }
 
@@ -328,8 +325,7 @@ function setupEmbedHeightBridge() {
   nextTick(scheduleEmbedHeightPost)
   if ('ResizeObserver' in window) {
     embedResizeObserver = new ResizeObserver(scheduleEmbedHeightPost)
-    if (document.body) embedResizeObserver.observe(document.body)
-    if (document.documentElement) embedResizeObserver.observe(document.documentElement)
+    if (bookingPage.value) embedResizeObserver.observe(bookingPage.value)
   }
   window.addEventListener('load', scheduleEmbedHeightPost)
 }
@@ -377,16 +373,17 @@ watch(selectedDateValue, () => {
 let scheduleRequestId = 0
 
 async function loadSchedule() {
+  const requestId = ++scheduleRequestId
+  selectedDateValue.value = ''
+  selectedSlotValue.value = ''
   if (!form.value.serviceType) {
     scheduleDays.value = []
     scheduleSlots.value = []
-    selectedDateValue.value = ''
-    selectedSlotValue.value = ''
+    scheduleLoading.value = false
     return
   }
 
   scheduleLoading.value = true
-  const requestId = ++scheduleRequestId
   try {
     const response = await publicBookingApi.schedule({
       weekStart: weekStart.value.format('YYYY-MM-DD'),
@@ -445,12 +442,16 @@ function getSelectedSlotMeta(slot) {
 }
 
 async function submitBooking() {
+  if (submitting.value || loading.value || scheduleLoading.value) return
   if (!form.value.serviceType) return ElMessage.warning(t('appointments.selectServiceType'))
   if (!selectedDateValue.value) return ElMessage.warning(t('publicBooking.selectDateHint'))
   if (!selectedSlot.value) return ElMessage.warning(t('publicBooking.selectSlotHint'))
   if (!form.value.lastName.trim() || !form.value.firstName.trim()) return ElMessage.warning(t('publicBooking.nameRequired'))
   if (!form.value.phone.trim()) return ElMessage.warning(t('publicBooking.phoneRequired'))
 
+  const slot = { ...selectedSlot.value }
+  const practitionerId = form.value.practitionerId || slot.assignedPractitionerId || null
+  submitting.value = true
   try {
     const response = await publicBookingApi.create({
       firstName: form.value.firstName.trim(),
@@ -458,23 +459,24 @@ async function submitBooking() {
       patientName: `${form.value.lastName.trim()} ${form.value.firstName.trim()}`.trim(),
       phone: form.value.phone.trim(),
       email: form.value.email.trim(),
-      practitionerId: form.value.practitionerId || selectedSlot.value.assignedPractitionerId || null,
-      roomId: selectedSlot.value.roomId || null,
+      practitionerId,
+      roomId: slot.roomId || null,
       serviceType: form.value.serviceType,
-      startTime: selectedSlot.value.startTime,
-      endTime: selectedSlot.value.endTime,
+      startTime: slot.startTime,
+      endTime: slot.endTime,
       notes: form.value.notes,
       intakeFormData: { ...form.value.intakeFormData },
     })
     successState.value = response?.appointment || {
-      startTime: selectedSlot.value.startTime,
-      practitionerId: selectedSlot.value.assignedPractitionerId,
-      roomId: selectedSlot.value.roomId,
+      startTime: slot.startTime,
+      practitionerId,
+      roomId: slot.roomId,
     }
     selectedSlotValue.value = ''
-    await loadSchedule().catch(() => {})
   } catch (error) {
     ElMessage.error(error.message || t('publicBooking.submitFailed'))
+  } finally {
+    submitting.value = false
   }
 }
 
@@ -486,6 +488,7 @@ const successTimeLabel = computed(() => {
 })
 
 async function bookAnother() {
+  if (submitting.value) return
   successState.value = null
   selectedSlotValue.value = ''
   await loadSchedule().catch(() => {})
@@ -521,14 +524,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="public-booking-page" :class="{ embedded: isEmbedded }">
+  <div ref="bookingPage" class="public-booking-page" :class="{ embedded: isEmbedded }">
     <div v-if="successState" class="public-card success-card">
       <img :src="clinicLogo" class="clinic-logo" alt="OTCM Acupuncture" width="389" height="232" />
       <h1>{{ t('publicBooking.successTitle') }}</h1>
       <p>{{ t('publicBooking.successIntro') }}</p>
       <p>{{ t('publicBooking.successTime', { time: successTimeLabel }) }}</p>
       <p>{{ t('publicBooking.successPractitioner', { name: getPractitionerName(successState.practitionerId) }) }}</p>
-      <el-button type="primary" @click="bookAnother">{{ t('publicBooking.bookAnother') }}</el-button>
+      <el-button type="primary" :disabled="submitting" @click="bookAnother">{{ t('publicBooking.bookAnother') }}</el-button>
     </div>
 
     <div v-else class="public-card">
@@ -545,7 +548,7 @@ onBeforeUnmount(() => {
 
       <el-skeleton v-if="loading" :rows="6" animated />
 
-      <el-form v-else :model="form" label-position="top" class="public-form">
+      <el-form v-else :model="form" :disabled="submitting" label-position="top" class="public-form">
         <section class="booking-section">
           <h2>Choose a Service</h2>
           <div class="grid two-col">
@@ -572,10 +575,10 @@ onBeforeUnmount(() => {
               <p>{{ t('publicBooking.weekScheduleSubtitle') }}</p>
             </div>
             <div class="week-nav">
-              <el-button size="small" @click="goToday">{{ t('appointments.today') }}</el-button>
-              <el-button circle size="small" :disabled="!canGoPrevWeek" @click="prevWeek">&lt;</el-button>
+              <el-button class="week-today" size="small" :disabled="submitting" @click="goToday">{{ t('appointments.today') }}</el-button>
+              <el-button class="week-step" circle size="small" :aria-label="t('publicBooking.previousWeek')" :disabled="submitting || !canGoPrevWeek" @click="prevWeek">&lt;</el-button>
               <span class="week-label">{{ weekLabel }}</span>
-              <el-button circle size="small" :disabled="!canGoNextWeek" @click="nextWeek">&gt;</el-button>
+              <el-button class="week-step" circle size="small" :aria-label="t('publicBooking.nextWeek')" :disabled="submitting || !canGoNextWeek" @click="nextWeek">&gt;</el-button>
             </div>
           </div>
 
@@ -592,7 +595,7 @@ onBeforeUnmount(() => {
                   type="button"
                   class="date-card"
                   :class="{ active: isSelectedDate(day), disabled: (day.availableCount || 0) < 1 }"
-                  :disabled="(day.availableCount || 0) < 1"
+                  :disabled="submitting || (day.availableCount || 0) < 1"
                   @click="selectDate(day)"
                 >
                   <div class="date-card-top">
@@ -626,6 +629,7 @@ onBeforeUnmount(() => {
               :key="getSlotKey(slot)"
               type="button"
               class="time-block-button"
+              :disabled="submitting"
               :class="{ active: isSelectedSlot(slot) }"
               @click="selectSlot(slot)"
             >
@@ -672,7 +676,7 @@ onBeforeUnmount(() => {
         </section>
 
         <div class="actions">
-          <el-button type="primary" @click="submitBooking">{{ t('publicBooking.submit') }}</el-button>
+          <el-button type="primary" :loading="submitting" :disabled="scheduleLoading || !selectedSlot" @click="submitBooking">{{ t('publicBooking.submit') }}</el-button>
         </div>
       </el-form>
     </div>
@@ -799,6 +803,10 @@ onBeforeUnmount(() => {
   color: #1f2937;
 }
 
+.week-nav :deep(.el-button) {
+  margin-left: 0;
+}
+
 .date-strip {
   margin-top: 14px;
   padding: 8px 0;
@@ -882,7 +890,7 @@ onBeforeUnmount(() => {
   transition: all 0.18s ease;
 }
 
-.time-block-button:hover {
+.time-block-button:hover:not(:disabled) {
   border-color: #95d5b2;
   box-shadow: 0 8px 20px rgba(45, 106, 79, 0.08);
 }
@@ -952,10 +960,25 @@ onBeforeUnmount(() => {
 
   .week-nav {
     width: 100%;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
   }
 
-  .week-nav :deep(.el-button) {
-    flex: 1;
+  .week-today {
+    grid-column: 1 / -1;
+    justify-self: start;
+    min-height: 36px;
+  }
+
+  .week-step {
+    width: 44px;
+    height: 44px;
+  }
+
+  .week-label {
+    min-width: 0;
+    text-align: center;
+    line-height: 1.5;
   }
 }
 </style>

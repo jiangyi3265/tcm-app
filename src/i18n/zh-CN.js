@@ -558,6 +558,8 @@ export default {
     matchingPractitioners: '可匹配医师：{names}',
     autoAssignHint: '不指定医师时，系统会根据排班自动分配接诊医师。',
     weekScheduleTitle: '选择日期',
+    previousWeek: '上一周',
+    nextWeek: '下一周',
     weekScheduleSubtitle: '选择日期，查看当天可预约的时段。',
     publicWindowHint: '当前仅开放未来 {days} 天预约日期。',
     dripWindowHint: '近 {days} 天按每次 {minutes} 分钟逐步释放时段。',

@@ -557,6 +557,8 @@ export default {
     matchingPractitioners: 'Matching practitioners: {names}',
     autoAssignHint: 'If you do not choose a practitioner, the system will auto-assign one based on the schedule.',
     weekScheduleTitle: 'Choose a date',
+    previousWeek: 'Previous week',
+    nextWeek: 'Next week',
     weekScheduleSubtitle: 'Select a date to view available appointment times.',
     publicWindowHint: 'Only the next {days} days are open for public booking.',
     dripWindowHint: 'Within the next {days} days, slots are released in {minutes}-minute batches.',
