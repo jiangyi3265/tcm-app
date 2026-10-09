@@ -861,7 +861,7 @@ function buildIntakeNarrative(intake) {
   return lines.join('\n')
 }
 
-function applyIntakePrefill(intake, appointmentId = null) {
+function applyIntakePrefill(intake) {
   if (!intake || typeof intake !== 'object') return
 
   if (intake.chiefComplaint) form.value.chiefComplaint = intake.chiefComplaint
@@ -880,10 +880,20 @@ function applyIntakePrefill(intake, appointmentId = null) {
       form.value.progressOfDisease = narrative
     }
   }
+}
 
-  if (appointmentId) {
-    form.value.appointmentId = appointmentId
-  }
+function findAutomaticAppointmentId() {
+  const { patientId: visitPatientId, practitionerId, date } = form.value
+  if (!visitPatientId || !practitionerId || !date) return null
+  const visitDate = String(date).slice(0, 10)
+  const candidates = appointmentsStore.getPatientAppointments(visitPatientId).filter((appointment) =>
+    appointment.id
+    && appointment.practitionerId === practitionerId
+    && String(appointment.startTime || '').slice(0, 10) === visitDate
+    && ['booked', 'confirmed'].includes(appointment.status)
+    && appointment.serviceType !== 'time_block',
+  )
+  return candidates.length === 1 ? candidates[0].id : null
 }
 
 async function refreshTongueImagePreview() {
@@ -1049,15 +1059,13 @@ onMounted(() => {
         return String(value || '').trim() !== ''
       })
     })
-    const appointmentIdForPrefill = latestAppt?.id && latestAppt.status !== 'completed' && latestAppt.status !== 'cancelled'
-      ? latestAppt.id
-      : null
-
     if (patient.value?.latestIntakeFormData) {
-      applyIntakePrefill(patient.value.latestIntakeFormData, appointmentIdForPrefill)
+      applyIntakePrefill(patient.value.latestIntakeFormData)
     } else if (latestAppt?.intakeFormData) {
-      applyIntakePrefill(latestAppt.intakeFormData, appointmentIdForPrefill)
+      applyIntakePrefill(latestAppt.intakeFormData)
     }
+    // Intake can come from another visit; only a unique matching visit may be linked.
+    form.value.appointmentId = findAutomaticAppointmentId()
   }
 
   refreshTongueImagePreview()
@@ -1731,6 +1739,10 @@ async function doPersistConsultationDraft({ silent = false, syncRoute = true, fl
       await flushRxDraftBeforeConsultationSave()
     }
     applyHistorySnapshotToForm()
+    if (isNew) {
+      // Recheck after date edits or appointment refreshes, before persisting the link.
+      form.value.appointmentId = findAutomaticAppointmentId()
+    }
     const data = buildPersistPayload()
     const requestSnapshot = JSON.stringify(data)
     const targetId = currentConsultationId.value
@@ -2448,13 +2460,9 @@ async function completeConsultation() {
     const id = saved?.id || currentConsultationId.value
     if (id) {
       await consultStore.completeConsultation(id)
-      if (form.value.appointmentId) {
-        try {
-          await appointmentsStore.completeAppointment(form.value.appointmentId)
-        } catch (e) {
-          console.warn('Failed to complete linked appointment:', e)
-        }
-      }
+      await appointmentsStore.refreshFromApi().catch((error) => {
+        console.warn('Failed to refresh appointments after consultation completion:', error)
+      })
       ElMessage.success(t('consultation.completed'))
       await navigateWithoutUnsavedPrompt(() => router.push(`/patients/${patientId}`))
     }
