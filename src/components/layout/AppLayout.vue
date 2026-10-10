@@ -55,9 +55,13 @@ async function refreshWorkspaceData() {
   if (!lightweightRoutes.has(name)) {
     requests.push(
       loadWorkspaceResource('patients', () => patientsStore.refreshFromApi()),
-      loadWorkspaceResource('consultations', () => consultationsStore.refreshFromApi()),
       loadWorkspaceResource('appointments', () => appointmentsStore.refreshFromApi()),
     )
+    // Cashier refreshes consultations on every entry, including returns from Stripe.
+    // Leave that request to the page instead of downloading the full list twice.
+    if (name !== 'cashier') {
+      requests.push(loadWorkspaceResource('consultations', () => consultationsStore.refreshFromApi()))
+    }
   }
   if (clinicalRoutes.has(name)) {
     requests.push(

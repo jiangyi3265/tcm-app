@@ -9,7 +9,7 @@ import { useAuthStore } from '../../stores/auth'
 import { canAccessPatientRecords, hasPermission } from '../../utils/permissions'
 import { formatDate } from '../../utils/dateUtils'
 import { COUNTRY_OPTIONS, DEFAULT_COUNTRY, getProvinceOptions } from '../../utils/countryRegionOptions'
-import { formatPatientName, getPatientInitial } from '../../utils/patientName'
+import { formatPatientName, getPatientInitial, sortPatientsByName } from '../../utils/patientName'
 import { GENDER_OPTIONS, formatGender, getGenderTagType, normalizeGender } from '../../utils/gender'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -53,10 +53,11 @@ const filteredPatients = computed(() =>
   ),
 )
 const sortedPatients = computed(() => {
-  const list = [...filteredPatients.value]
-  if (patientSortState.value.prop !== 'name') return list
-  const direction = patientSortState.value.order === 'descending' ? -1 : 1
-  return list.sort((a, b) => direction * comparePatientNames(a, b))
+  // Store search and permission filtering already preserve ascending name order.
+  if (patientSortState.value.prop === 'name' && patientSortState.value.order === 'descending') {
+    return sortPatientsByName(filteredPatients.value, 'descending')
+  }
+  return filteredPatients.value
 })
 const pagedPatients = computed(() => {
   const start = (currentPage.value - 1) * PAGE_SIZE
@@ -79,23 +80,6 @@ onMounted(() => {
     appointmentsStore.refreshFromApi(),
   ])
 })
-
-function patientNameKey(patient) {
-  const structuredName = [patient?.lastName, patient?.firstName]
-    .map((part) => String(part || '').trim())
-    .filter(Boolean)
-    .join(' ')
-  return structuredName || String(patient?.name || '').trim()
-}
-
-function comparePatientNames(a, b) {
-  const nameCompare = patientNameKey(a).localeCompare(patientNameKey(b), undefined, {
-    sensitivity: 'base',
-    numeric: true,
-  })
-  if (nameCompare !== 0) return nameCompare
-  return String(a?.id || '').localeCompare(String(b?.id || ''))
-}
 
 function handlePatientSortChange({ prop, order }) {
   patientSortState.value = {

@@ -5,30 +5,10 @@ import { readStoredJson, writeStoredJson } from '../utils/storage'
 import { useConsultationsStore } from './consultations'
 import { useAppointmentsStore } from './appointments'
 import { normalizeGender } from '../utils/gender'
+import { sortPatientsByName } from '../utils/patientName'
 
 export const usePatientsStore = defineStore('patients', () => {
   const patients = ref([])
-
-  function patientNameKey(patient) {
-    const structuredName = [patient?.lastName, patient?.firstName]
-      .map((part) => String(part || '').trim())
-      .filter(Boolean)
-      .join(' ')
-    return structuredName || String(patient?.name || '').trim()
-  }
-
-  function comparePatientNames(a, b) {
-    const nameCompare = patientNameKey(a).localeCompare(patientNameKey(b), undefined, {
-      sensitivity: 'base',
-      numeric: true,
-    })
-    if (nameCompare !== 0) return nameCompare
-    return String(a?.id || '').localeCompare(String(b?.id || ''))
-  }
-
-  function sortPatientsByName(list) {
-    return [...list].sort(comparePatientNames)
-  }
 
   function init() {
     patients.value = readStoredJson('tcm_patients', []) || []

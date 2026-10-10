@@ -1,3 +1,24 @@
+const patientNameCollator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
+
+function patientNameKey(patient) {
+  const structuredName = [patient?.lastName, patient?.firstName]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+    .join(' ')
+  return structuredName || String(patient?.name || '').trim()
+}
+
+export function comparePatientNames(a, b) {
+  const nameCompare = patientNameCollator.compare(patientNameKey(a), patientNameKey(b))
+  if (nameCompare !== 0) return nameCompare
+  return String(a?.id || '').localeCompare(String(b?.id || ''))
+}
+
+export function sortPatientsByName(list, order = 'ascending') {
+  const direction = order === 'descending' ? -1 : 1
+  return [...list].sort((a, b) => direction * comparePatientNames(a, b))
+}
+
 export function formatPatientName(patient, fallback = '-') {
   if (!patient) return fallback
   const first = String(patient.firstName || '').trim()
