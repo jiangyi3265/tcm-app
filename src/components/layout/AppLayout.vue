@@ -11,6 +11,7 @@ import { useSettingsStore } from '../../stores/settings'
 import { useTemplatesStore } from '../../stores/templates'
 import { useAcupointsStore } from '../../stores/acupoints'
 import { useHerbDictStore } from '../../stores/herbDict'
+import { useAuthStore } from '../../stores/auth'
 
 const route = useRoute()
 const patientsStore = usePatientsStore()
@@ -21,15 +22,25 @@ const settingsStore = useSettingsStore()
 const templatesStore = useTemplatesStore()
 const acupointsStore = useAcupointsStore()
 const herbDictStore = useHerbDictStore()
+const authStore = useAuthStore()
 const sidebarCollapsed = ref(false)
 const isMobile = ref(false)
 const inventoryRouteNames = new Set(['inventory', 'pharmacy', 'formulas', 'consultation-new', 'consultation-detail'])
 // The patient list refreshes its own core data; avoid issuing the same three requests twice.
 const lightweightRoutes = new Set(['inventory', 'formulas', 'audit-logs', 'patients'])
 const clinicalRoutes = new Set(['admin', 'consultation-new', 'consultation-detail'])
-let coreDataLoaded = false
-let clinicalDataLoaded = false
-let settingsLoaded = false
+const loadedResources = new Set()
+const pendingResources = new Map()
+
+function loadWorkspaceResource(key, load) {
+  if (loadedResources.has(key)) return Promise.resolve()
+  if (pendingResources.has(key)) return pendingResources.get(key)
+  const pending = Promise.resolve().then(load)
+    .then(() => loadedResources.add(key))
+    .finally(() => pendingResources.delete(key))
+  pendingResources.set(key, pending)
+  return pending
+}
 
 function checkMobile() {
   isMobile.value = window.innerWidth <= 1024
@@ -40,23 +51,28 @@ async function refreshWorkspaceData() {
   const name = String(route.name || '')
   const requests = []
   if (inventoryRouteNames.has(name) || name === 'admin') requests.push(herbDictStore.refreshFromApi())
-  if (!settingsLoaded) {
-    settingsLoaded = true
-    requests.push(settingsStore.refreshFromApi())
+  requests.push(loadWorkspaceResource('settings', () => settingsStore.refreshFromApi()))
+  if (!lightweightRoutes.has(name)) {
+    requests.push(
+      loadWorkspaceResource('patients', () => patientsStore.refreshFromApi()),
+      loadWorkspaceResource('consultations', () => consultationsStore.refreshFromApi()),
+      loadWorkspaceResource('appointments', () => appointmentsStore.refreshFromApi()),
+    )
   }
-  if (!lightweightRoutes.has(name) && !coreDataLoaded) {
-    coreDataLoaded = true
-    requests.push(patientsStore.refreshFromApi(), consultationsStore.refreshFromApi(), appointmentsStore.refreshFromApi())
-  }
-  if (clinicalRoutes.has(name) && !clinicalDataLoaded) {
-    clinicalDataLoaded = true
-    requests.push(templatesStore.refreshFromApi(), acupointsStore.refreshFromApi())
+  if (clinicalRoutes.has(name)) {
+    requests.push(
+      loadWorkspaceResource('templates', () => templatesStore.refreshFromApi()),
+      loadWorkspaceResource('acupoints', () => acupointsStore.refreshFromApi()),
+    )
   }
   await Promise.allSettled(requests)
 }
 
 function refreshInventoryForCurrentRoute() {
-  if (!inventoryRouteNames.has(String(route.name || ''))) return
+  const name = String(route.name || '')
+  const showsStockAlert = name === 'dashboard'
+    && authStore.roles.some(role => ['admin', 'pharmacist', 'practitioner'].includes(role))
+  if (!inventoryRouteNames.has(name) && !showsStockAlert) return
   void inventoryStore.refreshFromApi().catch(() => {})
 }
 

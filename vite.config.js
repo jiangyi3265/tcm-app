@@ -31,6 +31,9 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return
+          // Keep admin import/export and address data out of the login/booking bundle.
+          if (id.includes('/xlsx/')) return 'spreadsheet'
+          if (id.includes('/country-region-data/')) return 'country-regions'
           if (id.includes('@element-plus/icons-vue')) return 'ui-icons'
           if (id.includes('element-plus/dist/locale')) return 'ui-locale'
           if (id.includes('element-plus')) return 'ui'

@@ -24,6 +24,7 @@ const isMobile = inject('isMobile', ref(false))
 
 const searchQuery = ref('')
 const showAddDialog = ref(false)
+const creatingPatient = ref(false)
 const showMergeDialog = ref(false)
 
 const roles = computed(() => authStore.roles)
@@ -153,11 +154,13 @@ const selectedPractitionerName = computed(() => {
 })
 
 function openAddPatientDialog() {
+  if (creatingPatient.value) return
   resetForm()
   showAddDialog.value = true
 }
 
 async function handleAddPatient() {
+  if (creatingPatient.value) return
   if (!newPatient.value.lastName && !newPatient.value.firstName) {
     return ElMessage.warning(t('patients.nameRequired'))
   }
@@ -167,15 +170,22 @@ async function handleAddPatient() {
     newPatient.value.practitionerId = resolveDefaultPractitionerId()
   }
 
-  await patientsStore.addPatient({
-    ...newPatient.value,
-    gender: normalizeGender(newPatient.value.gender),
-    emails: validEmails,
-    phone: newPatient.value.mobilePhone,
-  })
-  ElMessage.success(t('patients.patientCreated'))
-  showAddDialog.value = false
-  resetForm()
+  creatingPatient.value = true
+  try {
+    await patientsStore.addPatient({
+      ...newPatient.value,
+      gender: normalizeGender(newPatient.value.gender),
+      emails: validEmails,
+      phone: newPatient.value.mobilePhone,
+    })
+    ElMessage.success(t('patients.patientCreated'))
+    showAddDialog.value = false
+    resetForm()
+  } catch (error) {
+    ElMessage.error(error.message || t('common.operationFailed'))
+  } finally {
+    creatingPatient.value = false
+  }
 }
 
 function resetForm() {
@@ -328,8 +338,8 @@ function displayPhone(patient) {
     </el-card>
 
     <!-- 新建病人对话框 -->
-    <el-drawer v-model="showAddDialog" :title="t('patients.newPatientDialog')" size="min(680px, 100vw)" direction="rtl" :close-on-press-escape="true" class="patient-create-drawer">
-      <el-form :model="newPatient" label-width="100px" :label-position="isMobile ? 'top' : 'right'" size="small">
+    <el-drawer v-model="showAddDialog" :title="t('patients.newPatientDialog')" size="min(680px, 100vw)" direction="rtl" :close-on-press-escape="!creatingPatient" :close-on-click-modal="!creatingPatient" :show-close="!creatingPatient" class="patient-create-drawer">
+      <el-form :model="newPatient" :disabled="creatingPatient" label-width="100px" :label-position="isMobile ? 'top' : 'right'" size="small">
         <div class="form-section-title">{{ t('patients.basicInfo') }}</div>
         <el-row :gutter="12">
           <el-col :xs="24" :sm="12">
@@ -496,8 +506,8 @@ function displayPhone(patient) {
         </el-row>
       </el-form>
       <template #footer>
-        <el-button @click="showAddDialog = false; resetForm()">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="handleAddPatient">{{ t('patients.createRecord') }}</el-button>
+        <el-button :disabled="creatingPatient" @click="showAddDialog = false; resetForm()">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="creatingPatient" @click="handleAddPatient">{{ t('patients.createRecord') }}</el-button>
       </template>
     </el-drawer>
 

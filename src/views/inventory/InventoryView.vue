@@ -55,6 +55,7 @@ const detailItem = ref(null)
 const adjustItem = ref(null)
 const adjustDelta = ref(0)
 const adjustReason = ref('')
+const adjustingStock = ref(false)
 
 const CATEGORY_CONFIG = computed(() => ({
   powder: { label: t('inventory.powder'), unit: 'bag', defaultUnit: 'bag' },
@@ -522,6 +523,7 @@ function openDetail(item) {
 }
 
 function openAdjust(item) {
+  if (adjustingStock.value) return
   adjustItem.value = item
   adjustDelta.value = 0
   adjustReason.value = ''
@@ -529,17 +531,24 @@ function openAdjust(item) {
 }
 
 async function handleAdjust() {
+  if (adjustingStock.value) return
   if (adjustDelta.value === 0) return ElMessage.warning(t('inventory.fillAdjustQty'))
+  const item = adjustItem.value
+  const delta = adjustDelta.value
+  const reason = adjustReason.value
+  adjustingStock.value = true
   try {
-    const success = await inventoryStore.adjustStock(adjustItem.value.id, adjustDelta.value, adjustReason.value)
+    const success = await inventoryStore.adjustStock(item.id, delta, reason)
     if (success) {
-      ElMessage.success(t('inventory.adjusted', { delta: Math.abs(adjustDelta.value), unit: getUnitLabel(adjustItem.value.unit) }))
+      ElMessage.success(t('inventory.adjusted', { delta: Math.abs(delta), unit: getUnitLabel(item.unit) }))
       showAdjustDialog.value = false
     } else {
       ElMessage.error(t('inventory.cannotBeNegative'))
     }
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    adjustingStock.value = false
   }
 }
 
@@ -993,8 +1002,8 @@ async function openAdjustmentHistory(item) {
     </el-drawer>
 
     <!-- 调整库存对话框 -->
-    <el-dialog v-model="showAdjustDialog" :title="t('inventory.adjustStockTitle', { name: adjustItem?.name })" width="360px">
-      <el-form label-width="90px">
+    <el-dialog v-model="showAdjustDialog" :title="t('inventory.adjustStockTitle', { name: adjustItem?.name })" width="360px" :close-on-press-escape="!adjustingStock" :close-on-click-modal="!adjustingStock" :show-close="!adjustingStock">
+      <el-form label-width="90px" :disabled="adjustingStock">
         <el-form-item :label="t('inventory.currentStock')">
           <span style="font-weight: 600">{{ adjustItem?.quantity }} {{ getUnitLabel(adjustItem?.unit) }}</span>
         </el-form-item>
@@ -1012,8 +1021,8 @@ async function openAdjustmentHistory(item) {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showAdjustDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="handleAdjust">{{ t('inventory.confirmAdjust') }}</el-button>
+        <el-button :disabled="adjustingStock" @click="showAdjustDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="adjustingStock" @click="handleAdjust">{{ t('inventory.confirmAdjust') }}</el-button>
       </template>
     </el-dialog>
 
