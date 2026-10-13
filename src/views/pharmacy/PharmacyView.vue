@@ -9,6 +9,7 @@ import { useBranchesStore } from '../../stores/branches'
 import { useSettingsStore } from '../../stores/settings'
 import { runStripeTerminalPayment } from '../../utils/stripeTerminalPayment'
 import { formatDate, formatDateTime } from '../../utils/dateUtils'
+import { summarizePrescription } from '../../utils/prescriptionSummary'
 import {
   getActivePrescriptions,
   getOutstandingAmount,
@@ -183,7 +184,7 @@ function getRequiredQuantity(item, row) {
 
 function displayUnit(unit) {
   const text = String(unit || '').trim().toLowerCase().replace(/\s+/g, '')
-  return text === '包' || text === 'bag' || text === 'bag(包)' ? 'bag(包)' : unit
+  return text === '包' || text === 'bag' || text === 'bag(包)' ? 'bag (包)' : unit
 }
 
 function getRequiredUnit(item, prescriptionType) {
@@ -221,11 +222,18 @@ function getPerDoseUnit(item, row) {
 function formatDispenseDisplay(item, row) {
   const perDoseQuantity = formatMedicineAmount(getPerDoseQuantity(item, row))
   const unit = getPerDoseUnit(item, row)
-  const doses = formatMedicineAmount(row?.quantity || 1)
   if (locale.value === 'zh-CN') {
-    return `${perDoseQuantity}${unit}/剂 · 共${doses}剂`
+    return `${perDoseQuantity} ${unit}/剂`
   }
-  return `${perDoseQuantity}${unit}/dose · ${doses} doses`
+  return `${perDoseQuantity} ${unit}/dose`
+}
+
+function dispenseSummary(row) {
+  const summary = summarizePrescription({ ...row, items: getConsultPrescriptionItems(row) })
+  const amounts = Object.entries(summary.quantities).map(([unit, amount]) => `${formatMedicineAmount(amount)} ${displayUnit(unit)}`).join(' · ')
+  return locale.value === 'zh-CN'
+    ? `药材种类：${summary.herbCount} · 单剂合计：${amounts || '0'} · 剂数：${row.quantity || 1}`
+    : `Total Types: ${summary.herbCount} · Per Dose: ${amounts || '0'} · Doses: ${row.quantity || 1}`
 }
 
 function buildHerbSummary(row) {
@@ -492,7 +500,7 @@ async function reopenPrescription(row) {
       </el-tab-pane>
     </el-tabs>
 
-    <el-drawer v-model="showDetailDialog" :title="t('pharmacy.prescriptionDetail')" :size="drawerSize" direction="rtl">
+    <el-drawer v-model="showDetailDialog" :title="t('pharmacy.prescriptionDetail')" :size="drawerSize" direction="rtl" append-to-body>
       <div v-if="selectedRow" class="rx-detail">
         <div class="rx-detail-header">
           <div>
@@ -516,6 +524,8 @@ async function reopenPrescription(row) {
           </el-tag>
         </div>
 
+        <p class="rx-dose-summary">{{ dispenseSummary(selectedRow) }}</p>
+
         <div class="rx-payment-card">
           <div>{{ t('cashier.totalCharge') }}: {{ rowMoney(selectedRow, selectedRow.consultation?.totalAmount) }}</div>
           <div>{{ t('cashier.paidAmount') }}: {{ rowMoney(selectedRow, selectedRow.paidAmount) }}</div>
@@ -535,9 +545,9 @@ async function reopenPrescription(row) {
         <div class="wide-table-wrap">
           <el-table :data="getConsultPrescriptionItems(selectedRow)" size="small" style="margin-top: 12px">
             <el-table-column prop="name" :label="t('pharmacy.herb')" />
-            <el-table-column :label="t('pharmacy.dosageCol')" width="140">
+            <el-table-column :label="t('pharmacy.dosageCol')" width="180">
               <template #default="{ row }">
-                <span>{{ formatDispenseDisplay(row, selectedRow) }}</span>
+                <strong class="rx-dose-amount">{{ formatDispenseDisplay(row, selectedRow) }}</strong>
               </template>
             </el-table-column>
             <el-table-column :label="t('pharmacy.stockStatus')" width="180">
@@ -586,6 +596,8 @@ async function reopenPrescription(row) {
 </template>
 
 <style scoped>
+.rx-dose-summary { font-weight: 600; line-height: 1.6; color: #334155; }
+.rx-dose-amount { font-size: 17px; line-height: 1.5; font-variant-numeric: tabular-nums; }
 .pharmacy-view { max-width: 100%; }
 
 .pharmacy-header {
@@ -710,5 +722,6 @@ async function reopenPrescription(row) {
   .wide-table-wrap :deep(.el-table) {
     min-width: 560px;
   }
+  .rx-detail .wide-table-wrap :deep(.el-table) { min-width: 440px; }
 }
 </style>

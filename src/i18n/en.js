@@ -1,6 +1,7 @@
 export default {
   // ── Common ──
   common: {
+    operationFailed: 'Could not save your changes. Please try again.',
     confirm: 'Confirm',
     cancel: 'Cancel',
     save: 'Save',

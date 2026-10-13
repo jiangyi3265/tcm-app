@@ -280,8 +280,8 @@ export const consultationsApi = {
   restoreDeletedPrescription(id, prescriptionId) {
     return request(`/api/consultations/${id}/prescriptions/${prescriptionId}/restore-deleted`, { method: 'PATCH' })
   },
-  hardDeletePrescription(id, prescriptionId, { restoreInventory = false } = {}) {
-    const params = restoreInventory ? '?restoreInventory=true' : ''
+  hardDeletePrescription(id, prescriptionId, { restoreInventory = true } = {}) {
+    const params = `?restoreInventory=${restoreInventory}`
     return request(`/api/consultations/${id}/prescriptions/${prescriptionId}${params}`, { method: 'DELETE' })
   },
   reopenPrescription(id, prescriptionId) {

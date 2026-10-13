@@ -17,7 +17,7 @@ export const CLINIC_CACHE_KEYS = [
   'tcm_copy_consult',
 ]
 
-const SESSION_KEYS = new Set(CLINIC_CACHE_KEYS)
+const SESSION_KEYS = new Set([...CLINIC_CACHE_KEYS, 'tcm_auth', 'tcm_token'])
 
 function getBrowserStorage(name) {
   try {

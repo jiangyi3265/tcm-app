@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus'
 import { useHerbDictStore } from '../stores/herbDict'
 import { useInventoryStore } from '../stores/inventory'
 import { inventoryApi } from '../utils/api'
-import { exactInvoiceHerb, invoiceHerbSuggestions } from '../utils/invoiceHerbMatch'
+import { exactInvoiceHerb, invoiceHerbSuggestions, normalizeInvoiceUnit } from '../utils/invoiceHerbMatch'
 
 const props = defineProps({ category: String, branchId: String, currency: String })
 const emit = defineEmits(['close'])
@@ -33,7 +33,7 @@ function options(row) {
 function chooseInventory(row, id) {
   row.inventoryId = id
   const item = inventory.getItem(id)
-  if (item && row.unit && row.unit !== item.unit) {
+  if (item && row.unit && normalizeInvoiceUnit(row.unit) !== normalizeInvoiceUnit(item.unit)) {
     row.quantity = null
     row.purchasePrice = null
     ElMessage.warning(t('invoiceImport.unitChanged'))
@@ -42,7 +42,7 @@ function chooseInventory(row, id) {
   if (item && row.gramsPerPacket == null) row.gramsPerPacket = item.gramsPerPacket
 }
 function chooseHerb(row) {
-  const matches = targets(row).filter((item) => item.unit === row.unit)
+  const matches = targets(row).filter((item) => normalizeInvoiceUnit(item.unit) === normalizeInvoiceUnit(row.unit))
   chooseInventory(row, matches.length === 1 ? matches[0].id : '')
 }
 async function recognize(upload) {
@@ -66,7 +66,7 @@ async function recognize(upload) {
   finally { busy.value = false }
 }
 async function confirm() {
-  if (!canImport.value) return
+  if (busy.value || imported.value || !canImport.value) return
   busy.value = true; error.value = ''
   try {
     await inventoryApi.confirmInvoice({ invoiceId: preview.value.invoiceId, currency: invoiceCurrency.value, items: rows.value })

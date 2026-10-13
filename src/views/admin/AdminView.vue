@@ -1687,12 +1687,12 @@ async function restoreDeletedPrescription(row) {
   ElMessage.success('Prescription restored')
 }
 
-async function physicalDeletePrescription(row, restoreInventory) {
-  const message = restoreInventory
+async function physicalDeletePrescription(row) {
+  const message = row.inventoryHeld
     ? '永久删除这条处方记录，并把它占用的草药还回库存？'
-    : '永久删除这条处方记录，不修改它占用过的库存？'
+    : '永久删除这条处方记录？库存已返还，不会重复返还。'
   await ElMessageBox.confirm(message, t('admin.permanentDeleteTitle'), { type: 'error' })
-  await consultationsStore.permanentlyDeletePrescription(row.consultationRecordId, row.id, { restoreInventory })
+  await consultationsStore.permanentlyDeletePrescription(row.consultationRecordId, row.id, { restoreInventory: true })
   ElMessage.success(t('admin.permanentlyDeleted'))
 }
 
@@ -3839,11 +3839,8 @@ async function deleteTemplate(tmpl) {
             <el-table-column :label="t('admin.operation')" width="360">
               <template #default="{ row }">
                 <el-button size="small" text type="success" @click="restoreDeletedPrescription(row)">{{ t('admin.restore') }}</el-button>
-                <el-button size="small" text type="danger" @click="physicalDeletePrescription(row, true)">
-                  Delete + restore inventory
-                </el-button>
-                <el-button size="small" text type="danger" @click="physicalDeletePrescription(row, false)">
-                  Delete only
+                <el-button size="small" text type="danger" @click="physicalDeletePrescription(row)">
+                  {{ t('admin.permanentDelete') }}
                 </el-button>
               </template>
             </el-table-column>

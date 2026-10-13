@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppointmentsStore } from '../../stores/appointments'
 import { usePatientsStore } from '../../stores/patients'
@@ -43,6 +43,10 @@ const canEditOwnSchedule = computed(() => roles.value.includes('practitioner') |
 const canEditAppointments = computed(() => hasPermission(roles.value, 'appointment.create'))
 
 const currentDate = ref(new Date())
+const clockNow = ref(new Date())
+let clockTimer
+onMounted(() => { clockTimer = window.setInterval(() => { clockNow.value = new Date() }, 30000) })
+onUnmounted(() => window.clearInterval(clockTimer))
 const viewMode = ref('calendar')
 // pageOffset tracks which 3-day page within the 7-day window: 0→days 0-2, 1→days 3-5, 2→days 6-8 (wraps)
 const pageOffset = ref(0)
@@ -80,7 +84,7 @@ function nextPage() {
 function prevWeek() { currentDate.value = dayjs(currentDate.value).subtract(INTERNAL_VIEW_DAYS, 'day').toDate(); pageOffset.value = 0 }
 function nextWeek() { currentDate.value = dayjs(currentDate.value).add(INTERNAL_VIEW_DAYS, 'day').toDate(); pageOffset.value = 0 }
 function goToday() { currentDate.value = new Date(); pageOffset.value = 0 }
-function isToday(date) { return dayjs(date).isSame(dayjs(), 'day') }
+function isToday(date) { return dayjs(date).isSame(dayjs(clockNow.value), 'day') }
 
 function toMinutes(timeText) {
   const [hours, minutes] = String(timeText || '').split(':').map(Number)
@@ -283,6 +287,14 @@ function getCellClass(date, totalMinutes) {
 
 // ── Proportional calendar layout ──
 const PX_PER_MINUTE = 1.8  // each minute = 1.8px height
+const currentTimeTop = computed(() => {
+  if (!timeSlots.value.length) return null
+  const now = dayjs(clockNow.value)
+  const minutes = now.hour() * 60 + now.minute()
+  const first = timeSlots.value[0].total
+  const last = timeSlots.value[timeSlots.value.length - 1].total + SLOT_MINUTES
+  return minutes >= first && minutes < last ? getSlotTopPx(minutes) : null
+})
 
 function getSlotTopPx(totalMinutes) {
   const base = timeSlots.value.length > 0 ? timeSlots.value[0].total : 0
@@ -821,7 +833,7 @@ async function handleSendPreviewEmail() {
             <div class="sg-header sg-time-col">{{ t('appointments.timeAxis') }}</div>
             <div v-for="day in visibleDays" :key="'h'+day" class="sg-header" :class="{ today: isToday(day) }">
               <div>{{ dayjs(day).format('ddd') }}</div>
-              <div>{{ dayjs(day).format('MM-DD') }}</div>
+              <div class="sg-date" :aria-current="isToday(day) ? 'date' : undefined">{{ dayjs(day).format('MM-DD') }}</div>
             </div>
           </div>
 
@@ -842,6 +854,9 @@ async function handleSendPreviewEmail() {
               :style="{ height: getTotalCalendarHeight() + 'px' }"
             >
               <!-- Grid lines at each slot -->
+              <div v-if="isToday(day) && currentTimeTop !== null" class="sg-now-line" :style="{ top: currentTimeTop + 'px' }" role="img" :aria-label="`${t('appointments.today')} ${formatTime(clockNow)}`">
+                <span>{{ formatTime(clockNow) }}</span>
+              </div>
               <div v-for="slot in timeSlots" :key="slot.label" class="sg-gridline" :style="{ top: getSlotTopPx(slot.total) + 'px' }" />
 
               <!-- Working hour background bands -->
@@ -1206,7 +1221,12 @@ async function handleSendPreviewEmail() {
 /* ── Proportional schedule grid ── */
 .schedule-grid { display:flex; flex-direction:column; min-width:920px; }
 .schedule-grid .sg-header { flex:1; text-align:center; padding:10px 8px; background:#f8fafc; border:1px solid #edf2f7; color:#1b4332; font-weight:600; font-size:13px; }
-.schedule-grid .sg-header.today { background:#eefbf0; }
+.schedule-grid .sg-header.today { color: #c62828; }
+.sg-date { display: inline-block; padding: 4px 9px; border-radius: 20px; }
+.sg-header.today .sg-date { background: #c62828; color: #fff; }
+.sg-now-line { position: absolute; left: 0; right: 0; height: 2px; background: #d32f2f; z-index: 8; pointer-events: none; }
+.sg-now-line::before { content: ''; position: absolute; left: -4px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: #d32f2f; }
+.sg-now-line span { position: absolute; right: 4px; bottom: 3px; color: #b71c1c; background: #fff; border-radius: 3px; padding: 0 3px; font-size: 11px; font-weight: 600; }
 .schedule-grid .sg-header.sg-time-col { flex:0 0 72px; font-size:12px; color:#64748b; }
 .schedule-grid .sg-head-row > .sg-header, .sg-body-row > .sg-time-axis, .sg-body-row > .sg-day-col { border-right:1px solid #edf2f7; }
 .schedule-grid .sg-head-row { display:flex; }

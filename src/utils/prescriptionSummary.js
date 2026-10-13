@@ -4,9 +4,12 @@ export function summarizePrescription(prescription = {}) {
   const quantities = {}
   for (const item of items) {
     const unit = item.convertedUnit || (prescription.prescriptionType === 'powder' ? '包' : 'g')
-    // Converted quantities already include the number of doses.
-    const amount = Number(item.convertedQty ?? (prescription.prescriptionType === 'powder'
-      ? 0 : Number(item.dosage || 0) * Number(prescription.quantity || 1)))
+    const doses = Math.max(1, Number(prescription.quantity) || 1)
+    const amount = prescription.prescriptionType === 'powder'
+      ? Number(item.packetsPerDose ?? (Number(item.convertedQty || 0) / doses))
+      : prescription.prescriptionType === 'pills'
+        ? Number(item.convertedQty ?? item.dosage ?? 0)
+        : Number(item.convertedQty != null ? item.convertedQty / doses : item.dosage || 0)
     if (!Number.isFinite(amount) || amount < 0) continue
     quantities[unit] = Math.round(((quantities[unit] || 0) + amount) * 1000) / 1000
   }

@@ -24,3 +24,9 @@ export function exactInvoiceHerb(name, herbs) {
   const matches = invoiceHerbSuggestions(name, herbs).filter((item) => item.score === 2)
   return matches.length === 1 ? matches[0].herb : null
 }
+export function normalizeInvoiceUnit(unit) {
+  const value = String(unit || '').trim().toLowerCase().replace(/\s+/g, '')
+  if (['bag', 'bags', 'bag(包)', '包', 'packet', 'packets'].includes(value)) return 'bag'
+  if (['g', 'gram', 'grams', '克'].includes(value)) return 'g'
+  return value
+}

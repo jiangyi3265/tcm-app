@@ -94,13 +94,29 @@ test('clinic cache read falls back when session storage read is blocked', () => 
   assert.equal(getStoredItem('tcm_patients'), '[{"id":"legacy-patient"}]')
 })
 
-test('plain storage read and write do not throw when local storage is blocked', () => {
+test('plain preference storage read and write do not throw when local storage is blocked', () => {
   const localStorage = new MemoryStorage({
-    shouldFailGet: (key) => key === 'tcm_token',
-    shouldFailSet: (key) => key === 'tcm_token',
+    shouldFailGet: (key) => key === 'tcm_lang',
+    shouldFailSet: (key) => key === 'tcm_lang',
   })
   installStorage({ sessionStorage: new MemoryStorage(), localStorage })
 
+  assert.equal(getStoredItem('tcm_lang'), null)
+  assert.equal(writeStoredItem('tcm_lang', 'en'), false)
+})
+
+
+test('login survives cache eviction and reload but is cleared with the tab session', () => {
+  const localStorage = new MemoryStorage()
+  const sessionStorage = new MemoryStorage()
+  installStorage({ sessionStorage, localStorage })
+  localStorage.setItem('tcm_token', 'legacy-token')
+  assert.equal(getStoredItem('tcm_token'), 'legacy-token')
+  assert.equal(localStorage.getItem('tcm_token'), null)
+  assert.equal(writeStoredJson('tcm_auth', { currentUser: { id: 'qa' } }), true)
+  assert.equal(localStorage.getItem('tcm_auth'), null)
+  assert.equal(getStoredItem('tcm_token'), 'legacy-token')
+  installStorage({ sessionStorage: new MemoryStorage(), localStorage })
   assert.equal(getStoredItem('tcm_token'), null)
-  assert.equal(writeStoredItem('tcm_token', 'token-value'), false)
+  assert.equal(getStoredItem('tcm_auth'), null)
 })

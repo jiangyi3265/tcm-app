@@ -95,17 +95,17 @@ for (const width of [768, 1180]) {
   })
 }
 
-test('tablet prescription shows 16 compact herb rows and the complete gram total', async ({ page }) => {
+test('tablet prescription shows 16 compact herb rows and the single-dose gram total', async ({ page }) => {
   const { errors } = await fixture(page)
   await page.setViewportSize({ width: 768, height: 1024 })
   await page.goto('/patients/patient/consultations/consult-0')
   await page.getByRole('tab', { name: /Treatment/ }).click()
   const row = page.locator('.el-table__body tr').filter({ hasText: 'QA 16 herbs' })
-  await expect(row).toContainText('16 herbs · 96 g')
+  await expect(row).toContainText('16 herbs · 48 g')
   await row.getByRole('button', { name: 'Edit', exact: true }).click()
   const table = page.locator('.rx-items-table')
   await expect(table.locator('.el-table__body tr')).toHaveCount(16)
-  await expect(page.locator('.rx-dialog-body .rx-summary')).toHaveText('16 herbs · 96 g')
+  await expect(page.locator('.rx-dialog-body .rx-summary')).toHaveText('16 herbs · 48 g')
   const sizes = await table.evaluate((el) => ({
     rows: [...el.querySelectorAll('.el-table__body tr')].reduce((sum, row) => sum + row.getBoundingClientRect().height, 0),
     viewport: el.querySelector('.el-table__body-wrapper .el-scrollbar__wrap').clientHeight,

@@ -1,6 +1,7 @@
 export default {
   // ── 通用 ──
   common: {
+    operationFailed: '保存失败，请重试。',
     confirm: '确定',
     cancel: '取消',
     save: '保存',

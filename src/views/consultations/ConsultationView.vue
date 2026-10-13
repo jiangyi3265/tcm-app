@@ -1544,7 +1544,7 @@ function syncRxFormFromConsultation(rxId) {
 
 async function ensureConsultationForPrescription() {
   if (currentConsultationId.value) return currentConsultationId.value
-  const created = await persistConsultationDraft({ silent: true, syncRoute: true, flushRx: false })
+  const created = await persistConsultationDraft({ silent: true, syncRoute: false, flushRx: false })
   return created?.id || currentConsultationId.value
 }
 
@@ -1564,6 +1564,7 @@ async function persistRxDraftPayload(payload) {
     await waitForConsultationSaveToFinish()
   }
   return consultStore.syncPrescription(consultationId, {
+    consultation: buildPersistPayload(),
     prescription: payload,
     totals: buildRxTotals(),
   })
@@ -1652,25 +1653,9 @@ function scheduleRxAutosave() {
 
 async function persistCopiedPrescriptions(sourcePrescriptions = []) {
   if (!Array.isArray(sourcePrescriptions) || sourcePrescriptions.length === 0) return
-  const consultationId = await ensureConsultationForPrescription()
-  if (!consultationId) return
-
-  for (const prescription of sourcePrescriptions) {
-    if (!prescription?.id) prescription.id = buildRxId()
-    const requestConsultationSnapshot = buildFormSnapshot()
-    const requestStartedClean = !hasUnsavedConsultationChanges.value
-    const cloned = {
-      ...prescription,
-      items: (prescription.items || []).map((item) => ({ ...item })),
-      rxStatus: 'editing',
-      dispensingCompleted: false,
-    }
-    const updated = await consultStore.syncPrescription(consultationId, {
-      prescription: cloned,
-      totals: buildRxTotals(),
-    })
-    applyPrescriptionResultAndMaybeSync(updated, requestConsultationSnapshot, requestStartedClean)
-  }
+  // Persist all copied prescriptions and their parent together. The backend
+  // reserves stock in this same transaction, including on initial creation.
+  return persistConsultationDraft({ silent: true, syncRoute: true, flushRx: false })
 }
 
 watch(
@@ -1781,6 +1766,9 @@ async function doPersistConsultationDraft({ silent = false, syncRoute = true, fl
     if (!silent) {
       ElMessage.success(t('consultation.saved'))
     }
+    if (syncRoute && isNew) {
+      await navigateWithoutUnsavedPrompt(() => router.replace(`/patients/${patientId}/consultations/${targetId}`))
+    }
     return updated
   } catch (e) {
     if (!silent) {
@@ -1867,9 +1855,16 @@ async function deleteRx(target) {
   if (idx < 0) return
   const targetRx = form.value.prescriptions[idx]
   if (!targetRx) return
+  clearRxAutosaveTimer()
+  pendingRxAutosave.value = false
+  suspendRxAutosave.value = true
+  invalidateRxEditingSession()
+  await waitForRxAutosaveToFinish({ ignoreErrors: true })
+  await waitForConsultationSaveToFinish({ ignoreErrors: true })
   if (!currentConsultationId.value) {
     form.value.prescriptions.splice(idx, 1)
     syncFormFromPrimaryPrescription()
+    suspendRxAutosave.value = false
     return
   }
   try {
@@ -1879,8 +1874,11 @@ async function deleteRx(target) {
       totals: buildRxTotals(buildTotalsSourceWithPrescriptionStatus(targetRx.id, 'deleted')),
     })
     applyPrescriptionResultAndMaybeSync(updated, requestSnapshot, requestStartedClean)
+    if (showRxDialog.value && rxForm.value.id === targetRx.id) showRxDialog.value = false
   } catch (error) {
     ElMessage.error(error.message || t('common.operationFailed'))
+  } finally {
+    suspendRxAutosave.value = false
   }
 }
 
@@ -2525,6 +2523,11 @@ async function reactivateConsultation() {
 async function deleteConsultation() {
   try {
     await ElMessageBox.confirm(t('consultation.confirmDelete'), t('consultation.confirmDeleteTitle'), { type: 'warning' })
+    clearRxAutosaveTimer()
+    pendingRxAutosave.value = false
+    suspendRxAutosave.value = true
+    await waitForRxAutosaveToFinish({ ignoreErrors: true })
+    await waitForConsultationSaveToFinish({ ignoreErrors: true })
     const id = consultId || consultation.value?.id
     if (id) {
       const ok = await consultStore.deleteConsultation(id)
@@ -2533,6 +2536,8 @@ async function deleteConsultation() {
     }
   } catch (e) {
     if (e !== 'cancel') ElMessage.error(e.message)
+  } finally {
+    suspendRxAutosave.value = false
   }
 }
 

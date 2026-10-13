@@ -22,6 +22,17 @@ export const useConsultationsStore = defineStore('consultations', () => {
   const consultations = ref([])
   const deletedPrescriptions = ref([])
   const inventoryStore = useInventoryStore()
+  let revision = 0
+
+  function upsertConsultation(record, fallback = {}) {
+    const normalized = normalizeConsultation({ ...fallback, ...record })
+    const index = consultations.value.findIndex((item) => item.id === normalized.id)
+    if (index < 0) consultations.value.push(normalized)
+    else consultations.value[index] = normalized
+    revision += 1
+    saveState()
+    return normalized
+  }
 
   function normalizeConsultation(consultation) {
     return {
@@ -48,7 +59,9 @@ export const useConsultationsStore = defineStore('consultations', () => {
   }
 
   async function refreshFromApi() {
+    const startedAtRevision = revision
     const list = await consultationsApi.list()
+    if (startedAtRevision !== revision) return consultations.value
     consultations.value = (Array.isArray(list) ? list : []).map(normalizeConsultation)
     saveState()
     return consultations.value
@@ -56,17 +69,11 @@ export const useConsultationsStore = defineStore('consultations', () => {
 
   async function refreshConsultationFromApi(id) {
     if (!id) return null
+    const startedAtRevision = revision
     const record = await consultationsApi.get(id)
     if (!record) return null
-    const normalized = normalizeConsultation(record)
-    const idx = consultations.value.findIndex((c) => c.id === normalized.id)
-    if (idx === -1) {
-      consultations.value.push(normalized)
-    } else {
-      consultations.value[idx] = normalized
-    }
-    saveState()
-    return normalized
+    if (startedAtRevision !== revision) return getConsultation(record.id) || record
+    return upsertConsultation(record)
   }
 
   async function refreshInventoryAfterPrescriptionChange() {
@@ -157,29 +164,18 @@ export const useConsultationsStore = defineStore('consultations', () => {
       createdAt: new Date().toISOString(),
     }
     const created = await consultationsApi.create(newConsult)
-    consultations.value.push(created)
-    saveState()
-    return created
+    const saved = upsertConsultation(created)
+    if (saved.prescriptions?.length) await refreshInventoryAfterPrescriptionChange()
+    return saved
   }
 
   async function updateConsultation(id, updates, userId) {
-    const idx = consultations.value.findIndex((c) => c.id === id)
-    if (idx === -1) return false
     const updated = await consultationsApi.update(id, updates)
-    // 合并API返回和本地更新数据，确保处方等嵌套数据不丢失
-    consultations.value[idx] = {
-      ...consultations.value[idx],
-      ...updates,
-      ...updated,
-      // 优先使用本地传入的处方数据（API可能不返回完整的嵌套对象）
-      prescriptions: updates.prescriptions || updated.prescriptions || consultations.value[idx].prescriptions || [],
-      acupuncture: updates.acupuncture || updated.acupuncture || consultations.value[idx].acupuncture || [],
-      services: updates.services || updated.services || consultations.value[idx].services || [],
-      documents: updates.documents || updated.documents || consultations.value[idx].documents || [],
-      diff: updates.diff || updated.diff || consultations.value[idx].diff || {},
-    }
-    saveState()
-    return consultations.value[idx]
+    // The server owns reservation and lifecycle metadata, even when this record
+    // was not present in a cached list or that list changed while saving.
+    const saved = upsertConsultation(updated, { ...getConsultation(id), ...updates, id })
+    if (updates.prescriptions) await refreshInventoryAfterPrescriptionChange()
+    return saved
   }
 
   function syncPatientHistorySnapshot(patientId, snapshot, sourceConsultationId, sourceDate) {
@@ -200,59 +196,44 @@ export const useConsultationsStore = defineStore('consultations', () => {
 
   async function completeConsultation(id) {
     const updated = await consultationsApi.complete(id)
-    const idx = consultations.value.findIndex((c) => c.id === id)
-    if (idx !== -1) consultations.value[idx] = updated
-    saveState()
+    upsertConsultation(updated)
     return updated
   }
 
   async function reactivateConsultation(id) {
     const updated = await consultationsApi.reactivate(id)
-    const idx = consultations.value.findIndex((c) => c.id === id)
-    if (idx !== -1) consultations.value[idx] = updated
-    saveState()
+    upsertConsultation(updated)
     return updated
   }
 
   async function markAsPaid(id, paymentInfo = {}) {
     const updated = await consultationsApi.createPayment(id, paymentInfo)
-    const idx = consultations.value.findIndex((c) => c.id === id)
-    if (idx === -1) return null
-    consultations.value[idx] = updated
-    saveState()
+    upsertConsultation(updated)
     return updated
   }
 
   async function updateInvoicePricing(id, pricingInfo = {}) {
     const updated = await consultationsApi.updateInvoicePricing(id, pricingInfo)
-    const idx = consultations.value.findIndex((c) => c.id === id)
-    if (idx !== -1) consultations.value[idx] = updated
-    saveState()
+    upsertConsultation(updated)
     return updated
   }
 
   async function deleteConsultation(id) {
-    const idx = consultations.value.findIndex((c) => c.id === id)
-    if (idx === -1) return false
     const updated = await consultationsApi.softDelete(id)
-    consultations.value[idx] = updated
-    saveState()
+    upsertConsultation(updated)
     await refreshInventoryAfterPrescriptionChange()
     return true
   }
 
   async function restoreConsultation(id) {
-    const idx = consultations.value.findIndex((c) => c.id === id)
-    if (idx !== -1) {
-      const updated = await consultationsApi.restore(id)
-      consultations.value[idx] = updated
-      saveState()
-      await refreshInventoryAfterPrescriptionChange()
-    }
+    const updated = await consultationsApi.restore(id)
+    upsertConsultation(updated)
+    await refreshInventoryAfterPrescriptionChange()
   }
 
   async function physicalDeleteConsultation(id) {
     await consultationsApi.hardDelete(id)
+    revision += 1
     consultations.value = consultations.value.filter((c) => c.id !== id)
     saveState()
     return true
@@ -266,9 +247,8 @@ export const useConsultationsStore = defineStore('consultations', () => {
 
   async function restoreDeletedPrescription(consultationId, prescriptionId) {
     const updated = await consultationsApi.restoreDeletedPrescription(consultationId, prescriptionId)
-    const idx = consultations.value.findIndex((c) => c.id === consultationId)
-    if (idx !== -1) consultations.value[idx] = updated
-    await refreshDeletedPrescriptions()
+    upsertConsultation(updated)
+    await refreshDeletedPrescriptions().catch((error) => { console.warn('回收站刷新失败:', error.message) })
     await refreshInventoryAfterPrescriptionChange()
     saveState()
     return updated
@@ -276,9 +256,8 @@ export const useConsultationsStore = defineStore('consultations', () => {
 
   async function permanentlyDeletePrescription(consultationId, prescriptionId, options = {}) {
     const updated = await consultationsApi.hardDeletePrescription(consultationId, prescriptionId, options)
-    const idx = consultations.value.findIndex((c) => c.id === consultationId)
-    if (idx !== -1) consultations.value[idx] = updated
-    await refreshDeletedPrescriptions()
+    upsertConsultation(updated)
+    await refreshDeletedPrescriptions().catch((error) => { console.warn('回收站刷新失败:', error.message) })
     await refreshInventoryAfterPrescriptionChange()
     saveState()
     return updated
@@ -303,54 +282,42 @@ export const useConsultationsStore = defineStore('consultations', () => {
 
   async function markDispensingComplete(id) {
     const updated = await consultationsApi.dispense(id)
-    const idx = consultations.value.findIndex((c) => c.id === id)
-    if (idx !== -1) consultations.value[idx] = updated
-    saveState()
+    upsertConsultation(updated)
     return updated
   }
 
   async function syncPrescription(id, payload) {
     const updated = await consultationsApi.syncPrescription(id, payload)
-    const idx = consultations.value.findIndex((c) => c.id === id)
-    if (idx !== -1) consultations.value[idx] = updated
-    saveState()
+    upsertConsultation(updated)
     await refreshInventoryAfterPrescriptionChange()
     return updated
   }
 
   async function completePrescription(id, prescriptionId, payload = {}) {
     const updated = await consultationsApi.completePrescription(id, prescriptionId, payload)
-    const idx = consultations.value.findIndex((c) => c.id === id)
-    if (idx !== -1) consultations.value[idx] = updated
-    saveState()
+    upsertConsultation(updated)
     await refreshInventoryAfterPrescriptionChange()
     return updated
   }
 
   async function deletePrescription(id, prescriptionId, payload = {}) {
     const updated = await consultationsApi.deletePrescription(id, prescriptionId, payload)
-    const idx = consultations.value.findIndex((c) => c.id === id)
-    if (idx !== -1) consultations.value[idx] = updated
-    saveState()
-    await refreshDeletedPrescriptions()
+    upsertConsultation(updated)
+    await refreshDeletedPrescriptions().catch((error) => { console.warn('回收站刷新失败:', error.message) })
     await refreshInventoryAfterPrescriptionChange()
     return updated
   }
 
   async function reopenPrescription(id, prescriptionId) {
     const updated = await consultationsApi.reopenPrescription(id, prescriptionId)
-    const idx = consultations.value.findIndex((c) => c.id === id)
-    if (idx !== -1) consultations.value[idx] = updated
-    saveState()
+    upsertConsultation(updated)
     await refreshInventoryAfterPrescriptionChange()
     return updated
   }
 
   async function dispensePrescription(id, prescriptionId) {
     const updated = await consultationsApi.dispensePrescription(id, prescriptionId)
-    const idx = consultations.value.findIndex((c) => c.id === id)
-    if (idx !== -1) consultations.value[idx] = updated
-    saveState()
+    upsertConsultation(updated)
     return updated
   }
 

@@ -82,7 +82,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function init() {
-    currentUser.value = readStoredJson(STORAGE_KEY, null)?.currentUser || null
+    currentUser.value = getStoredItem(TOKEN_KEY) ? readStoredJson(STORAGE_KEY, null)?.currentUser || null : null
     void loadUsers({ background: true })
   }
 

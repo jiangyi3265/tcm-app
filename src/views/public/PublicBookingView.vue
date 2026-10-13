@@ -529,8 +529,7 @@ onBeforeUnmount(() => {
 <template>
   <div ref="bookingPage" class="public-booking-page" :class="{ embedded: isEmbedded }">
     <div v-if="successState" class="public-card success-card">
-      <img :src="clinicLogo" class="clinic-logo" alt="OTCM Acupuncture" width="389" height="232" />
-      <a class="clinic-home-link" href="https://otcm.ca/" target="_top">{{ t('publicBooking.backToClinic') }}</a>
+      <a class="clinic-home-link" href="https://otcm.ca/" target="_top" aria-label="OTCM home"><img :src="clinicLogo" class="clinic-logo" alt="OTCM Acupuncture" width="389" height="232" /></a>
       <h1>{{ t('publicBooking.successTitle') }}</h1>
       <p>{{ t('publicBooking.successIntro') }}</p>
       <p>{{ t('publicBooking.successTime', { time: successTimeLabel }) }}</p>
@@ -539,12 +538,10 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else class="public-card">
-      <img :src="clinicLogo" class="clinic-logo" alt="OTCM Acupuncture" width="389" height="232" />
-      <a class="clinic-home-link" href="https://otcm.ca/" target="_top">{{ t('publicBooking.backToClinic') }}</a>
       <div class="page-head">
-        <div>
-          <h1>{{ t('publicBooking.pageTitle') }}</h1>
-          <p>{{ t('publicBooking.pageSubtitle') }}</p>
+        <div class="booking-brand">
+          <a class="clinic-home-link" href="https://otcm.ca/" target="_top" aria-label="OTCM home"><img :src="clinicLogo" class="clinic-logo" alt="OTCM Acupuncture" width="389" height="232" /></a>
+          <h1>OTCM Acupuncture Online Booking</h1>
         </div>
         <el-button v-if="!isEmbedded" size="small" @click="copyBookingUrl">
           {{ t('publicBooking.copyLink') }}
@@ -564,7 +561,6 @@ onBeforeUnmount(() => {
 
       <el-form v-else :model="form" :disabled="submitting" label-position="top" class="public-form">
         <section class="booking-section">
-          <h2>Choose a Service</h2>
           <div class="grid two-col">
             <el-form-item :label="t('appointments.serviceType')" required>
               <el-select v-model="form.serviceType" style="width: 100%">
@@ -577,16 +573,12 @@ onBeforeUnmount(() => {
               </el-select>
             </el-form-item>
           </div>
-          <div v-if="!form.practitionerId" class="auto-match-banner">
-            {{ t('publicBooking.autoAssignHint') }}
-          </div>
         </section>
 
         <section class="booking-section">
           <div class="schedule-head">
             <div>
               <h2>{{ t('publicBooking.weekScheduleTitle') }}</h2>
-              <p>{{ t('publicBooking.weekScheduleSubtitle') }}</p>
             </div>
             <div class="week-nav">
               <el-button class="week-today" size="small" :disabled="submitting" @click="goToday">{{ t('appointments.today') }}</el-button>
@@ -636,7 +628,6 @@ onBeforeUnmount(() => {
         <section v-if="!scheduleError" class="booking-section time-blocks">
           <div>
             <h2>{{ t('publicBooking.timeBlocksTitle') }}</h2>
-            <p>{{ t('publicBooking.timeBlocksSubtitle') }}</p>
           </div>
           <div v-if="scheduleLoading" class="schedule-empty">{{ t('common.loading') }}</div>
           <div v-else-if="!selectedDateValue" class="schedule-empty">{{ t('publicBooking.selectDateHint') }}</div>
@@ -724,11 +715,15 @@ onBeforeUnmount(() => {
 
 .clinic-logo {
   display: block;
-  width: 160px;
+  width: 100px;
   max-width: 100%;
   height: auto;
-  margin-bottom: 20px;
+  margin: 0;
 }
+
+.booking-brand { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.booking-brand .clinic-home-link { flex: 0 0 100px; margin: 0; }
+.booking-brand h1 { font-size: clamp(20px, 3vw, 28px); line-height: 1.25; }
 
 .success-card .clinic-logo {
   margin-left: auto;
