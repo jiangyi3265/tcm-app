@@ -1,39 +1,44 @@
 import { expect, test } from '@playwright/test'
 import dayjs from 'dayjs'
-import { createDraftConsultation, createPatient, createPractitioner, createRoom, withTemporaryPractitionerSchedule } from './helpers/api.js'
-import { chooseSelectOption, seedSession, setPreferredLocale } from './helpers/ui.js'
+import { apiJson, createDraftConsultation, createPatient, createPractitioner, createRoom, loginAsAdmin, requireLocalTestTarget, withTemporaryPractitionerSchedule } from './helpers/api.js'
+import { chooseSelectOption, loginThroughUi, seedSession, setPreferredLocale, trackBrowserFailures } from './helpers/ui.js'
 
 const WEEKDAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
 
+test.beforeEach(({ baseURL }) => requireLocalTestTarget(baseURL))
+
 test.describe.serial('最小浏览器级冒烟', () => {
   test('公开预约页可匿名完成预约', async ({ page, request }) => {
+    const browserFailures = trackBrowserFailures(page)
     const practitioner = await createPractitioner(request, {
       name: `E2E公开医师-${Date.now()}`,
     })
-    const room = await createRoom(request, {
+    await createRoom(request, {
       name: `E2E公开诊室-${Date.now()}`,
       supportTags: ['acupuncture'],
     })
+    const targetDay = dayjs().add(1, 'day')
     await withTemporaryPractitionerSchedule(request, practitioner.id, {
-      wednesday: [{ start: '09:00', end: '12:00' }],
+      [WEEKDAY_KEYS[targetDay.day()]]: [{ start: '09:00', end: '12:00' }],
     }, async () => {
       const bookingName = `E2E公开预约-${Date.now()}`
       const bookingPhone = `138${String(Date.now()).slice(-8)}`
 
       await setPreferredLocale(page)
       await page.goto('/book')
-      await expect(page.getByRole('heading', { name: '在线预约' })).toBeVisible()
+      await expect(page.getByRole('heading', { name: 'OTCM Acupuncture Online Booking' })).toBeVisible()
 
       const form = page.locator('.public-form')
       await chooseSelectOption(page, form, '医师', practitioner.name)
 
-      await expect(page.locator('.schedule-empty').filter({ hasText: '加载中...' })).toBeHidden({ timeout: 15000 })
-      const slotCard = page.locator('.slot-card').first()
+      await expect(page.locator('.schedule-empty').filter({ hasText: '加载中...' })).toHaveCount(0, { timeout: 15000 })
+      const slotCard = page.locator('.time-block-button').first()
       await expect(slotCard).toBeVisible()
       const selectedSlotTime = (await slotCard.locator('.slot-time').first().textContent())?.trim() || ''
       await slotCard.click()
 
-      await page.locator('input[placeholder="请输入您的姓名"]').fill(bookingName)
+      await page.getByPlaceholder('Last name', { exact: true }).fill('E2E')
+      await page.getByPlaceholder('First name', { exact: true }).fill(bookingName)
       await page.locator('input[placeholder="请输入手机号或联系电话"]').fill(bookingPhone)
       await page.getByRole('button', { name: '提交预约' }).click()
 
@@ -44,20 +49,23 @@ test.describe.serial('最小浏览器级冒烟', () => {
       }
 
       await page.getByRole('button', { name: /继续预约|再约一个/ }).click()
-      await expect(page.getByRole('heading', { name: '在线预约' })).toBeVisible()
+      await expect(page.getByRole('heading', { name: 'OTCM Acupuncture Online Booking' })).toBeVisible()
       if (selectedSlotTime) {
-        await expect(page.locator('.slot-card').filter({ hasText: selectedSlotTime.split(' - ')[0] })).toHaveCount(0)
+        await expect(page.locator('.time-block-button').filter({ hasText: selectedSlotTime.split(' - ')[0] })).toHaveCount(0)
       }
+      expect(browserFailures).toEqual([])
     })
   })
 
   test('前台预约页排班与建单联动可用', async ({ page, request }) => {
+    const browserFailures = trackBrowserFailures(page)
     const practitioner = await createPractitioner(request, {
       name: `E2E排班医师-${Date.now()}`,
     })
-    const todayKey = WEEKDAY_KEYS[dayjs().day()]
+    const targetDay = dayjs().add(1, 'day')
+    const targetDayKey = WEEKDAY_KEYS[targetDay.day()]
     await withTemporaryPractitionerSchedule(request, practitioner.id, {
-      [todayKey]: [{ start: '14:20', end: '16:20' }],
+      [targetDayKey]: [{ start: '14:20', end: '16:20' }],
     }, async () => {
       const patient = await createPatient(request, {
         name: `E2E排班联动-${Date.now()}`,
@@ -68,10 +76,10 @@ test.describe.serial('最小浏览器级冒烟', () => {
       await page.goto('/appointments')
       await expect(page.getByRole('banner').getByText('预约管理', { exact: true })).toBeVisible()
 
-      await page.locator('.appt-toolbar .toolbar-right .el-select').first().click()
+      await page.locator('.appt-toolbar .toolbar-right .el-select').nth(1).click()
       await page.locator('.el-select-dropdown__item').filter({ hasText: practitioner.name }).last().click()
 
-      const slotPrefix = dayjs().format('YYYY-MM-DD')
+      const slotPrefix = targetDay.format('YYYY-MM-DD')
       const slot1420 = page.locator(`[data-testid="appointment-slot-${slotPrefix}-14:20"].clickable`)
       const slot1430 = page.locator(`[data-testid="appointment-slot-${slotPrefix}-14:30"].clickable`)
       await expect(slot1420).toBeVisible()
@@ -90,13 +98,31 @@ test.describe.serial('最小浏览器级冒烟', () => {
 
       await expect(page.getByText('预约已创建')).toBeVisible()
       await expect(page.locator('[data-testid^="appointment-block-"]').filter({ hasText: patient.name }).first()).toBeVisible()
+      expect(browserFailures).toEqual([])
     })
   })
 
   test('处方完成在 autosave 竞争下仍进入待发状态', async ({ page, request }) => {
+    const browserFailures = trackBrowserFailures(page)
+    const { token } = await loginAsAdmin(request)
+    const patient = await createPatient(request)
+    const practitioner = await createPractitioner(request)
+    const fixtureName = `E2E处方-${Date.now()}`
+    const herb = await apiJson(request, '/api/herb-dict', {
+      method: 'POST', token,
+      data: { name: fixtureName, pinyin: fixtureName, isActive: true },
+    })
+    const stock = await apiJson(request, '/api/inventory', {
+      method: 'POST', token,
+      data: { name: fixtureName, herbDictId: herb.id, category: 'raw_herbs', quantity: 1000, unit: 'g', pricePerUnit: 0.1, isActive: true },
+    })
+    await apiJson(request, '/api/formulas', {
+      method: 'POST', token,
+      data: { name: fixtureName, isActive: true, items: [{ herbName: fixtureName, herbDictId: herb.id, dosage: 2, unit: 'g', sortOrder: 1 }] },
+    })
     const consultation = await createDraftConsultation(request, {
-      patientId: 'patient-1',
-      practitionerId: '101',
+      patientId: patient.id,
+      practitionerId: practitioner.id,
     })
     const rxTraffic = []
     const rxRequestPattern = /\/api\/consultations\/[^/]+\/prescriptions(?:\/[^/]+\/complete)?$/
@@ -126,7 +152,7 @@ test.describe.serial('最小浏览器级冒烟', () => {
     })
 
     await seedSession(page, request)
-    await page.goto(`/patients/patient-1/consultations/${consultation.id}`)
+    await page.goto(`/patients/${patient.id}/consultations/${consultation.id}`)
     const treatmentsTab = page.getByRole('tab', { name: /Treatments/ })
     await expect(treatmentsTab).toBeVisible()
     await treatmentsTab.click()
@@ -142,9 +168,9 @@ test.describe.serial('最小浏览器级冒烟', () => {
       req.method() === 'PATCH' && /\/api\/consultations\/[^/]+\/prescriptions$/.test(req.url()),
     )
 
-    await drawer.locator('.el-form-item').filter({ hasText: 'Formula' }).locator('input').fill('四君子汤')
-    await expect(page.locator('.formula-item').filter({ hasText: '四君子汤' }).first()).toBeVisible()
-    await page.locator('.formula-item').filter({ hasText: '四君子汤' }).first().click()
+    await drawer.locator('.el-form-item').filter({ hasText: 'Formula' }).locator('input').fill(fixtureName)
+    await expect(page.locator('.formula-item').filter({ hasText: fixtureName }).first()).toBeVisible()
+    await page.locator('.formula-item').filter({ hasText: fixtureName }).first().click()
 
     await autosaveStarted
     const completeResponse = page.waitForResponse(
@@ -159,12 +185,42 @@ test.describe.serial('最小浏览器级冒烟', () => {
       throw new Error(`${error.message}\n处方请求轨迹:\n${rxTraffic.join('\n')}`)
     }
 
+    expect(delayedAutosaveCount).toBe(1)
     await expect(drawer).toBeHidden()
-    const row = treatmentsPanel.locator('.el-table__row').filter({ hasText: '四君子汤' }).first()
+    const row = treatmentsPanel.locator('.el-table__row').filter({ hasText: fixtureName }).first()
     await expect(row).toContainText('待发')
 
     await page.goto('/pharmacy')
     await expect(page.getByText('待发药处方')).toBeVisible()
-    await expect(page.locator('.rx-card').filter({ hasText: '四君子汤' }).first()).toBeVisible()
+    await expect(page.locator('.rx-card').filter({ hasText: fixtureName }).first()).toBeVisible()
+    const inventory = await apiJson(request, '/api/inventory', { token })
+    expect(inventory.find((item) => item.id === stock.id)?.quantity).toBe(986)
+    expect(browserFailures).toEqual([])
   })
+})
+
+test('真实登录刷新保持会话，关闭标签页后需要重新登录', async ({ page }) => {
+  const browserFailures = trackBrowserFailures(page)
+  await loginThroughUi(page)
+  const originalToken = await page.evaluate(() => window.sessionStorage.getItem('tcm_token'))
+  expect(originalToken).toBeTruthy()
+  expect(await page.evaluate(() => window.localStorage.getItem('tcm_token'))).toBeNull()
+
+  await page.reload()
+  await expect(page).toHaveURL(/\/dashboard$/)
+  await expect(page.getByRole('banner')).toBeVisible()
+  expect(await page.evaluate(() => window.sessionStorage.getItem('tcm_token'))).toBe(originalToken)
+  expect(browserFailures).toEqual([])
+
+  const context = page.context()
+  await page.close()
+  const newPage = await context.newPage()
+  const newPageFailures = trackBrowserFailures(newPage)
+  await setPreferredLocale(newPage)
+  await newPage.goto('/dashboard')
+  await expect(newPage).toHaveURL(/\/login$/)
+  await expect(newPage.getByRole('button', { name: '登 录' })).toBeVisible()
+  expect(await newPage.evaluate(() => window.sessionStorage.getItem('tcm_token'))).toBeNull()
+  expect(newPageFailures).toEqual([])
+  await newPage.close()
 })

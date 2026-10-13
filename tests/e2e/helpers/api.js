@@ -4,6 +4,13 @@ const ADMIN_CREDENTIALS = {
 }
 const BROWSER_LIKE_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36'
 
+export function requireLocalTestTarget(baseURL) {
+  const host = new URL(baseURL).hostname
+  if (!['127.0.0.1', 'localhost', '[::1]'].includes(host)) {
+    throw new Error('These integration tests create fixtures and must only run against an isolated local server.')
+  }
+}
+
 function uniqueSuffix() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -17,10 +24,10 @@ async function readJson(response) {
 }
 
 async function expectOk(response, context) {
-  if (response.ok()) {
-    return readJson(response)
-  }
   const payload = await readJson(response)
+  if (response.ok() && !(Number(payload?.code) >= 400)) {
+    return payload
+  }
   throw new Error(payload?.msg || payload?.message || `${context} failed with ${response.status()}`)
 }
 
@@ -99,7 +106,7 @@ export async function createPractitioner(request, overrides = {}) {
     token,
     data: {
       name: overrides.name || `E2E医师-${suffix}`,
-      email: overrides.email || `e2e-practitioner-${suffix}@clinic.com`,
+      email: overrides.email || `e2e-${suffix}@example.invalid`,
       password: overrides.password || 'admin12345',
       roles: ['practitioner'],
       phone: overrides.phone || `137${String(Date.now()).slice(-8)}`,

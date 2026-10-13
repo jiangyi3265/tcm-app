@@ -6,11 +6,14 @@ import {
   createPractitioner,
   createRoom,
   loginAsAdmin,
+  requireLocalTestTarget,
   withTemporaryPractitionerSchedule,
 } from './helpers/api.js'
-import { setPreferredLocale } from './helpers/ui.js'
+import { setPreferredLocale, trackBrowserFailures } from './helpers/ui.js'
 
 const WEEKDAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+
+test.beforeEach(({ baseURL }) => requireLocalTestTarget(baseURL))
 
 function toArray(payload) {
   if (Array.isArray(payload)) return payload
@@ -24,7 +27,7 @@ async function createCancelableAppointment(request, label) {
   const shortId = `${label}${String(Date.now()).slice(-6)}`
   const practitioner = await createPractitioner(request, {
     name: `E2E公开医师-${suffix}`,
-    email: `${shortId}@c.com`,
+    email: `${shortId}@example.invalid`,
   })
   const room = await createRoom(request, {
     name: `E2E公开诊室-${suffix}`,
@@ -92,6 +95,7 @@ async function createCancelableAppointment(request, label) {
 
 test.describe.serial('公开预约取消 smoke', () => {
   test('公开预约管理页可以取消预约并展示成功态', async ({ page, request }) => {
+    const browserFailures = trackBrowserFailures(page)
     const { manageToken } = await createCancelableAppointment(request, 'manage')
 
     await setPreferredLocale(page)
@@ -106,15 +110,17 @@ test.describe.serial('公开预约取消 smoke', () => {
 
     await expect(page.getByRole('heading', { name: '预约已取消' })).toBeVisible()
     await expect(page.getByText('本次预约已取消，相关后续邮件也会一并停止。')).toBeVisible()
+    expect(browserFailures).toEqual([])
   })
 
   test('首次资料页可以取消预约并展示成功态', async ({ page, request }) => {
+    const browserFailures = trackBrowserFailures(page)
     const { intakeToken } = await createCancelableAppointment(request, 'intake')
 
     await setPreferredLocale(page)
     await page.goto(`/intake/${intakeToken}`)
 
-    await expect(page.getByRole('heading', { name: '就诊问诊表' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '首诊情况问询' })).toBeVisible()
     const cancelButton = page.getByRole('button', { name: '取消这次预约' })
     await expect(cancelButton).toBeVisible()
     await expect(cancelButton).toBeEnabled()
@@ -123,5 +129,6 @@ test.describe.serial('公开预约取消 smoke', () => {
 
     await expect(page.getByRole('heading', { name: '预约已取消' })).toBeVisible()
     await expect(page.getByText('本次预约已经取消，后续提醒和回访邮件将不再发送。')).toBeVisible()
+    expect(browserFailures).toEqual([])
   })
 })
