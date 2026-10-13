@@ -78,7 +78,9 @@ export const useConsultationsStore = defineStore('consultations', () => {
 
   async function refreshInventoryAfterPrescriptionChange() {
     try {
-      await inventoryStore.refreshFromApi()
+      // A request started before the prescription mutation contains old stock.
+      // Force a fresh read and invalidate that earlier response.
+      await inventoryStore.refreshFromApi({ force: true })
     } catch (error) {
       console.warn('处方变更后刷新库存失败:', error.message)
     }
@@ -129,8 +131,9 @@ export const useConsultationsStore = defineStore('consultations', () => {
       formulaName: data.formulaName || '',
       prescriptionType: data.prescriptionType || 'none',
       prognosis: data.prognosis || '',
-      feedback: '',
+      feedback: data.feedback || '',
       previousPrognosisReview: data.previousPrognosisReview || '',
+      rateForLast: data.rateForLast ?? 0,
       // Pricing
       servicePriceList: data.servicePriceList || '',
       services: data.services || [],
@@ -138,6 +141,7 @@ export const useConsultationsStore = defineStore('consultations', () => {
       discountType: data.discountType || 'none',
       discountValue: data.discountValue || 0,
       taxable: data.taxable !== undefined ? data.taxable : false,
+      overrideTaxRate: data.overrideTaxRate ?? null,
       includeRxAmount: data.includeRxAmount || false,
       add3rdParty: data.add3rdParty || false,
       currency: data.currency || 'CAD',
@@ -236,6 +240,7 @@ export const useConsultationsStore = defineStore('consultations', () => {
     revision += 1
     consultations.value = consultations.value.filter((c) => c.id !== id)
     saveState()
+    await refreshInventoryAfterPrescriptionChange()
     return true
   }
 

@@ -212,6 +212,9 @@ let aiRecognition = null
 let consultationSavePromise = null
 let consultationHydrationSeq = 0
 let flushingRxBeforeConsultationSave = false
+const pendingCopiedPrescriptions = ref(null)
+let clearCopyCacheAfterSave = false
+let consultationViewDisposed = false
 
 function cloneJson(value, fallback = null) {
   if (value === undefined) return fallback
@@ -474,7 +477,7 @@ const hasUnsavedRxDialogChanges = computed(() =>
 )
 
 const hasPendingUnsavedChanges = computed(() =>
-  hasUnsavedConsultationChanges.value || hasUnsavedRxDialogChanges.value,
+  hasUnsavedConsultationChanges.value || hasUnsavedRxDialogChanges.value || Boolean(pendingCopiedPrescriptions.value),
 )
 
 function syncRxBaseline() {
@@ -818,12 +821,17 @@ async function onCopySection(data) {
   Object.assign(form.value, rest)
   if (Array.isArray(prescriptions)) {
     applyCopiedPrescriptions(prescriptions)
-    await persistCopiedConsultationData({
-      currentConsultationId: currentConsultationId.value,
-      prescriptions: form.value.prescriptions,
-      persistConsultationDraft,
-      persistCopiedPrescriptions,
-    })
+    try {
+      await persistCopiedConsultationData({
+        currentConsultationId: currentConsultationId.value,
+        prescriptions: form.value.prescriptions,
+        persistConsultationDraft,
+        persistCopiedPrescriptions,
+      })
+    } catch (error) {
+      ElMessage.error(error.message || t('common.operationFailed'))
+      return
+    }
   }
   form.value.servicePriceList = normalizeServicePriceListSelection(form.value.servicePriceList)
   ElMessage.success(t('consultation.copiedToRecord'))
@@ -1032,6 +1040,7 @@ onMounted(() => {
         if (copyData.diff) form.value.diff = normalizeDiff(copyData.diff)
         if (copyData.acupuncture) form.value.acupuncture = normalizeAcuRows(copyData.acupuncture)
         if (copyData.prescriptions) {
+          clearCopyCacheAfterSave = copyData.prescriptions.length > 0
           applyCopiedPrescriptions(copyData.prescriptions)
           persistCopiedPrescriptions(form.value.prescriptions).catch((error) => {
             ElMessage.error(error.message || t('common.operationFailed'))
@@ -1046,7 +1055,7 @@ onMounted(() => {
       } catch (error) {
         console.warn('Failed to parse copied consultation data:', error)
       }
-      removeStoredKey('tcm_copy_consult')
+      if (!clearCopyCacheAfterSave) removeStoredKey('tcm_copy_consult')
     }
 
     const patientAppts = appointmentsStore.getPatientAppointments(patientId)
@@ -1106,6 +1115,7 @@ watch(currentConsultationId, (id) => {
 })
 
 onBeforeUnmount(() => {
+  consultationViewDisposed = true
   window.removeEventListener('beforeunload', handleBeforeUnload)
   stopAiListening()
 })
@@ -1462,9 +1472,28 @@ function syncFormFromPrimaryPrescription() {
 }
 
 function applyCopiedPrescriptions(sourcePrescriptions = []) {
-  form.value.prescriptions = rehydrateCopiedPrescriptions(sourcePrescriptions, inventoryStore.items)
+  // Keep the copied quantities until a successful inventory read. The page's
+  // background bootstrap may still be loading when this copy is applied.
+  pendingCopiedPrescriptions.value = sourcePrescriptions.length ? cloneJson(sourcePrescriptions, []) : null
+  form.value.prescriptions = sourcePrescriptions.map((prescription) => ({
+    ...cloneJson(prescription, {}),
+    rxStatus: 'editing',
+    deletedAt: null,
+    dispensingCompleted: false,
+    inventoryReservation: [],
+    inventorySyncedAt: null,
+  }))
   syncFormFromPrimaryPrescription()
   resetDispensingState(form.value)
+}
+
+async function prepareCopiedPrescriptions() {
+  if (!pendingCopiedPrescriptions.value) return
+  await inventoryStore.refreshFromApi({ force: true, throwOnError: true })
+  if (consultationViewDisposed) throw new Error(t('common.operationFailed'))
+  form.value.prescriptions = rehydrateCopiedPrescriptions(pendingCopiedPrescriptions.value, inventoryStore.items)
+  pendingCopiedPrescriptions.value = null
+  syncFormFromPrimaryPrescription()
 }
 
 function buildPrescriptionPayload(source = rxForm.value, overrideStatus = 'editing') {
@@ -1720,6 +1749,7 @@ async function persistConsultationDraft(options = {}) {
 async function doPersistConsultationDraft({ silent = false, syncRoute = true, flushRx = true } = {}) {
   saving.value = true
   try {
+    await prepareCopiedPrescriptions()
     if (flushRx) {
       await flushRxDraftBeforeConsultationSave()
     }
@@ -1734,6 +1764,10 @@ async function doPersistConsultationDraft({ silent = false, syncRoute = true, fl
 
     if (!targetId) {
       const created = await consultStore.createConsultation(data)
+      if (clearCopyCacheAfterSave) {
+        removeStoredKey('tcm_copy_consult')
+        clearCopyCacheAfterSave = false
+      }
       if (buildFormSnapshot() === requestSnapshot) {
         applySavedConsultation(created)
         refreshTongueImagePreview()

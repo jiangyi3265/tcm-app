@@ -190,6 +190,7 @@ export const useInventoryStore = defineStore('inventory', () => {
       saveState()
     }).catch((e) => {
       console.warn('库存刷新失败:', e.message)
+      if (options.throwOnError) throw e
     }).finally(() => { if (refreshPromise === pending) refreshPromise = null })
     refreshPromise = pending
     return pending

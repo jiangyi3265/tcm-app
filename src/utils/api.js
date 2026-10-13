@@ -4,6 +4,12 @@ import { managedFileResource } from './managedFileResource.js'
 const TOKEN_KEY = 'tcm_token'
 const AUTH_KEY = 'tcm_auth'
 let runtimeToken = null
+const sessionExpiredListeners = new Set()
+
+export function onSessionExpired(listener) {
+  sessionExpiredListeners.add(listener)
+  return () => sessionExpiredListeners.delete(listener)
+}
 
 function getToken() {
   return runtimeToken || getStoredItem(TOKEN_KEY)
@@ -18,10 +24,13 @@ export function setAuthToken(token) {
   }
 }
 
-function clearSession() {
+function clearSession(requestToken) {
+  // A delayed response from an older login must not invalidate the new session.
+  if (!requestToken || getToken() !== requestToken) return
   runtimeToken = null
   removeStoredKey(TOKEN_KEY)
   removeStoredKey(AUTH_KEY)
+  sessionExpiredListeners.forEach(listener => listener())
 }
 
 function buildQuery(params = {}) {
@@ -47,8 +56,8 @@ async function request(path, { method = 'GET', body, auth = true, timeoutMs = 0 
     'Content-Type': 'application/json',
   }
 
+  const token = auth ? getToken() : null
   if (auth) {
-    const token = getToken()
     if (!token) throw new Error('Please log in again.')
     headers.Authorization = `Bearer ${token}`
   }
@@ -80,9 +89,10 @@ async function request(path, { method = 'GET', body, auth = true, timeoutMs = 0 
 
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
-    if (response.status === 401) clearSession()
+    if (response.status === 401) clearSession(token)
     throw new Error(payload.msg || payload.message || `Request failed (${response.status})`)
   }
+  if (auth && token !== getToken()) throw new Error('Session changed. Please retry.')
   return payload
 }
 
@@ -112,9 +122,10 @@ async function requestMultipart(path, formData, fallback = 'Upload failed') {
   })
   const payload = await parseResponsePayload(res)
   if (!res.ok) {
-    if (res.status === 401) clearSession()
+    if (res.status === 401) clearSession(token)
     throw new Error(responseErrorMessage(payload, fallback, res.status))
   }
+  if (token !== getToken()) throw new Error('Session changed. Please retry.')
   return payload
 }
 
@@ -152,7 +163,10 @@ export const bootstrapApi = {
     const res = await fetch('/api/bootstrap/export', {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     })
-    if (!res.ok) throw new Error('Export failed')
+    if (!res.ok) {
+      if (res.status === 401) clearSession(token)
+      throw new Error('Export failed')
+    }
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -172,7 +186,10 @@ export const bootstrapApi = {
       body: formData,
     })
     const payload = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(payload.msg || payload.message || 'Import failed')
+    if (!res.ok) {
+      if (res.status === 401) clearSession(token)
+      throw new Error(payload.msg || payload.message || 'Import failed')
+    }
     return payload
   },
 }
@@ -532,6 +549,7 @@ export const filesApi = {
       headers: { Authorization: `Bearer ${token}` },
     })
     if (!res.ok) {
+      if (res.status === 401) clearSession(token)
       const payload = await res.json().catch(() => ({}))
       throw new Error(payload.msg || payload.message || 'Download failed')
     }

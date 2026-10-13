@@ -7,7 +7,7 @@ async function fixture(page, { copy = false } = {}) {
     { name: 'QA herb', herbDictId: 'herb', inventoryId: 'stock', dosage: 6, unit: 'g', packetsPerDose: 1, convertedQty: 10, convertedUnit: '包', gramsPerPacket: 6, pricePerUnit: 1, subtotal: 10 },
   ] }
   const record = { id: 'consult', consultationId: 'QA-1', patientId: patient.id, practitionerId: user.id, date: '2026-10-13', status: 'draft', chiefComplaint: 'Copied clinical notes', prescriptions: [rx], services: [], currency: 'CAD' }
-  const writes = [], state = { list: [record], delay: null, failSave: false, reads: 0 }
+  const writes = [], state = { list: [record], delay: null, failSave: false, failInventory: false, reads: 0, inventoryReads: 0, inventoryDelay: null, stock: 100 }
   await page.addInitScript(({ user, patient, record, copy }) => {
     sessionStorage.setItem('tcm_token', 'fixture-token')
     sessionStorage.setItem('tcm_auth', JSON.stringify({ currentUser: user }))
@@ -24,7 +24,12 @@ async function fixture(page, { copy = false } = {}) {
     if (path === '/api/users') body = [user]
     else if (path === '/api/patients') body = [patient]
     else if (path === '/api/herb-dict') body = [{ id: 'herb', name: 'QA herb', isActive: true }]
-    else if (path === '/api/inventory') body = [{ id: 'stock', herbDictId: 'herb', name: 'QA herb', quantity: 100, gramsPerPacket: 6, pricePerUnit: 1, category: 'powder', unit: 'bag', isActive: true }]
+    else if (path === '/api/inventory') {
+      state.inventoryReads++
+      if (state.failInventory) return route.fulfill({ status: 500, json: { message: 'Inventory unavailable; retry' } })
+      body = [{ id: 'stock', herbDictId: 'herb', name: 'QA herb', quantity: state.stock, gramsPerPacket: 6, pricePerUnit: 1, category: 'powder', unit: 'bag', isActive: true }]
+      if (state.inventoryDelay) { const delay = state.inventoryDelay; state.inventoryDelay = null; await delay }
+    }
     else if (path === '/api/settings') body = { currency: 'CAD', serviceTypes: {}, rooms: [], priceLists: [] }
     else if (path === '/api/settings/stripe' || path === '/api/ai/status') body = {}
     else if (path === '/api/consultations' && method === 'POST') {
@@ -40,11 +45,16 @@ async function fixture(page, { copy = false } = {}) {
         if (state.failSave) return route.fulfill({ status: 500, json: { message: 'Save unavailable; retry' } })
         body = { ...record, ...input, id, prescriptions: [{ ...rx, inventoryReservation: [{ inventoryId: 'stock', reservedQty: 10 }] }] }
         state.list = state.list.filter(r => r.id !== id).concat(body)
+      } else if (method === 'DELETE') {
+        state.stock += 10
+        state.list = state.list.filter(r => r.id !== id)
+        body = { success: true }
       } else body = state.list.find(r => r.id === id)
     } else if (path.endsWith('/prescriptions') && method === 'PATCH') {
       body = { ...record, ...input.consultation, prescriptions: [{ ...input.prescription, inventoryReservation: [{ inventoryId: 'stock', reservedQty: 20 }] }] }
       state.list = [body]
     } else if (path.endsWith('/delete')) {
+      state.stock += 10
       body = { ...state.list.find(r => r.id === path.split('/')[3]), deletedAt: '2026-10-13 13:00:00', prescriptions: [] }
     }
     await route.fulfill({ json: body })
@@ -73,6 +83,54 @@ test('uncached consultation saves and stale list cannot replace authoritative re
   expect(latest.prescriptions[0].inventoryReservation).toHaveLength(1)
 })
 
+test('first consultation save preserves feedback, previous treatment rating, and explicit tax rate', async ({ page }) => {
+  const { writes } = await fixture(page)
+  await page.goto('/patients/patient/consultations/new')
+  await page.locator('.el-form-item').filter({ hasText: 'Rate for Last Treatment' }).locator('.el-rate__item').nth(3).click()
+  await page.getByRole('tab', { name: /Treatment/ }).click()
+  await page.getByPlaceholder('Patient feedback for this treatment (fill in at next visit)...').fill('Feedback entered before the first Save')
+  await page.getByRole('tab', { name: 'Pricing', exact: true }).click()
+  await page.locator('.el-radio-button').filter({ hasText: /^13%$/ }).click()
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page).toHaveURL(/\/consultations\/created$/)
+  const created = writes.find(w => w.method === 'POST' && w.path === '/api/consultations')
+  expect(created.body.feedback).toBe('Feedback entered before the first Save')
+  expect(created.body.rateForLast).toBeGreaterThan(0)
+  expect(created.body.overrideTaxRate).toBe(0.13)
+  await page.getByRole('tab', { name: 'Pricing', exact: true }).click()
+  await expect(page.getByRole('radio', { name: '13%', exact: true })).toBeChecked()
+  await page.getByRole('tab', { name: /Treatment/ }).click()
+  await expect(page.getByPlaceholder('Patient feedback for this treatment (fill in at next visit)...')).toHaveValue('Feedback entered before the first Save')
+})
+
+test('returning prescription stock replaces an inventory request started before deletion', async ({ page }) => {
+  const { state } = await fixture(page)
+  await page.goto('/patients'); await page.waitForLoadState('networkidle')
+  let release
+  state.inventoryDelay = new Promise(resolve => { release = resolve })
+  const reads = state.inventoryReads
+  await page.evaluate(async () => {
+    const inventory = (await import('/src/stores/inventory.js')).useInventoryStore()
+    window.oldInventoryRead = inventory.refreshFromApi()
+  })
+  await expect.poll(() => state.inventoryReads).toBe(reads + 1)
+  await page.evaluate(async () => {
+    window.deletion = (await import('/src/stores/consultations.js')).useConsultationsStore().deleteConsultation('consult')
+  })
+  await expect.poll(() => state.stock).toBe(110)
+  release()
+  await page.evaluate(() => Promise.all([window.oldInventoryRead, window.deletion]))
+  expect(await page.evaluate(async () => (await import('/src/stores/inventory.js')).useInventoryStore().getItem('stock').quantity)).toBe(110)
+})
+
+test('permanent consultation deletion immediately refreshes stock restored by the server', async ({ page }) => {
+  await fixture(page)
+  await page.goto('/patients'); await page.waitForLoadState('networkidle')
+  await page.evaluate(async () => (await import('/src/stores/inventory.js')).useInventoryStore().refreshFromApi())
+  await page.evaluate(async () => (await import('/src/stores/consultations.js')).useConsultationsStore().physicalDeleteConsultation('consult'))
+  expect(await page.evaluate(async () => (await import('/src/stores/inventory.js')).useInventoryStore().getItem('stock').quantity)).toBe(110)
+})
+
 test('failed consultation save preserves cached record and a retry succeeds', async ({ page }) => {
   const { state, writes } = await fixture(page)
   await page.goto('/patients'); await page.waitForLoadState('networkidle')
@@ -96,11 +154,31 @@ test('copying a prescription saves its parent and clinical notes before manual S
   expect(creates).toHaveLength(1)
   expect(creates[0].body.chiefComplaint).toBe('Copied clinical notes')
   expect(creates[0].body.prescriptions).toHaveLength(1)
+  expect(creates[0].body.prescriptions[0].items[0].convertedQty).toBe(10)
+  expect(creates[0].body.prescriptions[0].items[0].packetsPerDose).toBe(1)
+  expect(creates[0].body.prescriptions[0].items[0].inventoryId).toBe('stock')
   expect(writes.filter(w => w.path.endsWith('/prescriptions'))).toHaveLength(0)
   await page.getByRole('button', { name: 'Delete', exact: true }).first().click()
   await page.locator('.el-message-box').getByRole('button', { name: /OK|Confirm/ }).click()
   await expect(page).toHaveURL(/\/patients\/patient$/)
   expect(writes.filter(w => w.path === '/api/consultations/created/delete')).toHaveLength(1)
+})
+
+test('copied prescription is retained for retry when its inventory cannot be loaded', async ({ page }) => {
+  const { state, writes } = await fixture(page, { copy: true })
+  state.failInventory = true
+  await page.goto('/patients/patient/consultations/new')
+  await expect(page.locator('.el-message--error').filter({ hasText: 'Inventory unavailable; retry' })).toBeVisible()
+  expect(writes.filter(w => w.path === '/api/consultations' && w.method === 'POST')).toHaveLength(0)
+  expect(await page.evaluate(() => sessionStorage.getItem('tcm_copy_consult'))).not.toBeNull()
+  state.failInventory = false
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page).toHaveURL(/\/consultations\/created$/)
+  const creates = writes.filter(w => w.path === '/api/consultations' && w.method === 'POST')
+  expect(creates).toHaveLength(1)
+  expect(creates[0].body.prescriptions[0].items[0].convertedQty).toBe(10)
+  expect(creates[0].body.prescriptions[0].items[0].inventoryId).toBe('stock')
+  expect(await page.evaluate(() => sessionStorage.getItem('tcm_copy_consult'))).toBeNull()
 })
 
 test('pharmacy displays per-dose packets and shows dose count once', async ({ page }) => {

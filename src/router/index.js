@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { onSessionExpired } from '../utils/api'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -163,6 +164,13 @@ router.beforeEach((to, from) => {
   }
 
   return true
+})
+
+onSessionExpired(() => {
+  if (router.currentRoute.value.meta.requiresAuth) {
+    // Recreate in-memory clinical stores as well as clearing persistent caches.
+    window.location.replace(router.resolve('/login').href)
+  }
 })
 
 export default router

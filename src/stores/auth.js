@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, onScopeDispose } from 'vue'
 import { naturalCompareText } from '../utils/naturalSort'
-import { authApi, setAuthToken, usersApi } from '../utils/api'
+import { authApi, onSessionExpired, setAuthToken, usersApi } from '../utils/api'
 import { clearClinicCache, getStoredItem, readStoredJson, writeStoredJson } from '../utils/storage'
 
 const STORAGE_KEY = 'tcm_auth'
@@ -49,6 +49,12 @@ export const useAuthStore = defineStore('auth', () => {
   const currentUser = ref(null)
   const users = ref([])
   let usersRefreshPromise = null
+  let usersRefreshToken = null
+  onScopeDispose(onSessionExpired(() => {
+    currentUser.value = null
+    users.value = []
+    clearClinicCache()
+  }))
 
   async function loadUsers({ background = false } = {}) {
     users.value = readStoredJson(USERS_KEY, []) || []
@@ -57,9 +63,10 @@ export const useAuthStore = defineStore('auth', () => {
     const token = getStoredItem(TOKEN_KEY)
     if (!token) return
 
-    if (!usersRefreshPromise) {
-      usersRefreshPromise = (async () => {
+    if (!usersRefreshPromise || usersRefreshToken !== token) {
+      const pending = (async () => {
         const list = await usersApi.list()
+        if (getStoredItem(TOKEN_KEY) !== token) return
         users.value = Array.isArray(list)
           ? list
           : readStoredJson(USERS_KEY, []) || []
@@ -70,8 +77,13 @@ export const useAuthStore = defineStore('auth', () => {
           // Keep the cached user list if the bootstrap refresh fails.
         })
         .finally(() => {
-          usersRefreshPromise = null
+          if (usersRefreshPromise === pending) {
+            usersRefreshPromise = null
+            usersRefreshToken = null
+          }
         })
+      usersRefreshPromise = pending
+      usersRefreshToken = token
     }
 
     if (background) {
