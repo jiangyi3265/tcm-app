@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus'
 import { useHerbDictStore } from '../stores/herbDict'
 import { useInventoryStore } from '../stores/inventory'
 import { inventoryApi } from '../utils/api'
-import { exactInvoiceHerb, invoiceHerbSuggestions, normalizeInvoiceUnit } from '../utils/invoiceHerbMatch'
+import { bestInvoiceHerb, rankedInvoiceHerbs, normalizeInvoiceUnit } from '../utils/invoiceHerbMatch'
 
 const props = defineProps({ category: String, branchId: String, currency: String })
 const emit = defineEmits(['close'])
@@ -26,7 +26,7 @@ function targets(row) {
     && (!props.branchId || !item.branchId || item.branchId === props.branchId))
 }
 function options(row) {
-  const suggestions = invoiceHerbSuggestions(row.invoiceName, herbs.activeHerbs).map((item) => item.herb)
+  const suggestions = rankedInvoiceHerbs(row.invoiceName, herbs.activeHerbs).map((item) => item.herb)
   const ids = new Set(suggestions.map((herb) => herb.id))
   return [...suggestions, ...herbs.activeHerbs.filter((herb) => !ids.has(herb.id))]
 }
@@ -54,7 +54,7 @@ async function recognize(upload) {
     preview.value = await inventoryApi.recognizeInvoice(file)
     invoiceCurrency.value = preview.value.currency || props.currency
     rows.value = preview.value.items.map((line) => {
-      const herb = exactInvoiceHerb(line.invoiceName, herbs.activeHerbs)
+      const herb = bestInvoiceHerb(line.invoiceName, herbs.activeHerbs)
       const row = { invoiceName: line.invoiceName, herbDictId: herb?.id || '', inventoryId: '',
         category: props.category === 'raw_herbs' ? 'raw_herbs' : 'powder', quantity: line.quantity,
         purchasePrice: line.unitPriceBeforeDiscount, gramsPerPacket: line.gramsPerPacket,

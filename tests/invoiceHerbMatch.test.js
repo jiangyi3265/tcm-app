@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { exactInvoiceHerb, invoiceHerbSuggestions, normalizeInvoiceUnit } from '../src/utils/invoiceHerbMatch.js'
+import { exactInvoiceHerb, invoiceHerbSuggestions, normalizeInvoiceUnit, bestInvoiceHerb, rankedInvoiceHerbs } from '../src/utils/invoiceHerbMatch.js'
 
 const herbs = [
   { id: '1', name: '通草', pinyin: 'Tong Cao', alias: '通脱木', isActive: true },
@@ -35,4 +35,31 @@ test('legacy bilingual names match the exact Chinese or pinyin part, preserving 
   assert.equal(exactInvoiceHerb('炙甘草', dictionary)?.id, 'gc')
   assert.equal(exactInvoiceHerb('甘草', dictionary), null)
   assert.equal(exactInvoiceHerb('通草', [...dictionary, { id: 'duplicate', name: '通草（Tong Cao）', isActive: true }]), null)
+})
+
+test('supplier bilingual names and packaging preselect the closest dictionary herb', () => {
+  const dictionary = [
+    { id: 'lu', name: '芦根(Lu Gen)', isActive: true },
+    { id: 'di', name: '生地黄(Sheng Di Huang)', isActive: true },
+    { id: 'bai', name: '黄柏(Huang Bai)', isActive: true },
+    { id: 'lian', name: '黄连(Huang Lian)', isActive: true },
+    { id: 'chuan', name: '川楝子(Chuan Lian Zi)', isActive: true },
+  ]
+  for (const [name, id] of [['Lu Gen芦根(15g)', 'lu'], ['Sheng Di Huang生地黄(10g)', 'di'], ['Huang Bai黄柏(6g)', 'bai'], ['Huang Lian黄连(3g)', 'lian'], ['Chao Chuan Lian Zi炒川楝子(10g)', 'chuan']]) {
+    assert.equal(bestInvoiceHerb(name, dictionary)?.id, id)
+    assert.equal(rankedInvoiceHerbs(name, dictionary)[0].herb.id, id)
+  }
+  assert.equal(bestInvoiceHerb('Tóng Cáo granules 100g', herbs)?.id, '1')
+  assert.equal(bestInvoiceHerb('Tong Cso 100g', herbs)?.id, '1')
+})
+test('unknown, inactive, duplicate and equally close herb names remain unselected', () => {
+  assert.equal(bestInvoiceHerb('Unknown product 100g', herbs), null)
+  assert.equal(bestInvoiceHerb('黄芩', herbs), null)
+  assert.equal(bestInvoiceHerb('', herbs), null)
+  assert.equal(bestInvoiceHerb('旧药材', herbs), null)
+  assert.equal(bestInvoiceHerb('Tong Cao 100g', [...herbs, { ...herbs[0], id: 'duplicate' }]), null)
+  assert.equal(bestInvoiceHerb('Huang Xin', [{ id: '1', name: 'Huang Xin', isActive: true, deletedAt: '2026-10-15' }]), null)
+  const prepared = [{ id: 'raw', name: '甘草(Gan Cao)', isActive: true }, { id: 'prepared', name: '炙甘草(Zhi Gan Cao)', isActive: true }]
+  assert.equal(bestInvoiceHerb('Zhi Gan Cao炙甘草(10g)', prepared)?.id, 'prepared')
+  assert.equal(bestInvoiceHerb('甘草', [prepared[1]]), null)
 })

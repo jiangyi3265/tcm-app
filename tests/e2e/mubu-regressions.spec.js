@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 
-async function fixture(page, { stockHerbId = 'server-herb', dictionaryEmpty = false } = {}) {
+async function fixture(page, { stockHerbId = 'server-herb', dictionaryEmpty = false, invoiceNames = ['Tong Cao'] } = {}) {
   const herb = { id: 'server-herb', name: '通草', pinyin: 'Tong Cao', isActive: true }
   const stock = { id: 'stock', herbDictId: stockHerbId, name: herb.name, category: 'powder', unit: 'bag', quantity: 111, gramsPerPacket: 6, pricePerUnit: 4, isActive: true, last30DaysUsage: 0 }
   const formulas = [
@@ -34,7 +34,7 @@ async function fixture(page, { stockHerbId = 'server-herb', dictionaryEmpty = fa
     else if (path === '/api/ai/settings') {
       body = { configured: true, apiKeyMasked: '••••5678', model: 'deepseek-flash' }
       if (method === 'PUT') writes.push(route.request().postDataJSON())
-    } else if (path === '/api/inventory/invoices/recognize') body = { invoiceId: 'preview', currency: 'CAD', supplier: 'QA Supplier', items: [{ invoiceName: 'Tong Cao', quantity: 3, unit: 'bag', unitPriceBeforeDiscount: 2.5, gramsPerPacket: 10 }] }
+    } else if (path === '/api/inventory/invoices/recognize') body = { invoiceId: 'preview', currency: 'CAD', supplier: 'QA Supplier', items: invoiceNames.map(invoiceName => ({ invoiceName, quantity: 3, unit: 'bag', unitPriceBeforeDiscount: 2.5, gramsPerPacket: 10 })) }
     else if (path === '/api/inventory/invoices/confirm') { writes.push(route.request().postDataJSON()); body = { imported: true } }
     await route.fulfill({ json: body ?? {}, status: 200 })
   })
@@ -98,6 +98,28 @@ test('invoice preview maps a herb and sends original purchase price once', async
   await expect(panel.getByRole('button', { name: 'Invoice imported', exact: true })).toBeDisabled()
   expect(writes).toHaveLength(1)
   expect(writes[0].items[0]).toMatchObject({ herbDictId: 'server-herb', inventoryId: 'stock', quantity: 3, purchasePrice: 2.5 })
+  expect(errors).toEqual([])
+})
+
+test('invoice preview preselects bilingual and approximate herbs while leaving unknown rows for review', async ({ page }) => {
+  const { writes, errors } = await fixture(page, { invoiceNames: ['Tong Cao通草(10g)', 'Tong Cso 100g', 'Unknown product'] })
+  await page.goto('/inventory')
+  await page.getByRole('button', { name: 'Import supplier invoice', exact: true }).click()
+  await page.locator('.invoice-import input[type=file]').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: Buffer.from('test invoice') })
+  const panel = page.locator('.invoice-import')
+  const rows = panel.locator('.el-table__body tr')
+  await expect(rows).toHaveCount(3)
+  await expect(rows.nth(0).locator('.el-select').first()).toContainText('通草 / Tong Cao')
+  await expect(rows.nth(1).locator('.el-select').first()).toContainText('通草 / Tong Cao')
+  await expect(rows.nth(2).locator('.el-select').first()).not.toContainText('通草 / Tong Cao')
+  await expect(panel.getByRole('button', { name: 'Confirm and update inventory', exact: true })).toBeDisabled()
+  expect(writes).toHaveLength(0)
+  await rows.nth(2).getByRole('button', { name: 'Delete', exact: true }).click()
+  await panel.getByRole('button', { name: 'Confirm and update inventory', exact: true }).click()
+  await expect(panel.getByRole('button', { name: 'Invoice imported', exact: true })).toBeDisabled()
+  expect(writes).toHaveLength(1)
+  expect(writes[0].items).toHaveLength(2)
+  for (const row of writes[0].items) expect(row).toMatchObject({ herbDictId: 'server-herb', inventoryId: 'stock', quantity: 3, purchasePrice: 2.5 })
   expect(errors).toEqual([])
 })
 

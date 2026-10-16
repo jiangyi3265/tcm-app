@@ -1,12 +1,14 @@
 import { test, expect } from '@playwright/test'
 
-async function fixture(page, { copy = false } = {}) {
+async function fixture(page, { copy = false, pricing = false, paid = false } = {}) {
   const user = { id: 'qa', name: 'QA', roles: ['admin', 'practitioner'], isActive: true }
   const patient = { id: 'patient', name: 'QA Patient', isActive: true }
   const rx = { id: 'rx', formulaName: 'QA Powder', prescriptionType: 'powder', whereToGet: 'Clinic', quantity: 10, rxStatus: 'pending', items: [
     { name: 'QA herb', herbDictId: 'herb', inventoryId: 'stock', dosage: 6, unit: 'g', packetsPerDose: 1, convertedQty: 10, convertedUnit: '包', gramsPerPacket: 6, pricePerUnit: 1, subtotal: 10 },
   ] }
   const record = { id: 'consult', consultationId: 'QA-1', patientId: patient.id, practitionerId: user.id, date: '2026-10-13', status: 'draft', chiefComplaint: 'Copied clinical notes', prescriptions: [rx], services: [], currency: 'CAD' }
+  if (pricing) { rx.subtotal = 103.04; record.includeRxAmount = true; record.overrideTaxRate = 0.13 }
+  if (paid) Object.assign(record, { status: 'paid', paymentStatus: 'paid', totalAmount: 103.04, totalWithoutTax: 103.04, taxAmount: 0, paidAmount: 103.04 })
   const writes = [], state = { list: [record], delay: null, failSave: false, failInventory: false, reads: 0, inventoryReads: 0, inventoryDelay: null, stock: 100 }
   await page.addInitScript(({ user, patient, record, copy }) => {
     sessionStorage.setItem('tcm_token', 'fixture-token')
@@ -61,6 +63,42 @@ async function fixture(page, { copy = false } = {}) {
   })
   return { state, writes }
 }
+
+test('herb-only pricing displays and persists tax, exemption, and exclusion consistently', async ({ page }) => {
+  const { writes } = await fixture(page, { pricing: true })
+  await page.goto('/patients/patient/consultations/consult')
+  await page.getByRole('tab', { name: 'Pricing', exact: true }).click()
+  await expect(page.locator('.price-summary .tax-row')).toContainText('$13.40')
+  await expect(page.locator('.price-summary .grand-total')).toContainText('$116.44')
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect.poll(() => writes.filter(w => w.method === 'PUT').length).toBe(1)
+  expect(writes.find(w => w.method === 'PUT').body).toMatchObject({ totalWithoutTax: 103.04, taxAmount: 13.4, totalAmount: 116.44 })
+  await page.reload()
+  await page.getByRole('tab', { name: 'Pricing', exact: true }).click()
+  await expect(page.locator('.price-summary .tax-row')).toContainText('$13.40')
+  await page.locator('.el-radio-button').filter({ hasText: /^0%/ }).click()
+  await expect(page.locator('.price-summary .tax-row')).toContainText('$0.00')
+  await expect(page.locator('.price-summary .grand-total')).toContainText('$103.04')
+  await page.locator('.el-radio-button').filter({ hasText: /^13%$/ }).click()
+  await page.locator('.el-form-item').filter({ hasText: 'Include Prescription Amount?' }).locator('.el-switch__core').click()
+  await expect(page.locator('.price-summary .grand-total')).toContainText('$0.00')
+  await page.locator('.el-form-item').filter({ hasText: 'Include Prescription Amount?' }).locator('.el-switch__core').click()
+  await page.getByRole('button', { name: 'Percentage %', exact: true }).click()
+  await page.locator('.el-form-item').filter({ hasText: 'Discount Type' }).getByRole('spinbutton').fill('10')
+  await expect(page.locator('.price-summary .tax-row')).toContainText('$12.06')
+  await expect(page.locator('.price-summary .grand-total')).toContainText('$104.80')
+  await page.screenshot({ path: 'test-results/herb-pricing-tax.png', fullPage: true })
+})
+
+test('historical paid invoices retain their charged amounts when opened after tax fixes', async ({ page }) => {
+  const { writes } = await fixture(page, { pricing: true, paid: true })
+  await page.goto('/patients/patient/consultations/consult')
+  await page.getByRole('tab', { name: 'Pricing', exact: true }).click()
+  await expect(page.locator('.price-summary .tax-row')).toContainText('$0.00')
+  await expect(page.locator('.price-summary .grand-total')).toContainText('$103.04')
+  await expect(page.getByRole('radio', { name: '13%', exact: true })).toBeDisabled()
+  expect(writes).toHaveLength(0)
+})
 
 test('uncached consultation saves and stale list cannot replace authoritative reservations', async ({ page }) => {
   const { state } = await fixture(page)

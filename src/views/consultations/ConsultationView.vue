@@ -60,6 +60,7 @@ import {
   requiresStripeTerminal,
 } from '../../utils/paymentMethods'
 import { resolveInvoicePaymentAfterSave } from '../../utils/invoicePaymentFlow'
+import { calculateInvoiceTotals as computeInvoiceTotals, serviceExtended } from '../../utils/invoiceTotals'
 import { compressImageFile } from '../../utils/imageCompress'
 import { getStoredItem, removeStoredKey } from '../../utils/storage'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -415,6 +416,7 @@ function formatChiefComplaintDuration(value) {
 }
 
 function buildPersistPayload(source = form.value) {
+  const totals = calculateInvoiceTotals(source)
   const nextDiff = cloneJson(source.diff || {}, {})
   if (nextDiff.tongueImageResource) {
     nextDiff.tongueImage = nextDiff.tongueImageResource
@@ -426,9 +428,9 @@ function buildPersistPayload(source = form.value) {
     acupuncture: normalizeAcuRows(source.acupuncture || []),
     consultationFeeTaxable: false,
     summary: source.chiefComplaintDescription || source.summary,
-    totalWithoutTax: totalWithoutTax.value,
-    taxAmount: taxAmount.value,
-    totalAmount: totalAmount.value,
+    totalWithoutTax: totals.totalWithoutTax,
+    taxAmount: totals.taxAmount,
+    totalAmount: totals.totalAmount,
     branchId: source.branchId || branchesStore.currentBranchId || null,
   }, {})
 }
@@ -2406,7 +2408,7 @@ const effectiveTaxRate = computed(() => {
   return settingsStore.taxRate
 })
 function getServiceExtended(sv) {
-  return (sv.price || 0) * (sv.quantity || 1) - (sv.manualDiscount || 0)
+  return serviceExtended(sv)
 }
 function getEffectiveTaxRateFor(source = form.value) {
   if (source?.overrideTaxRate !== null && source?.overrideTaxRate !== undefined) {
@@ -2420,47 +2422,28 @@ function getServiceTax(sv, source = form.value) {
 function getTotalServiceFor(source = form.value) {
   return (source.services || []).reduce((s, sv) => s + getServiceExtended(sv), 0)
 }
-function getTotalServiceTaxFor(source = form.value) {
-  return (source.services || []).reduce((s, sv) => s + getServiceTax(sv, source), 0)
-}
 function calculateInvoiceTotals(source = form.value) {
-  const serviceTotal = getTotalServiceFor(source)
-  const rxTotal = getBillablePrescriptionTotal(source)
-  const rawBase = (source.consultationFee || 0) + serviceTotal + (source.includeRxAmount ? rxTotal : 0)
-  let totalBeforeTax = rawBase
-  if (source.discountType === 'percentage') totalBeforeTax *= (1 - (source.discountValue || 0) / 100)
-  else if (source.discountType === 'amount') totalBeforeTax -= (source.discountValue || 0)
-  totalBeforeTax = Math.max(0, totalBeforeTax)
-
-  let factor = 1
-  if (rawBase > 0) {
-    if (source.discountType === 'percentage') factor = Math.max(0, 1 - (source.discountValue || 0) / 100)
-    else if (source.discountType === 'amount') factor = Math.max(0, (rawBase - (source.discountValue || 0)) / rawBase)
-  }
-  const tax = getTotalServiceTaxFor(source) * factor
-  return {
-    totalWithoutTax: roundMoney(totalBeforeTax),
-    taxAmount: roundMoney(tax),
-    totalAmount: roundMoney(totalBeforeTax + tax),
-    discountFactor: factor,
-    includeRxAmount: Boolean(source.includeRxAmount),
-  }
+  return computeInvoiceTotals(source, settingsStore.taxRate)
 }
 const totalService = computed(() =>
   getTotalServiceFor(form.value),
-)
-const totalServiceTax = computed(() =>
-  getTotalServiceTaxFor(form.value),
 )
 // 处方总额：单剂价格 × 数量
 const totalRxAmount = computed(() =>
   getBillablePrescriptionTotal(form.value)
 )
-const invoiceTotals = computed(() => calculateInvoiceTotals(form.value))
+const invoiceTotals = computed(() => {
+  // Settled invoices keep the amounts actually charged; opening historical
+  // records must not recalculate them using a newer tax rule or clinic setting.
+  if (!canEditInvoicePricing.value && form.value.totalAmount != null) {
+    const tax = Number(form.value.taxAmount) || 0
+    const total = Number(form.value.totalAmount) || 0
+    return { totalAmount: total, taxAmount: tax, totalWithoutTax: Number(form.value.totalWithoutTax ?? (total - tax)) }
+  }
+  return calculateInvoiceTotals(form.value)
+})
 const totalWithoutTax = computed(() => invoiceTotals.value.totalWithoutTax)
-const discountFactor = computed(() => invoiceTotals.value.discountFactor)
-const consultationFeeTax = computed(() => 0)
-const taxAmount = computed(() => roundMoney((totalServiceTax.value + consultationFeeTax.value) * discountFactor.value))
+const taxAmount = computed(() => invoiceTotals.value.taxAmount)
 const totalAmount = computed(() => invoiceTotals.value.totalAmount)
 
 const invoicePractitioner = computed(() =>
