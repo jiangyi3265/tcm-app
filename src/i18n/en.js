@@ -1,4 +1,30 @@
 export default {
+  smtpSettings: {
+    title: 'SMTP email delivery', description: 'Replace the email sending key here. Saved settings apply to new emails without restarting the service.',
+    configured: 'Key configured', notConfigured: 'No key configured',
+    adminSource: 'Using settings saved in this admin panel.', environmentSource: 'Using server settings. Saving here will override them.',
+    host: 'SMTP host', port: 'Port', security: 'Encryption', username: 'Username',
+    password: 'SMTP password / Resend API key', from: 'Sender address',
+    keepPassword: 'Leave blank to keep the current key', enterPassword: 'Enter a new SMTP password or API key',
+    keyHelp: 'Resend uses an API key as the SMTP password. Create a replacement for a revoked key. Saved keys are never displayed.',
+    manageKeys: 'Manage Resend keys', fromHelp: 'Use a sender address on a domain verified with your email provider.',
+    save: 'Save SMTP settings', test: 'Test saved connection', resendPreset: 'Use Resend defaults',
+    saveBeforeTest: 'Save your changes before testing the connection.', testHelp: 'This checks SMTP authentication without sending mail. It does not confirm inbox delivery.',
+    saved: 'SMTP settings saved. New emails will use this configuration. Test the connection next.',
+    connected: 'SMTP connection and authentication succeeded. No test email was sent.', retry: 'Reload',
+    failed: 'The operation failed. Check your connection and try again.',
+    errors: {
+      SMTP_SETTINGS_INVALID: 'Check the SMTP settings and save them again.', SMTP_HOST_INVALID: 'Enter a valid SMTP hostname without https:// or a path.',
+      SMTP_PORT_INVALID: 'The port must be between 1 and 65535.', SMTP_TLS_REQUIRED: 'Choose SSL/TLS or STARTTLS encryption.',
+      SMTP_USERNAME_INVALID: 'Enter a valid SMTP username.', SMTP_FROM_INVALID: 'Enter one valid sender email address.',
+      SMTP_PASSWORD_INVALID: 'Paste the complete key without line breaks or masked characters.',
+      SMTP_NEW_PASSWORD_REQUIRED: 'Enter a new key. Changing the host or username requires its corresponding password.',
+      SMTP_SAVE_FAILED: 'The settings could not be saved. Please try again.', SMTP_SECRET_STORAGE_UNAVAILABLE: 'The server cannot securely store the key. Ask an administrator to check storage permissions.',
+      SMTP_SECRET_UNAVAILABLE_REENTER_KEY: 'The saved key cannot be decrypted. Enter it again and save.',
+      SMTP_CONNECTION_FAILED: 'SMTP connection failed. Check the host, port, encryption and network.',
+      SMTP_AUTH_FAILED: 'SMTP authentication was rejected. Check the username and replace any revoked or expired key.',
+    },
+  },
   // ── Common ──
   common: {
     operationFailed: 'Could not save your changes. Please try again.',

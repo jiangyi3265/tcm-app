@@ -34,6 +34,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { authApi, bootstrapApi, filesApi, usersApi, aiSettingsApi } from '../../utils/api'
 import { getRevenueCategory, REVENUE_CATEGORIES } from '../../utils/revenueCategories'
 import * as XLSX from 'xlsx'
+import SmtpSettings from '../../components/SmtpSettings.vue'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -2674,6 +2675,8 @@ async function deleteTemplate(tmpl) {
               </el-form-item>
             </el-form>
           </div>
+          <el-divider />
+          <SmtpSettings />
           <el-divider />
           <h4>{{ t('aiSettings.title') }}</h4>
           <p class="settings-help">{{ t('aiSettings.description') }}</p>

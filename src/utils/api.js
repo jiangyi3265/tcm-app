@@ -497,6 +497,12 @@ export const aiSettingsApi = {
   update(body) { return request('/api/ai/settings', { method: 'PUT', body }) },
 }
 
+export const smtpSettingsApi = {
+  get() { return request('/api/settings/smtp') },
+  update(body) { return request('/api/settings/smtp', { method: 'PUT', body }) },
+  test() { return request('/api/settings/smtp/test', { method: 'POST' }) },
+}
+
 export const meridiansApi = {
   list() { return request('/api/meridians') },
   get(id) { return request(`/api/meridians/${id}`) },

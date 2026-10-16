@@ -1,4 +1,30 @@
 export default {
+  smtpSettings: {
+    title: 'SMTP 邮件发送', description: '在这里更换邮件发送密钥，保存后立即用于新邮件，无需重启服务。',
+    configured: '密钥已配置', notConfigured: '尚未配置密钥',
+    adminSource: '当前使用后台保存的配置。', environmentSource: '当前使用服务器配置；保存后将使用此处的设置。',
+    host: 'SMTP 服务器', port: '端口', security: '加密方式', username: '用户名',
+    password: 'SMTP 密码 / Resend API Key', from: '发件人',
+    keepPassword: '留空保留现有密钥', enterPassword: '输入新的 SMTP 密码或 API Key',
+    keyHelp: 'Resend 的 API Key 就是 SMTP 密码。已撤销的密钥需要重新创建。保存后不显示密钥原文。',
+    manageKeys: '打开 Resend 密钥管理', fromHelp: '请使用邮件服务商已验证域名下的发件地址。',
+    save: '保存 SMTP 设置', test: '测试已保存的连接', resendPreset: '使用 Resend 默认设置',
+    saveBeforeTest: '请先保存修改，再测试连接。', testHelp: '连接测试只验证 SMTP 登录，不发送邮件，也不代表收件箱已收到邮件。',
+    saved: 'SMTP 设置已保存，下一封邮件将使用新配置。请测试连接。',
+    connected: 'SMTP 连接与登录成功，未发送测试邮件。', retry: '重新加载',
+    failed: '操作失败，请检查网络连接后重试。',
+    errors: {
+      SMTP_SETTINGS_INVALID: 'SMTP 配置无效，请检查并重新保存。', SMTP_HOST_INVALID: '请输入有效的 SMTP 服务器域名，不要包含 https:// 或路径。',
+      SMTP_PORT_INVALID: '端口必须在 1 到 65535 之间。', SMTP_TLS_REQUIRED: '请选择 SSL/TLS 或 STARTTLS 加密。',
+      SMTP_USERNAME_INVALID: '请输入有效的 SMTP 用户名。', SMTP_FROM_INVALID: '请输入一个有效的发件邮箱。',
+      SMTP_PASSWORD_INVALID: '密钥格式无效，请粘贴完整原文，不要包含换行或掩码。',
+      SMTP_NEW_PASSWORD_REQUIRED: '请填写新的密钥。更换服务器或用户名时，需要重新输入对应密码。',
+      SMTP_SAVE_FAILED: '设置未能保存，请重试。', SMTP_SECRET_STORAGE_UNAVAILABLE: '服务器无法安全保存密钥，请联系管理员检查存储权限。',
+      SMTP_SECRET_UNAVAILABLE_REENTER_KEY: '服务器无法解密已保存的密钥，请重新输入并保存。',
+      SMTP_CONNECTION_FAILED: 'SMTP 连接失败，请检查服务器、端口、加密方式和网络。',
+      SMTP_AUTH_FAILED: 'SMTP 登录被拒绝，请检查用户名，并更换已撤销或失效的密钥。',
+    },
+  },
   // ── 通用 ──
   common: {
     operationFailed: '保存失败，请重试。',
