@@ -44,6 +44,7 @@ test('supplier bilingual names and packaging preselect the closest dictionary he
     { id: 'bai', name: '黄柏(Huang Bai)', isActive: true },
     { id: 'lian', name: '黄连(Huang Lian)', isActive: true },
     { id: 'chuan', name: '川楝子(Chuan Lian Zi)', isActive: true },
+    { id: 'lotus', name: '莲子(Lian Zi)', isActive: true },
   ]
   for (const [name, id] of [['Lu Gen芦根(15g)', 'lu'], ['Sheng Di Huang生地黄(10g)', 'di'], ['Huang Bai黄柏(6g)', 'bai'], ['Huang Lian黄连(3g)', 'lian'], ['Chao Chuan Lian Zi炒川楝子(10g)', 'chuan']]) {
     assert.equal(bestInvoiceHerb(name, dictionary)?.id, id)

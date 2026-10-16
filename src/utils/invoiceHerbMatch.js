@@ -46,7 +46,7 @@ function editDistance(a, b) {
 function approximateScore(query, name) {
   if (query === name) return 1.9
   const chinese = /^\p{Script=Han}+$/u.test(name)
-  if (name.length >= (chinese ? 2 : 5) && query.includes(name)) return 1.6 + 0.2 * name.length / query.length
+  if (name.length >= (chinese ? 2 : 5) && query.includes(name)) return 1.3 + 0.5 * name.length / query.length
   // A small OCR typo in a long Latin name is recognizable; a one-character
   // change in a short Chinese herb name can identify a different herb.
   if (/^[a-z]+$/.test(query) && /^[a-z]+$/.test(name) && Math.min(query.length, name.length) >= 5) {
