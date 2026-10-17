@@ -1,13 +1,13 @@
 import { test, expect } from '@playwright/test'
 
-async function fixture(page, { copy = false, pricing = false, paid = false } = {}) {
+async function fixture(page, { copy = false, pricing = false, paid = false, rxSubtotal = 103.04, services = [] } = {}) {
   const user = { id: 'qa', name: 'QA', roles: ['admin', 'practitioner'], isActive: true }
   const patient = { id: 'patient', name: 'QA Patient', isActive: true }
   const rx = { id: 'rx', formulaName: 'QA Powder', prescriptionType: 'powder', whereToGet: 'Clinic', quantity: 10, rxStatus: 'pending', items: [
     { name: 'QA herb', herbDictId: 'herb', inventoryId: 'stock', dosage: 6, unit: 'g', packetsPerDose: 1, convertedQty: 10, convertedUnit: '包', gramsPerPacket: 6, pricePerUnit: 1, subtotal: 10 },
   ] }
-  const record = { id: 'consult', consultationId: 'QA-1', patientId: patient.id, practitionerId: user.id, date: '2026-10-13', status: 'draft', chiefComplaint: 'Copied clinical notes', prescriptions: [rx], services: [], currency: 'CAD' }
-  if (pricing) { rx.subtotal = 103.04; record.includeRxAmount = true; record.overrideTaxRate = 0.13 }
+  const record = { id: 'consult', consultationId: 'QA-1', patientId: patient.id, practitionerId: user.id, date: '2026-10-13', status: 'draft', chiefComplaint: 'Copied clinical notes', prescriptions: [rx], services, currency: 'CAD' }
+  if (pricing) { rx.subtotal = rxSubtotal; record.includeRxAmount = true; record.overrideTaxRate = 0.13 }
   if (paid) Object.assign(record, { status: 'paid', paymentStatus: 'paid', totalAmount: 103.04, totalWithoutTax: 103.04, taxAmount: 0, paidAmount: 103.04 })
   const writes = [], state = { list: [record], delay: null, failSave: false, failInventory: false, reads: 0, inventoryReads: 0, inventoryDelay: null, stock: 100 }
   await page.addInitScript(({ user, patient, record, copy }) => {
@@ -98,6 +98,30 @@ test('historical paid invoices retain their charged amounts when opened after ta
   await expect(page.locator('.price-summary .grand-total')).toContainText('$103.04')
   await expect(page.getByRole('radio', { name: '13%', exact: true })).toBeDisabled()
   expect(writes).toHaveLength(0)
+})
+
+test('discounted half-cent pricing displays and saves the same rounded amounts', async ({ page }) => {
+  const { writes } = await fixture(page, { pricing: true, rxSubtotal: 2.3 })
+  await page.goto('/patients/patient/consultations/consult')
+  await page.getByRole('tab', { name: 'Pricing', exact: true }).click()
+  await page.getByRole('button', { name: 'Percentage %', exact: true }).click()
+  await page.locator('.el-form-item').filter({ hasText: 'Discount Type' }).getByRole('spinbutton').fill('5')
+  await expect(page.locator('.price-summary .total-before-tax')).toContainText('$2.19')
+  await expect(page.locator('.price-summary .tax-row')).toContainText('$0.28')
+  await expect(page.locator('.price-summary .grand-total')).toContainText('$2.47')
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect.poll(() => writes.filter(w => w.method === 'PUT').length).toBe(1)
+  expect(writes.find(w => w.method === 'PUT').body).toMatchObject({ totalWithoutTax: 2.19, taxAmount: 0.28, totalAmount: 2.47 })
+})
+
+test('service-row tax and invoice tax agree at a half-cent boundary', async ({ page }) => {
+  await fixture(page, { services: [{ name: 'QA taxable service', price: 4.5, quantity: 1, taxable: true }] })
+  await page.goto('/patients/patient/consultations/consult')
+  await page.getByRole('tab', { name: 'Pricing', exact: true }).click()
+  await page.locator('.el-radio-button').filter({ hasText: /^13%$/ }).click()
+  await expect(page.locator('.el-table__body tr').filter({ hasText: 'QA taxable service' })).toContainText('$0.59')
+  await expect(page.locator('.price-summary .tax-row')).toContainText('$0.59')
+  await expect(page.locator('.price-summary .grand-total')).toContainText('$5.09')
 })
 
 test('uncached consultation saves and stale list cannot replace authoritative reservations', async ({ page }) => {

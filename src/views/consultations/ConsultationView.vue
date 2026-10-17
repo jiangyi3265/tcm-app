@@ -60,7 +60,7 @@ import {
   requiresStripeTerminal,
 } from '../../utils/paymentMethods'
 import { resolveInvoicePaymentAfterSave } from '../../utils/invoicePaymentFlow'
-import { calculateInvoiceTotals as computeInvoiceTotals, serviceExtended } from '../../utils/invoiceTotals'
+import { calculateInvoiceTotals as computeInvoiceTotals, serviceExtended, serviceTax } from '../../utils/invoiceTotals'
 import { compressImageFile } from '../../utils/imageCompress'
 import { getStoredItem, removeStoredKey } from '../../utils/storage'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -2417,7 +2417,7 @@ function getEffectiveTaxRateFor(source = form.value) {
   return settingsStore.taxRate
 }
 function getServiceTax(sv, source = form.value) {
-  return sv.taxable ? getServiceExtended(sv) * getEffectiveTaxRateFor(source) : 0
+  return serviceTax(sv, getEffectiveTaxRateFor(source))
 }
 function getTotalServiceFor(source = form.value) {
   return (source.services || []).reduce((s, sv) => s + getServiceExtended(sv), 0)

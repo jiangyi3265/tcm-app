@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { calculateInvoiceTotals } from '../src/utils/invoiceTotals.js'
+import { calculateInvoiceTotals, serviceTax } from '../src/utils/invoiceTotals.js'
 
 const prescription = (subtotal, rxStatus = 'pending') => ({ subtotal, rxStatus })
 const herbsOnly = { prescriptions: [prescription(103.04)], includeRxAmount: true }
@@ -36,4 +36,42 @@ test('discount cannot produce negative charges or tax, and rounded components ad
   const totals = calculateInvoiceTotals({ includeRxAmount: true, prescriptions: [prescription(1.005)] })
   assert.equal(totals.totalWithoutTax, 1.01)
   assert.equal(totals.totalAmount, 1.14)
+})
+
+test('half-cent discounted subtotals round up without binary floating point loss', () => {
+  const totals = calculateInvoiceTotals({ includeRxAmount: true, prescriptions: [prescription(2.3)], discountType: 'percentage', discountValue: 5 })
+  assert.equal(totals.totalWithoutTax, 2.19)
+  assert.equal(totals.taxAmount, 0.28)
+  assert.equal(totals.totalAmount, 2.47)
+  const split = calculateInvoiceTotals({ includeRxAmount: true, prescriptions: [prescription(2.1), prescription(0.2)], discountType: 'percentage', discountValue: 5 })
+  assert.deepEqual(split, totals)
+})
+
+test('percentage discounts agree with integer-cent arithmetic across 120000 combinations', () => {
+  for (const discount of [5, 10, 15, 20, 25, 30, 33, 40, 50, 60, 75, 90]) {
+    for (let cents = 1; cents <= 10000; cents++) {
+      const totals = calculateInvoiceTotals({ includeRxAmount: true, prescriptions: [prescription(cents / 100)], discountType: 'percentage', discountValue: discount })
+      const expectedBase = Math.floor((cents * (100 - discount) + 50) / 100) / 100
+      const expectedTax = Math.floor((cents * 13 * (100 - discount) + 5000) / 10000) / 100
+      assert.equal(totals.totalWithoutTax, expectedBase, `subtotal ${cents / 100}, discount ${discount}%`)
+      assert.equal(totals.taxAmount, expectedTax, `tax on ${cents / 100}, discount ${discount}%`)
+    }
+  }
+})
+
+test('amount discounts and decimal service quantities preserve half-cent rounding', () => {
+  const totals = calculateInvoiceTotals({ consultationFee: 1, services: [{ price: 2, taxable: true }], discountType: 'amount', discountValue: 1.5 })
+  assert.equal(totals.totalWithoutTax, 1.5)
+  assert.equal(totals.taxAmount, 0.13)
+  const fractional = calculateInvoiceTotals({ services: [{ price: 1.15, quantity: 3, manualDiscount: 0.15, taxable: true }], discountType: 'amount', discountValue: 1.15 })
+  assert.equal(fractional.totalWithoutTax, 2.15)
+  assert.equal(fractional.taxAmount, 0.28)
+})
+
+test('service tax display uses the same half-up rounding as invoice totals', () => {
+  const service = { price: 4.5, taxable: true }
+  assert.equal(serviceTax(service, 0.13), 0.59)
+  assert.equal(serviceTax({ ...service, taxable: false }, 0.13), 0)
+  assert.equal(serviceTax(service, 0), 0)
+  assert.equal(calculateInvoiceTotals({ services: [service] }).taxAmount, 0.59)
 })
