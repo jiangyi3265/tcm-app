@@ -964,6 +964,7 @@ export default {
     title: '导入采购发票', description: '上传 PDF 或图片，核对药材、数量和折扣前单价后更新库存。',
     chooseFile: '选择发票', fileLimit: '请选择不超过 10 MB 的发票。', invoiceName: '发票药材名称', dictionaryHerb: '药材字典匹配',
     target: '更新目标库存', newInventory: '新建库存条目', quantity: '入库数量', unit: '库存单位', purchasePrice: '折扣前采购单价',
+    newInventorySupplier: '新建库存（{supplier}）',
     sellingPrice: '销售单价 ×2', gramsPerPacket: '每单位克数', confirm: '确认并更新库存', success: '发票已入库',
     reviewHint: '请核对单位和币种。数量仅追加一次，采购价格会覆盖原价格，销售价格按采购价格的两倍设置。',
     unitChanged: '库存单位与发票不同，请按所选库存单位重新核对并填写数量和单价。',

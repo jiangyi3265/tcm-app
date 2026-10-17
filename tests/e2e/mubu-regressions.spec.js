@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test'
 
-async function fixture(page, { stockHerbId = 'server-herb', dictionaryEmpty = false, invoiceNames = ['Tong Cao'] } = {}) {
+async function fixture(page, { stockHerbId = 'server-herb', dictionaryEmpty = false, invoiceNames = ['Tong Cao'], stockRows = null, invoiceSupplier = 'QA Supplier', inventoryRefreshFails = false } = {}) {
   const herb = { id: 'server-herb', name: '通草', pinyin: 'Tong Cao', isActive: true }
-  const stock = { id: 'stock', herbDictId: stockHerbId, name: herb.name, category: 'powder', unit: 'bag', quantity: 111, gramsPerPacket: 6, pricePerUnit: 4, isActive: true, last30DaysUsage: 0 }
+  const stock = { id: 'stock', herbDictId: stockHerbId, name: herb.name, category: 'powder', unit: 'bag', quantity: 111, gramsPerPacket: 10, pricePerUnit: 4, isActive: true, last30DaysUsage: 0 }
   const formulas = [
     { id: 'first', name: 'First formula', isActive: true, items: [{ herbDictId: herb.id, herbName: herb.name, dosage: 6, unit: 'g' }] },
     { id: 'second', name: 'Second formula', isActive: true, items: [{ herbDictId: herb.id, herbName: herb.name, dosage: 10, unit: 'g' }] },
@@ -27,14 +27,17 @@ async function fixture(page, { stockHerbId = 'server-herb', dictionaryEmpty = fa
       if (method === 'POST') { body = { ...route.request().postDataJSON(), id: 'created' }; formulas.push(body); writes.push(body) }
       else body = formulas
     } else if (path.startsWith('/api/formulas/')) body = formulas.find((f) => path.endsWith(f.id))
-    else if (path === '/api/inventory') body = [stock]
+    else if (path === '/api/inventory') {
+      if (inventoryRefreshFails && reads.filter(read => read === path).length > 1) return route.fulfill({ status: 503, json: { message: 'Inventory unavailable' } })
+      body = stockRows ? stockRows.map(item => ({ ...stock, ...item })) : [stock]
+    }
     else if (path === '/api/inventory/stock') { Object.assign(stock, route.request().postDataJSON()); body = stock; writes.push(body) }
     else if (path === '/api/settings') body = { currency: 'CAD', serviceTypes: {}, priceLists: [], rooms: [], taxRate: 0.13 }
     else if (path === '/api/settings/stripe') body = {}
     else if (path === '/api/ai/settings') {
       body = { configured: true, apiKeyMasked: '••••5678', model: 'deepseek-flash' }
       if (method === 'PUT') writes.push(route.request().postDataJSON())
-    } else if (path === '/api/inventory/invoices/recognize') body = { invoiceId: 'preview', currency: 'CAD', supplier: 'QA Supplier', items: invoiceNames.map(invoiceName => ({ invoiceName, quantity: 3, unit: 'bag', unitPriceBeforeDiscount: 2.5, gramsPerPacket: 10 })) }
+    } else if (path === '/api/inventory/invoices/recognize') body = { invoiceId: 'preview', currency: 'CAD', supplier: invoiceSupplier, items: invoiceNames.map(invoiceName => ({ invoiceName, quantity: 3, unit: 'bag', unitPriceBeforeDiscount: 2.5, gramsPerPacket: 10 })) }
     else if (path === '/api/inventory/invoices/confirm') { writes.push(route.request().postDataJSON()); body = { imported: true } }
     await route.fulfill({ json: body ?? {}, status: 200 })
   })
@@ -121,6 +124,70 @@ test('invoice preview preselects bilingual and approximate herbs while leaving u
   expect(writes[0].items).toHaveLength(2)
   for (const row of writes[0].items) expect(row).toMatchObject({ herbDictId: 'server-herb', inventoryId: 'stock', quantity: 3, purchasePrice: 2.5 })
   expect(errors).toEqual([])
+})
+
+test('invoice selects the closest supplier and packaging from multiple inventory rows', async ({ page }) => {
+  const { writes, errors, reads } = await fixture(page, { invoiceSupplier: 'Starjay Trading Ltd.', stockRows: [
+    { id: 'other', supplier: 'Evergreen Herbs' },
+    { id: 'other-pack', supplier: 'Starjay Trading', gramsPerPacket: 15 },
+    { id: 'closest', supplier: 'Starjai Trading Limited', quantity: 42 },
+  ] })
+  await page.goto('/inventory')
+  await page.getByRole('button', { name: 'Import supplier invoice', exact: true }).click()
+  await page.locator('.invoice-import input[type=file]').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: Buffer.from('test invoice') })
+  const panel = page.locator('.invoice-import')
+  await expect(panel.locator('.el-table__body tr .el-select').nth(1)).toContainText('Starjai Trading Limited (42 bag)')
+  expect(reads.filter(path => path === '/api/inventory').length).toBeGreaterThanOrEqual(2)
+  await panel.screenshot({ path: 'test-results/invoice-default-existing.png' })
+  await panel.getByRole('button', { name: 'Confirm and update inventory', exact: true }).click()
+  await expect(panel.getByRole('button', { name: 'Invoice imported', exact: true })).toBeDisabled()
+  expect(writes[0].items[0]).toMatchObject({ inventoryId: 'closest', supplier: 'Starjay Trading Ltd.', gramsPerPacket: 10, quantity: 3, purchasePrice: 2.5 })
+  expect(errors).toEqual([])
+})
+
+for (const scenario of [
+  { name: 'no stock', stockRows: [] },
+  { name: 'different supplier', stockRows: [{ supplier: 'Evergreen Herbs' }] },
+  { name: 'different package', stockRows: [{ supplier: 'Starjay Trading', gramsPerPacket: 15 }] },
+]) test(`invoice visibly defaults to creating stock for the printed supplier when ${scenario.name}`, async ({ page }) => {
+  const { writes, errors } = await fixture(page, { ...scenario, invoiceSupplier: 'Starjay Trading Ltd.' })
+  await page.goto('/inventory')
+  await page.getByRole('button', { name: 'Import supplier invoice', exact: true }).click()
+  await page.locator('.invoice-import input[type=file]').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: Buffer.from('test invoice') })
+  const panel = page.locator('.invoice-import')
+  await expect(panel.locator('.el-table__body tr .el-select').nth(1)).toContainText('Create inventory (Starjay Trading Ltd.)')
+  await expect(panel.getByRole('button', { name: 'Confirm and update inventory', exact: true })).toBeEnabled()
+  await panel.screenshot({ path: `test-results/invoice-default-new-${scenario.name.replaceAll(' ', '-')}.png` })
+  await panel.getByRole('button', { name: 'Confirm and update inventory', exact: true }).click()
+  await expect(panel.getByRole('button', { name: 'Invoice imported', exact: true })).toBeDisabled()
+  expect(writes).toHaveLength(1)
+  expect(writes[0].items[0]).toMatchObject({ inventoryId: '', supplier: 'Starjay Trading Ltd.', herbDictId: 'server-herb', quantity: 3, purchasePrice: 2.5, unit: 'bag' })
+  expect(errors).toEqual([])
+})
+
+test('invoice inventory defaults can be manually changed to create stock', async ({ page }) => {
+  const { writes } = await fixture(page)
+  await page.goto('/inventory')
+  await page.getByRole('button', { name: 'Import supplier invoice', exact: true }).click()
+  await page.locator('.invoice-import input[type=file]').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: Buffer.from('test invoice') })
+  const panel = page.locator('.invoice-import')
+  await panel.locator('.el-table__body tr .el-select').nth(1).click()
+  await page.getByRole('option', { name: 'Create inventory (QA Supplier)', exact: true }).click()
+  await expect(panel.locator('.el-table__body tr .el-select').nth(1)).toContainText('Create inventory (QA Supplier)')
+  await panel.getByRole('button', { name: 'Confirm and update inventory', exact: true }).click()
+  await expect.poll(() => writes.length).toBe(1)
+  expect(writes[0].items[0]).toMatchObject({ inventoryId: '', supplier: 'QA Supplier' })
+})
+
+test('invoice cannot select stale inventory when refreshing current stock fails', async ({ page }) => {
+  const { writes } = await fixture(page, { inventoryRefreshFails: true })
+  await page.goto('/inventory')
+  await page.getByRole('button', { name: 'Import supplier invoice', exact: true }).click()
+  await page.locator('.invoice-import input[type=file]').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: Buffer.from('test invoice') })
+  const panel = page.locator('.invoice-import')
+  await expect(panel.getByRole('alert')).toContainText('Inventory unavailable')
+  await expect(panel.getByRole('button', { name: 'Confirm and update inventory', exact: true })).toHaveCount(0)
+  expect(writes).toHaveLength(0)
 })
 
 test('editing legacy inventory replaces an obsolete dictionary ID with its unique current herb', async ({ page }) => {

@@ -81,3 +81,44 @@ export function normalizeInvoiceUnit(unit) {
   if (['g', 'gram', 'grams', '克'].includes(value)) return 'g'
   return value
 }
+
+function supplierName(value) {
+  return token(String(value || '').normalize('NFKC').normalize('NFD').replace(/\p{M}/gu, '')
+    .replace(/\b(?:ltd|limited|inc|incorporated|corp|corporation|co|company|llc)\b\.?/gi, '')
+    .replace(/(?:有限责任公司|股份有限公司|有限公司)$/u, ''))
+}
+
+function supplierScore(invoice, stock) {
+  const query = supplierName(invoice)
+  const name = supplierName(stock)
+  // Legacy inventory without a supplier can still be reused, but a named
+  // supplier match always wins. Unrelated named suppliers stay separate.
+  if (!query || !name) return 0
+  if (query === name) return 3
+  const shortest = Math.min(query.length, name.length)
+  const longest = Math.max(query.length, name.length)
+  if (shortest >= 4 && shortest / longest >= 0.6 && (query.includes(name) || name.includes(query))) return 2 + shortest / longest
+  const distance = editDistance(query, name)
+  return shortest >= 5 && distance <= Math.max(1, Math.floor(longest * 0.15)) ? 1 + (1 - distance / longest) : -1
+}
+
+export function bestInvoiceInventory(row, items = [], branchId = null) {
+  if (!row.herbDictId) return null
+  const unit = normalizeInvoiceUnit(row.unit || (row.category === 'powder' ? 'bag' : 'g'))
+  const packetSize = Number(row.gramsPerPacket) || 0
+  const candidates = items.filter(item => item.isActive && !item.deletedAt
+    && item.herbDictId === row.herbDictId && item.category === row.category
+    && (!branchId || !item.branchId || item.branchId === branchId)
+    && normalizeInvoiceUnit(item.unit) === unit)
+    .map(item => {
+      const size = Number(item.gramsPerPacket ?? item.quantityPerMainUnit) || 0
+      return { item, supplier: supplierScore(row.supplier, item.supplier),
+        compatible: !packetSize || !size || packetSize === size,
+        sizeMatch: Number(packetSize > 0 && packetSize === size),
+        branchMatch: Number(Boolean(branchId) && item.branchId === branchId) }
+    })
+    .filter(match => match.compatible && match.supplier >= 0)
+    .sort((a, b) => b.supplier - a.supplier || b.sizeMatch - a.sizeMatch || b.branchMatch - a.branchMatch
+      || String(a.item.id).localeCompare(String(b.item.id)))
+  return candidates[0]?.item || null
+}

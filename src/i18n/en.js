@@ -963,6 +963,7 @@ export default {
     title: 'Import supplier invoice', description: 'Upload a PDF or image, then review the herbs, quantities and original unit prices before updating inventory.',
     chooseFile: 'Choose invoice', fileLimit: 'Choose an invoice up to 10 MB.', invoiceName: 'Printed herb name', dictionaryHerb: 'Dictionary herb',
     target: 'Inventory to update', newInventory: 'Create inventory item', quantity: 'Quantity', unit: 'Inventory unit', purchasePrice: 'Purchase/unit before discount',
+    newInventorySupplier: 'Create inventory ({supplier})',
     sellingPrice: 'Selling/unit ×2', gramsPerPacket: 'Grams per unit', confirm: 'Confirm and update inventory', success: 'Invoice imported',
     reviewHint: 'Check units and currency. Quantities are added once; purchase prices replace previous prices and selling prices are twice the purchase price.',
     unitChanged: 'The inventory unit differs. Review and enter the quantity and price in the selected inventory unit.',

@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus'
 import { useHerbDictStore } from '../stores/herbDict'
 import { useInventoryStore } from '../stores/inventory'
 import { inventoryApi } from '../utils/api'
-import { bestInvoiceHerb, rankedInvoiceHerbs, normalizeInvoiceUnit } from '../utils/invoiceHerbMatch'
+import { bestInvoiceHerb, bestInvoiceInventory, rankedInvoiceHerbs, normalizeInvoiceUnit } from '../utils/invoiceHerbMatch'
 
 const props = defineProps({ category: String, branchId: String, currency: String })
 const emit = defineEmits(['close'])
@@ -42,15 +42,17 @@ function chooseInventory(row, id) {
   if (item && row.gramsPerPacket == null) row.gramsPerPacket = item.gramsPerPacket
 }
 function chooseHerb(row) {
-  const matches = targets(row).filter((item) => normalizeInvoiceUnit(item.unit) === normalizeInvoiceUnit(row.unit))
-  chooseInventory(row, matches.length === 1 ? matches[0].id : '')
+  chooseInventory(row, bestInvoiceInventory(row, inventory.activeItems, props.branchId)?.id || '')
+}
+function newInventoryLabel(row) {
+  return row.supplier?.trim() ? t('invoiceImport.newInventorySupplier', { supplier: row.supplier }) : t('invoiceImport.newInventory')
 }
 async function recognize(upload) {
   const file = upload.raw
   if (!file || file.size > 10 * 1024 * 1024) return ElMessage.error(t('invoiceImport.fileLimit'))
   busy.value = true; error.value = ''; imported.value = false; preview.value = null; rows.value = []
   try {
-    await herbs.refreshFromApi({ force: true })
+    await Promise.all([herbs.refreshFromApi({ force: true }), inventory.refreshFromApi({ force: true, throwOnError: true })])
     preview.value = await inventoryApi.recognizeInvoice(file)
     invoiceCurrency.value = preview.value.currency || props.currency
     rows.value = preview.value.items.map((line) => {
@@ -102,8 +104,8 @@ async function confirm() {
         </el-select>
       </template></el-table-column>
       <el-table-column :label="t('invoiceImport.target')" min-width="180"><template #default="{row}">
-        <el-select :model-value="row.inventoryId" :disabled="busy || imported" @change="chooseInventory(row, $event)">
-          <el-option value="" :label="t('invoiceImport.newInventory')" />
+        <el-select :model-value="row.inventoryId" :empty-values="[null, undefined]" :disabled="busy || imported" @change="chooseInventory(row, $event)">
+          <el-option value="" :label="newInventoryLabel(row)" />
           <el-option v-for="item in targets(row)" :key="item.id" :value="item.id" :label="`${item.supplier || item.name} (${item.quantity} ${item.unit})`" />
         </el-select>
       </template></el-table-column>

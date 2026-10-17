@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { exactInvoiceHerb, invoiceHerbSuggestions, normalizeInvoiceUnit, bestInvoiceHerb, rankedInvoiceHerbs } from '../src/utils/invoiceHerbMatch.js'
+import { exactInvoiceHerb, invoiceHerbSuggestions, normalizeInvoiceUnit, bestInvoiceHerb, bestInvoiceInventory, rankedInvoiceHerbs } from '../src/utils/invoiceHerbMatch.js'
 
 const herbs = [
   { id: '1', name: '通草', pinyin: 'Tong Cao', alias: '通脱木', isActive: true },
@@ -63,4 +63,45 @@ test('unknown, inactive, duplicate and equally close herb names remain unselecte
   const prepared = [{ id: 'raw', name: '甘草(Gan Cao)', isActive: true }, { id: 'prepared', name: '炙甘草(Zhi Gan Cao)', isActive: true }]
   assert.equal(bestInvoiceHerb('Zhi Gan Cao炙甘草(10g)', prepared)?.id, 'prepared')
   assert.equal(bestInvoiceHerb('甘草', [prepared[1]]), null)
+})
+
+const invoiceRow = { herbDictId: '1', category: 'powder', unit: 'bags', gramsPerPacket: 10, supplier: 'Starjay Trading Ltd.' }
+const stockItem = { id: 'matching', herbDictId: '1', category: 'powder', unit: 'bag(包)', gramsPerPacket: 10, supplier: 'Starjay Trading', isActive: true }
+
+test('inventory defaults to the closest supplier despite multiple rows and spelling variations', () => {
+  const stocks = [
+    { ...stockItem, id: 'unrelated', supplier: 'Evergreen Herbs' },
+    { ...stockItem, id: 'legacy', supplier: '' },
+    { ...stockItem, id: 'typo', supplier: 'Starjai Trading Limited' },
+    stockItem,
+  ]
+  assert.equal(bestInvoiceInventory(invoiceRow, stocks)?.id, 'matching')
+  assert.equal(bestInvoiceInventory(invoiceRow, stocks.slice(0, 3))?.id, 'typo')
+  assert.equal(bestInvoiceInventory({ ...invoiceRow, supplier: '星嘉有限公司' }, [{ ...stockItem, supplier: '星嘉' }])?.id, 'matching')
+})
+
+test('inventory with no compatible herb, supplier, unit or packaging defaults to a new item', () => {
+  for (const change of [{ herbDictId: '2' }, { supplier: 'Evergreen Herbs' }, { unit: 'g' }, { gramsPerPacket: 15 },
+    { category: 'raw_herbs' }, { isActive: false }, { deletedAt: '2026-10-16' }, { branchId: 'other' }]) {
+    assert.equal(bestInvoiceInventory(invoiceRow, [{ ...stockItem, ...change }], 'clinic'), null)
+  }
+  assert.equal(bestInvoiceInventory({ ...invoiceRow, herbDictId: '' }, [stockItem]), null)
+  assert.equal(bestInvoiceInventory(invoiceRow, []), null)
+})
+
+test('inventory selection prefers a known matching pack size and current branch with stable ties', () => {
+  const stocks = [
+    { ...stockItem, id: 'unknown-size', gramsPerPacket: null },
+    { ...stockItem, id: 'shared' },
+    { ...stockItem, id: 'clinic-b', branchId: 'clinic' },
+    { ...stockItem, id: 'clinic-a', branchId: 'clinic' },
+  ]
+  assert.equal(bestInvoiceInventory(invoiceRow, stocks, 'clinic')?.id, 'clinic-a')
+  assert.equal(bestInvoiceInventory(invoiceRow, [...stocks].reverse(), 'clinic')?.id, 'clinic-a')
+})
+
+test('legacy inventory and missing invoice metadata still select an eligible existing row', () => {
+  assert.equal(bestInvoiceInventory(invoiceRow, [{ ...stockItem, supplier: '', gramsPerPacket: null }])?.id, 'matching')
+  assert.equal(bestInvoiceInventory({ ...invoiceRow, supplier: '', unit: null, gramsPerPacket: null }, [stockItem])?.id, 'matching')
+  assert.equal(bestInvoiceInventory(invoiceRow, [{ ...stockItem, gramsPerPacket: null, quantityPerMainUnit: 15 }]), null)
 })
