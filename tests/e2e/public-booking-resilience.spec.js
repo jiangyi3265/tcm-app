@@ -7,9 +7,9 @@ function deferred() {
 }
 
 function schedule(weekStart = '2026-10-05') {
-  const date = weekStart === '2026-10-05' ? '2026-10-07' : '2026-10-14'
+  const date = new Date(Date.parse(weekStart + 'T12:00:00Z') + 2 * 86400000).toISOString().slice(0, 10)
   return {
-    weekStart,
+    weekStart, publicWindowStart: '2026-10-07', publicWindowEnd: '2026-11-21',
     days: [{
       date, availableCount: 1, releaseMode: 'drip',
       slots: [{ date, startTime: `${date}T09:00:00`, endTime: `${date}T09:30:00`, status: 'available', assignedPractitionerId: 'qa-practitioner' }],
@@ -22,7 +22,7 @@ async function openBooking(page, onSchedule, embedded = false) {
   await page.route('**/api/public-booking/options', route => route.fulfill({ json: {
     serviceTypes: [{ key: 'acupuncture', label: 'Acupuncture', publicVisible: true }],
     practitioners: [{ id: 'qa-practitioner', name: 'QA Practitioner' }],
-    publicWindowStart: '2026-10-07', publicWindowEnd: '2026-10-21',
+    publicWindowStart: '2026-10-07', publicWindowEnd: '2026-11-21',
   } }))
   await page.route('**/api/public-booking/schedule**', async route => {
     const weekStart = new URL(route.request().url()).searchParams.get('weekStart')
@@ -42,7 +42,8 @@ async function openBooking(page, onSchedule, embedded = false) {
   await expect(booking.locator('.time-block-button')).toBeVisible()
   await booking.getByPlaceholder('Last name', { exact: true }).fill('QA')
   await booking.getByPlaceholder('First name', { exact: true }).fill('Booking')
-  await booking.getByPlaceholder('Enter your phone number', { exact: true }).fill('5550100')
+  await booking.getByPlaceholder('Phone number', { exact: true }).fill('5550100')
+  await booking.getByPlaceholder('Email', { exact: true }).fill('qa@example.invalid')
   return booking
 }
 
@@ -56,12 +57,12 @@ test('a double click submits one booking and locks the form until the response',
   })
   try {
     await openBooking(page)
-    const submit = page.getByRole('button', { name: 'Submit Booking', exact: true })
+    const submit = page.locator('button[type="submit"]')
     await submit.dblclick()
     await expect(submit).toBeDisabled({ timeout: 1000 })
     expect(submitted).toHaveLength(1)
     await expect(page.getByPlaceholder('First name', { exact: true })).toBeDisabled()
-    await expect(page.locator('.date-card')).toBeDisabled()
+    await expect(page.locator('.date-card:enabled')).toHaveCount(0)
     response.resolve()
     await expect(page.getByRole('heading', { name: 'Booking Submitted', exact: true })).toBeVisible()
     await expect(page.locator('.success-card')).toContainText('2026-10-07 09:00')
@@ -69,7 +70,7 @@ test('a double click submits one booking and locks the form until the response',
   } finally { response.resolve() }
 })
 
-test('changing weeks cannot submit the previous week while the new schedule loads', async ({ page }) => {
+test('changing months cannot submit the previous month while the new schedule loads', async ({ page }) => {
   const response = deferred()
   const requested = deferred()
   const submitted = []
@@ -79,24 +80,24 @@ test('changing weeks cannot submit the previous week while the new schedule load
   })
   try {
     await openBooking(page, async weekStart => {
-      if (weekStart === '2026-10-12') {
+      if (weekStart === '2026-11-02') {
         requested.resolve()
         await response.promise
       }
     })
-    await page.locator('.week-nav button').last().click()
+    await page.getByRole('button', { name: 'Next month', exact: true }).click()
     await requested.promise
-    const submit = page.getByRole('button', { name: 'Submit Booking', exact: true })
+    const submit = page.locator('button[type="submit"]')
     await expect(submit).toBeDisabled({ timeout: 1000 })
-    await expect(page.locator('.selected-slot-panel').first()).not.toContainText('2026-10-07')
+    await expect(page.locator('.time-block-button')).toHaveCount(0)
     expect(submitted).toHaveLength(0)
     response.resolve()
-    await expect(page.locator('.selected-slot-panel').first()).toContainText('2026-10-14')
+    await expect(page.locator('.date-card[data-date="2026-11-04"]')).toHaveAttribute('aria-pressed', 'true')
     await expect(submit).toBeEnabled()
     await submit.click()
     await expect(page.getByRole('heading', { name: 'Booking Submitted', exact: true })).toBeVisible()
     expect(submitted).toHaveLength(1)
-    expect(submitted[0].startTime).toBe('2026-10-14 09:00:00')
+    expect(submitted[0].startTime).toBe('2026-11-04 09:00:00')
   } finally { response.resolve() }
 })
 
@@ -111,7 +112,7 @@ test('a failed submission unlocks the form and retains entries for retry', async
     }
   })
   await openBooking(page)
-  const submit = page.getByRole('button', { name: 'Submit Booking', exact: true })
+  const submit = page.locator('button[type="submit"]')
   await submit.click()
   await expect(page.getByText('Temporary booking failure', { exact: true })).toBeVisible()
   await expect(submit).toBeEnabled()

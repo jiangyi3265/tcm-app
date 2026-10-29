@@ -24,34 +24,49 @@ test.describe.serial('最小浏览器级冒烟', () => {
       const bookingName = `E2E公开预约-${Date.now()}`
       const bookingPhone = `138${String(Date.now()).slice(-8)}`
 
-      await setPreferredLocale(page)
+      await setPreferredLocale(page, 'en')
+      // Limit the public fixture to the practitioner created by this test. The
+      // schedule and booking creation still use the isolated real backend.
+      await page.route('**/api/public-booking/options', async route => {
+        const response = await route.fetch()
+        const json = await response.json()
+        const actual = json.practitioners.find(item => String(item.id) === String(practitioner.id))
+        expect(actual).toBeTruthy()
+        await route.fulfill({ response, json: { ...json, practitioners: [actual] } })
+      })
       await page.goto('/book')
-      await expect(page.getByRole('heading', { name: 'OTCM Acupuncture Online Booking' })).toBeVisible()
-
-      const form = page.locator('.public-form')
-      await chooseSelectOption(page, form, '医师', practitioner.name)
-
-      await expect(page.locator('.schedule-empty').filter({ hasText: '加载中...' })).toHaveCount(0, { timeout: 15000 })
+      await expect(page.getByRole('heading', { name: 'Treatment with OTCM', exact: true })).toBeVisible()
+      const targetDate = targetDay.format('YYYY-MM-DD')
+      const dateButton = page.locator(`[data-date="${targetDate}"]`)
+      if (await dateButton.count() === 0) {
+        await page.getByRole('button', { name: 'Next month', exact: true }).click()
+      }
+      await expect(dateButton).toBeEnabled({ timeout: 15000 })
+      await dateButton.click()
       const slotCard = page.locator('.time-block-button').first()
       await expect(slotCard).toBeVisible()
-      const selectedSlotTime = (await slotCard.locator('.slot-time').first().textContent())?.trim() || ''
+      const selectedSlotTime = (await slotCard.innerText()).trim()
+      const timeParts = selectedSlotTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/)
+      expect(timeParts).toBeTruthy()
+      const hour = Number(timeParts[1]) % 12 + (timeParts[3] === 'PM' ? 12 : 0)
+      const expectedStart = targetDay.hour(hour).minute(Number(timeParts[2])).format('YYYY-MM-DD HH:mm')
       await slotCard.click()
 
       await page.getByPlaceholder('Last name', { exact: true }).fill('E2E')
       await page.getByPlaceholder('First name', { exact: true }).fill(bookingName)
-      await page.locator('input[placeholder="请输入手机号或联系电话"]').fill(bookingPhone)
-      await page.getByRole('button', { name: '提交预约' }).click()
+      await page.getByPlaceholder('Phone number', { exact: true }).fill(bookingPhone)
+      await page.getByPlaceholder('Email', { exact: true }).fill('qa@example.invalid')
+      await page.getByRole('button', { name: 'Submit Booking', exact: true }).click()
 
-      await expect(page.getByRole('heading', { name: '预约已提交' })).toBeVisible()
-      await expect(page.getByText(`接诊医师：${practitioner.name}`)).toBeVisible()
-      if (selectedSlotTime) {
-        await expect(page.getByText('预约时间：')).toContainText(selectedSlotTime.split(' - ')[0])
-      }
-
-      await page.getByRole('button', { name: /继续预约|再约一个/ }).click()
-      await expect(page.getByRole('heading', { name: 'OTCM Acupuncture Online Booking' })).toBeVisible()
-      if (selectedSlotTime) {
-        await expect(page.locator('.time-block-button').filter({ hasText: selectedSlotTime.split(' - ')[0] })).toHaveCount(0)
+      await expect(page.getByRole('heading', { name: 'Booking Submitted', exact: true })).toBeVisible()
+      await expect(page.locator('.success-card')).toContainText(practitioner.name)
+      await expect(page.locator('.success-card')).toContainText(expectedStart)
+      await page.getByRole('button', { name: 'Book Another', exact: true }).click()
+      await expect(page.getByRole('heading', { name: 'Treatment with OTCM', exact: true })).toBeVisible()
+      await expect(page.locator('.schedule-section')).toHaveAttribute('aria-busy', 'false')
+      if (await dateButton.isEnabled()) {
+        await dateButton.click()
+        await expect(page.getByRole('button', { name: selectedSlotTime, exact: true })).toHaveCount(0)
       }
       expect(browserFailures).toEqual([])
     })

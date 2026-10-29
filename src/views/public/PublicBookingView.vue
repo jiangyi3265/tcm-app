@@ -3,18 +3,18 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { publicBookingApi } from '../../utils/api'
-import { dayjs, formatDate, formatTime } from '../../utils/dateUtils'
+import { dayjs } from '../../utils/dateUtils'
 import { SERVICE_TYPES } from '../../utils/sampleData'
 import clinicLogo from '../../assets/otcm-logo.png'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const DEFAULT_PUBLIC_BOOKING = {
   advanceDays: 15,
   dripWindowDays: 7,
   dripMinutes: 60,
 }
-const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const weekdayLabels = computed(() => locale.value.startsWith('zh') ? ['日', '一', '二', '三', '四', '五', '六'] : ['S', 'M', 'T', 'W', 'T', 'F', 'S'])
 
 const loading = ref(true)
 const scheduleLoading = ref(false)
@@ -32,7 +32,8 @@ const bookingPage = ref(null)
 const publicBookingSettings = ref({ ...DEFAULT_PUBLIC_BOOKING })
 const publicWindowStart = ref(dayjs().format('YYYY-MM-DD'))
 const publicWindowEnd = ref(dayjs().add(DEFAULT_PUBLIC_BOOKING.advanceDays - 1, 'day').format('YYYY-MM-DD'))
-const currentWeek = ref(alignWeekStart(dayjs()))
+const currentMonth = ref(dayjs().startOf('month').format('YYYY-MM-DD'))
+const expandedServices = ref([])
 
 const isEmbedded = computed(() => {
   if (typeof window === 'undefined') return false
@@ -49,13 +50,6 @@ const form = ref({
   email: '',
   practitionerId: '',
   serviceType: '',
-  notes: '',
-  intakeFormData: {
-    chiefComplaint: '',
-    allergies: '',
-    currentMedications: '',
-    medicalHistory: '',
-  },
 })
 
 function normalizeTagList(value) {
@@ -90,6 +84,8 @@ function normalizeServiceTypes(source) {
         label: item?.label ?? item?.name ?? item?.displayName ?? fallback.label ?? key,
         requiredTag: item?.requiredTag ?? fallback.requiredTag ?? '',
         roomRequired: Boolean(item?.roomRequired ?? fallback.roomRequired),
+        defaultPrice: item?.defaultPrice ?? item?.price ?? null,
+        description: String(item?.description || '').trim(),
       }
     })
     .filter((item) => item.key && item.publicVisible !== false)
@@ -128,35 +124,65 @@ const practitionerOptions = computed(() =>
   }),
 )
 
-const weekStart = computed(() => dayjs(alignWeekStart(currentWeek.value)))
-const weekLabel = computed(() => `${formatDate(weekStart.value.toDate())} - ${formatDate(weekStart.value.add(6, 'day').toDate())}`)
+const monthStart = computed(() => dayjs(currentMonth.value).startOf('month'))
+const displayLocale = computed(() => locale.value.startsWith('zh') ? 'zh-cn' : 'en')
+const selectedService = computed(() => serviceTypes.value.find((service) => service.key === form.value.serviceType))
+const monthLabel = computed(() => monthStart.value.locale(displayLocale.value).format(locale.value.startsWith('zh') ? 'YYYY年M月' : 'MMMM YYYY'))
 const selectedDay = computed(() => scheduleDays.value.find((day) => day.date === selectedDateValue.value) || null)
-const selectedDaySlots = computed(() => {
-  const slots = Array.isArray(selectedDay.value?.slots) ? selectedDay.value.slots : []
-  return slots
-    .filter((slot) => slot.status === 'available')
-    .slice()
-    .sort((left, right) => left.startTime.localeCompare(right.startTime))
-})
+const selectedDaySlots = computed(() => (selectedDay.value?.slots || [])
+  .filter((slot) => slot.status === 'available').slice()
+  .sort((left, right) => left.startTime.localeCompare(right.startTime)))
 const selectedSlot = computed(() => scheduleSlots.value.find((slot) => getSlotKey(slot) === selectedSlotValue.value) || null)
-const selectedDateLabel = computed(() => {
-  if (!selectedDateValue.value) return ''
-  const parsed = dayjs(selectedDateValue.value)
-  return parsed.isValid() ? `${parsed.format('YYYY-MM-DD')} ${formatWeekday(selectedDateValue.value)}` : selectedDateValue.value
+const selectedDateLabel = computed(() => selectedDateValue.value ? fullDateLabel(selectedDateValue.value) : '')
+const canGoPrevMonth = computed(() => monthStart.value.isAfter(dayjs(publicWindowStart.value).startOf('month')))
+const canGoNextMonth = computed(() => monthStart.value.isBefore(dayjs(publicWindowEnd.value).startOf('month')))
+const calendarDays = computed(() => {
+  const byDate = new Map(scheduleDays.value.map((day) => [day.date, day]))
+  const blanks = Array.from({ length: monthStart.value.day() }, (_, index) => ({ key: `blank-${index}` }))
+  const dates = Array.from({ length: monthStart.value.daysInMonth() }, (_, index) => {
+    const date = monthStart.value.add(index, 'day').format('YYYY-MM-DD')
+    const day = byDate.get(date)
+    return { key: date, date, number: index + 1,
+      availableCount: date >= publicWindowStart.value && date <= publicWindowEnd.value ? (day?.availableCount || 0) : 0 }
+  })
+  return [...blanks, ...dates]
 })
-const windowStartWeek = computed(() => dayjs(alignWeekStart(publicWindowStart.value)))
-const windowEndWeek = computed(() => dayjs(alignWeekStart(publicWindowEnd.value)))
-const canGoPrevWeek = computed(() => weekStart.value.valueOf() > windowStartWeek.value.valueOf())
-const canGoNextWeek = computed(() => weekStart.value.add(7, 'day').valueOf() <= windowEndWeek.value.valueOf())
+const hasMonthAvailability = computed(() => scheduleDays.value.some((day) => day.availableCount > 0))
 
-function formatWeekday(value) {
-  const parsed = dayjs(value)
-  return parsed.isValid() ? WEEKDAY_LABELS[parsed.day()] : ''
+function fullDateLabel(value) {
+  return dayjs(value).locale(displayLocale.value).format(locale.value.startsWith('zh') ? 'YYYY年M月D日' : 'MMMM D, YYYY')
 }
 
-function formatShortDate(value) {
-  const parsed = dayjs(value)
-  return parsed.isValid() ? parsed.format('MM-DD') : value
+function timeLabel(value) {
+  return dayjs(value).locale('en').format('h:mm A')
+}
+
+function servicePrice(service) {
+  if (service.pricingVisible === false || service.defaultPrice === null || service.defaultPrice === '' || !Number.isFinite(Number(service.defaultPrice))) return ''
+  return new Intl.NumberFormat(locale.value.startsWith('zh') ? 'zh-CN' : 'en-CA', { style: 'currency', currency: 'CAD', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(service.defaultPrice))
+}
+
+function serviceDuration(service) {
+  const duration = Number(service?.duration)
+  if (!Number.isFinite(duration) || duration <= 0) return ''
+  return duration === 60 ? t('publicBooking.oneHour') : t('publicBooking.minutes', { count: duration })
+}
+
+function selectService(service) {
+  if (!submitting.value) form.value.serviceType = service.key
+}
+
+function toggleDescription(key) {
+  expandedServices.value = expandedServices.value.includes(key)
+    ? expandedServices.value.filter((value) => value !== key) : [...expandedServices.value, key]
+}
+
+function prevMonth() {
+  if (!submitting.value && canGoPrevMonth.value) currentMonth.value = monthStart.value.subtract(1, 'month').format('YYYY-MM-DD')
+}
+
+function nextMonth() {
+  if (!submitting.value && canGoNextMonth.value) currentMonth.value = monthStart.value.add(1, 'month').format('YYYY-MM-DD')
 }
 
 function getSlotKey(slot) {
@@ -169,25 +195,8 @@ function getSlotKey(slot) {
   ].map((part) => String(part || '')).join('|')
 }
 
-function prevWeek() {
-  if (!submitting.value && canGoPrevWeek.value) currentWeek.value = weekStart.value.subtract(7, 'day').toDate()
-}
-
-function nextWeek() {
-  if (!submitting.value && canGoNextWeek.value) currentWeek.value = weekStart.value.add(7, 'day').toDate()
-}
-
-function goToday() {
-  if (submitting.value) return
-  currentWeek.value = alignWeekStart(publicWindowStart.value || dayjs())
-}
-
 function getPractitionerName(id) {
   return practitioners.value.find((item) => String(item.id) === String(id))?.name || id || '-'
-}
-
-function getPractitionerNames(ids = []) {
-  return ids.map((id) => getPractitionerName(id)).filter(Boolean).join(', ')
 }
 
 function parseScheduleDateTime(date, value) {
@@ -233,12 +242,12 @@ function normalizeSlot(slot) {
 
 function normalizeDay(day) {
   const date = String(day?.date || '').trim()
-  const slots = Array.isArray(day?.slots) ? day.slots.map(normalizeSlot).filter(Boolean) : []
+  const slots = Array.isArray(day?.slots) ? day.slots.map((slot) => normalizeSlot({ ...slot, date: slot.date || date })).filter(Boolean) : []
   return {
     ...day,
     date,
     slots,
-    availableCount: Number(day?.availableCount ?? slots.filter((slot) => slot.status === 'available').length) || 0,
+    availableCount: slots.filter((slot) => slot.status === 'available').length,
     releaseMode: String(day?.releaseMode || 'full').toLowerCase(),
   }
 }
@@ -275,7 +284,7 @@ function syncSelectionFromSchedule() {
   const currentDay = scheduleDays.value.find((day) => day.date === selectedDateValue.value)
   const availableDay = scheduleDays.value.find((day) => (day.availableCount || 0) > 0)
   if (!currentDay || (currentDay.availableCount || 0) < 1) {
-    selectedDateValue.value = availableDay?.date || scheduleDays.value[0]?.date || ''
+    selectedDateValue.value = availableDay?.date || ''
   }
 
   const matchedDay = scheduleDays.value.find((day) => day.date === selectedDateValue.value)
@@ -345,7 +354,7 @@ async function loadOptions() {
     publicWindowStart.value = response?.publicWindowStart || dayjs().format('YYYY-MM-DD')
     publicWindowEnd.value = response?.publicWindowEnd || resolveWindowEnd(publicWindowStart.value, nextSettings)
 
-    currentWeek.value = alignWeekStart(publicWindowStart.value)
+    currentMonth.value = dayjs(publicWindowStart.value).startOf('month').format('YYYY-MM-DD')
 
     if (!serviceTypes.value.some((service) => service.key === form.value.serviceType)) {
       form.value.serviceType = serviceTypes.value[0]?.key || ''
@@ -388,23 +397,35 @@ async function loadSchedule() {
 
   scheduleLoading.value = true
   try {
-    const response = await publicBookingApi.schedule({
-      weekStart: weekStart.value.format('YYYY-MM-DD'),
+    // The API returns weeks; request every week intersecting this month and
+    // the real booking window so later weeks are visible without another step.
+    const month = monthStart.value
+    const first = month.format('YYYY-MM-DD') > publicWindowStart.value ? month : dayjs(publicWindowStart.value)
+    const last = month.endOf('month').format('YYYY-MM-DD') < publicWindowEnd.value ? month.endOf('month') : dayjs(publicWindowEnd.value)
+    const weeks = []
+    for (let week = dayjs(alignWeekStart(first)); !week.isAfter(last, 'day'); week = week.add(7, 'day')) {
+      if (!first.isAfter(last, 'day')) weeks.push(week.format('YYYY-MM-DD'))
+    }
+    const responses = await Promise.all(weeks.map((week) => publicBookingApi.schedule({
+      weekStart: week,
       serviceType: form.value.serviceType,
       practitionerId: form.value.practitionerId || null,
       roomId: null,
-    })
+    })))
     if (requestId !== scheduleRequestId) return
 
-    if (response?.weekStart) {
-      const normalizedWeekStart = alignWeekStart(response.weekStart)
-      if (!dayjs(normalizedWeekStart).isSame(weekStart.value, 'day')) currentWeek.value = normalizedWeekStart
-    }
+    const response = responses[0]
     publicBookingSettings.value = normalizePublicBookingSettings(response?.publicBooking || publicBookingSettings.value)
     publicWindowStart.value = response?.publicWindowStart || publicWindowStart.value
     publicWindowEnd.value = response?.publicWindowEnd || resolveWindowEnd(publicWindowStart.value, publicBookingSettings.value)
-    scheduleDays.value = normalizeScheduleDays(response)
-    scheduleSlots.value = collectSlots(response)
+    const days = new Map()
+    responses.flatMap(normalizeScheduleDays).forEach((day) => {
+      if (day.date >= publicWindowStart.value && day.date <= publicWindowEnd.value && dayjs(day.date).isSame(month, 'month')) {
+        days.set(day.date, day)
+      }
+    })
+    scheduleDays.value = [...days.values()].sort((a, b) => a.date.localeCompare(b.date))
+    scheduleSlots.value = scheduleDays.value.flatMap((day) => day.slots)
     syncSelectionFromSchedule()
   } catch {
     if (requestId !== scheduleRequestId) return
@@ -419,7 +440,7 @@ async function loadSchedule() {
 }
 
 watch(
-  [() => form.value.serviceType, () => form.value.practitionerId, weekStart],
+  [() => form.value.serviceType, () => form.value.practitionerId, monthStart],
   () => { void loadSchedule() },
   { immediate: true },
 )
@@ -432,25 +453,14 @@ watch(
   },
 )
 
-function getSelectedSlotMeta(slot) {
-  if (!slot || form.value.practitionerId) return []
-  const lines = []
-  if (slot.assignedPractitionerId) {
-    lines.push(t('publicBooking.autoAssignedPractitioner', { name: getPractitionerName(slot.assignedPractitionerId) }))
-  }
-  if ((slot.availablePractitionerIds || []).length > 1) {
-    lines.push(t('publicBooking.matchingPractitioners', { names: getPractitionerNames(slot.availablePractitionerIds) }))
-  }
-  return lines
-}
-
 async function submitBooking() {
-  if (submitting.value || loading.value || scheduleLoading.value) return
+  if (submitting.value || loading.value || scheduleLoading.value || successState.value) return
   if (!form.value.serviceType) return ElMessage.warning(t('appointments.selectServiceType'))
   if (!selectedDateValue.value) return ElMessage.warning(t('publicBooking.selectDateHint'))
   if (!selectedSlot.value) return ElMessage.warning(t('publicBooking.selectSlotHint'))
   if (!form.value.lastName.trim() || !form.value.firstName.trim()) return ElMessage.warning(t('publicBooking.nameRequired'))
   if (!form.value.phone.trim()) return ElMessage.warning(t('publicBooking.phoneRequired'))
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.value.email.trim())) return ElMessage.warning(t('publicBooking.emailRequired'))
 
   const slot = { ...selectedSlot.value }
   const practitionerId = form.value.practitionerId || slot.assignedPractitionerId || null
@@ -467,8 +477,6 @@ async function submitBooking() {
       serviceType: form.value.serviceType,
       startTime: slot.startTime,
       endTime: slot.endTime,
-      notes: form.value.notes,
-      intakeFormData: { ...form.value.intakeFormData },
     })
     successState.value = response?.appointment || {
       startTime: slot.startTime,
@@ -497,16 +505,6 @@ async function bookAnother() {
   await loadSchedule().catch(() => {})
 }
 
-function copyBookingUrl() {
-  const url = window.location.href
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(url)
-      .then(() => ElMessage.success(t('publicBooking.linkCopied')))
-      .catch(() => ElMessage.info(url))
-    return
-  }
-  ElMessage.info(url)
-}
 
 watch(
   [loading, scheduleLoading, scheduleDays, selectedDateValue, selectedSlotValue, successState],
@@ -520,6 +518,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  scheduleRequestId += 1
   if (embedResizeTimer && typeof window !== 'undefined') window.clearTimeout(embedResizeTimer)
   embedResizeObserver?.disconnect()
   if (typeof window !== 'undefined') window.removeEventListener('load', scheduleEmbedHeightPost)
@@ -528,479 +527,220 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="bookingPage" class="public-booking-page" :class="{ embedded: isEmbedded }">
-    <div v-if="successState" class="public-card success-card">
+    <div v-if="successState" class="public-card success-card" role="status">
       <a class="clinic-home-link" href="https://otcm.ca/" target="_top" aria-label="OTCM home"><img :src="clinicLogo" class="clinic-logo" alt="OTCM Acupuncture" width="389" height="232" /></a>
       <h1>{{ t('publicBooking.successTitle') }}</h1>
       <p>{{ t('publicBooking.successIntro') }}</p>
       <p>{{ t('publicBooking.successTime', { time: successTimeLabel }) }}</p>
+      <p>{{ t('publicBooking.easternTime') }}</p>
       <p>{{ t('publicBooking.successPractitioner', { name: getPractitionerName(successState.practitionerId) }) }}</p>
-      <el-button type="primary" :disabled="submitting" @click="bookAnother">{{ t('publicBooking.bookAnother') }}</el-button>
+      <button type="button" class="primary-button" :disabled="submitting" @click="bookAnother">{{ t('publicBooking.bookAnother') }}</button>
     </div>
 
     <div v-else class="public-card">
-      <div class="page-head">
-        <div class="booking-brand">
-          <a class="clinic-home-link" href="https://otcm.ca/" target="_top" aria-label="OTCM home"><img :src="clinicLogo" class="clinic-logo" alt="OTCM Acupuncture" width="389" height="232" /></a>
-          <h1>OTCM Acupuncture Online Booking</h1>
-        </div>
-        <el-button v-if="!isEmbedded" size="small" @click="copyBookingUrl">
-          {{ t('publicBooking.copyLink') }}
-        </el-button>
-      </div>
-
+      <header class="page-head">
+        <a class="clinic-home-link" href="https://otcm.ca/" target="_top" aria-label="OTCM home"><img :src="clinicLogo" class="clinic-logo" alt="OTCM Acupuncture" width="389" height="232" /></a>
+        <h1>{{ t('publicBooking.treatmentTitle') }}</h1>
+      </header>
       <el-skeleton v-if="loading" :rows="6" animated />
-
-      <div v-else-if="optionsError" class="schedule-empty booking-notice" role="alert">
+      <div v-else-if="optionsError" class="booking-notice" role="alert">
         <p>{{ t('publicBooking.loadFailed') }}</p>
-        <el-button @click="loadOptions">{{ t('publicBooking.retry') }}</el-button>
+        <button type="button" class="outline-button" @click="loadOptions">{{ t('publicBooking.retry') }}</button>
       </div>
-
-      <div v-else-if="!serviceTypes.length" class="schedule-empty booking-notice" role="status">
-        {{ t('publicBooking.noServicesAvailable') }}
-      </div>
-
-      <el-form v-else :model="form" :disabled="submitting" label-position="top" class="public-form">
-        <section class="booking-section">
-          <div class="grid two-col">
-            <el-form-item :label="t('appointments.serviceType')" required>
-              <el-select v-model="form.serviceType" style="width: 100%">
-                <el-option v-for="service in serviceTypes" :key="service.key" :label="service.label" :value="service.key" />
-              </el-select>
-            </el-form-item>
-            <el-form-item :label="t('appointments.practitioner')">
-              <el-select v-model="form.practitionerId" clearable :placeholder="t('appointments.allPractitioners')" style="width: 100%">
-                <el-option v-for="practitioner in practitionerOptions" :key="practitioner.id" :label="practitioner.name" :value="practitioner.id" />
-              </el-select>
-            </el-form-item>
-          </div>
-        </section>
-
-        <section class="booking-section">
-          <div class="schedule-head">
-            <div>
-              <h2>{{ t('publicBooking.weekScheduleTitle') }}</h2>
-            </div>
-            <div class="week-nav">
-              <el-button class="week-today" size="small" :disabled="submitting" @click="goToday">{{ t('appointments.today') }}</el-button>
-              <el-button class="week-step" circle size="small" :aria-label="t('publicBooking.previousWeek')" :disabled="submitting || !canGoPrevWeek" @click="prevWeek">&lt;</el-button>
-              <span class="week-label">{{ weekLabel }}</span>
-              <el-button class="week-step" circle size="small" :aria-label="t('publicBooking.nextWeek')" :disabled="submitting || !canGoNextWeek" @click="nextWeek">&gt;</el-button>
-            </div>
-          </div>
-
-          <div class="date-strip">
-            <div v-if="scheduleLoading" class="schedule-empty">{{ t('common.loading') }}</div>
-            <div v-else-if="scheduleError" class="schedule-empty booking-notice" role="alert">
-              <p>{{ t('publicBooking.scheduleLoadFailed') }}</p>
-              <el-button @click="loadSchedule">{{ t('publicBooking.retry') }}</el-button>
-            </div>
-            <template v-else>
-              <div v-if="!scheduleDays.length" class="schedule-empty">
-                {{ t('publicBooking.noAvailableDates') }}
-              </div>
-              <div v-else class="date-grid">
-                <button
-                  v-for="day in scheduleDays"
-                  :key="day.date"
-                  type="button"
-                  class="date-card"
-                  :class="{ active: isSelectedDate(day), disabled: (day.availableCount || 0) < 1 }"
-                  :disabled="submitting || (day.availableCount || 0) < 1"
-                  @click="selectDate(day)"
-                >
-                  <div class="date-card-top">
-                    <span>{{ formatWeekday(day.date) }}</span>
-                  </div>
-                  <div class="date-day">{{ formatShortDate(day.date) }}</div>
-                  <div class="date-meta">
-                    {{
-                      (day.availableCount || 0) > 0
-                        ? t('publicBooking.dateCardAvailable', { count: day.availableCount })
-                        : t('publicBooking.dateCardUnavailable')
-                    }}
-                  </div>
-                </button>
-              </div>
-            </template>
-          </div>
-        </section>
-
-        <section v-if="!scheduleError" class="booking-section time-blocks">
-          <div>
-            <h2>{{ t('publicBooking.timeBlocksTitle') }}</h2>
-          </div>
-          <div v-if="scheduleLoading" class="schedule-empty">{{ t('common.loading') }}</div>
-          <div v-else-if="!selectedDateValue" class="schedule-empty">{{ t('publicBooking.selectDateHint') }}</div>
-          <div v-else-if="!selectedDaySlots.length" class="schedule-empty">{{ t('publicBooking.noSlotsForDate') }}</div>
-          <div v-else class="time-block-list">
-            <button
-              v-for="slot in selectedDaySlots"
-              :key="getSlotKey(slot)"
-              type="button"
-              class="time-block-button"
-              :disabled="submitting"
-              :class="{ active: isSelectedSlot(slot) }"
-              @click="selectSlot(slot)"
-            >
-              <div class="slot-time">{{ formatTime(slot.startTime) }} - {{ formatTime(slot.endTime) }}</div>
-              <div v-for="line in getSelectedSlotMeta(slot)" :key="line" class="slot-meta">{{ line }}</div>
+      <div v-else-if="!serviceTypes.length" class="booking-notice" role="status">{{ t('publicBooking.noServicesAvailable') }}</div>
+      <form v-else class="public-form" @submit.prevent="submitBooking">
+        <h2 class="section-heading service-heading"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>{{ t('publicBooking.selectService') }}</h2>
+        <div class="service-list" role="radiogroup" :aria-label="t('appointments.serviceType')">
+          <article v-for="service in serviceTypes" :key="service.key" class="service-card" :class="{ active: service.key === form.serviceType }">
+            <button type="button" class="service-choice" role="radio" :aria-label="service.label" :aria-checked="service.key === form.serviceType" :disabled="submitting" @click="selectService(service)">
+              <span class="service-name">{{ service.label }}</span>
+              <span class="service-indicator" aria-hidden="true"><svg v-if="service.key === form.serviceType" viewBox="0 0 24 24"><path d="m6 12 4 4 8-8" /></svg></span>
             </button>
-          </div>
-        </section>
-
-        <div v-if="!scheduleError" class="grid two-col selection-grid">
-          <div class="selected-slot-panel">
-            <div class="selected-slot-title">{{ t('publicBooking.selectedDateTitle') }}</div>
-            <div v-if="selectedDateLabel" class="selected-slot-detail">{{ selectedDateLabel }}</div>
-            <div v-else class="selected-slot-empty">{{ t('publicBooking.selectDateHint') }}</div>
-          </div>
-          <div class="selected-slot-panel">
-            <div class="selected-slot-title">{{ t('publicBooking.selectedSlotTitle') }}</div>
-            <div v-if="selectedSlot" class="selected-slot-detail">
-              {{ formatTime(selectedSlot.startTime) }} - {{ formatTime(selectedSlot.endTime) }}
-              <span v-if="!form.practitionerId && selectedSlot.assignedPractitionerId">
-                - {{ t('publicBooking.autoAssignedPractitioner', { name: getPractitionerName(selectedSlot.assignedPractitionerId) }) }}
-              </span>
+            <div v-if="service.description" class="service-description-row">
+              <p :class="{ expanded: expandedServices.includes(service.key) }">{{ service.description }}</p>
+              <button type="button" class="text-button" :aria-expanded="expandedServices.includes(service.key)" @click="toggleDescription(service.key)">{{ t(expandedServices.includes(service.key) ? 'publicBooking.readLess' : 'publicBooking.readMore') }}</button>
             </div>
-            <div v-else class="selected-slot-empty">{{ t('publicBooking.selectSlotHint') }}</div>
-          </div>
+            <p class="service-facts"><span v-if="servicePrice(service)">{{ servicePrice(service) }}</span><span v-if="servicePrice(service) && serviceDuration(service)" aria-hidden="true"> · </span><span>{{ serviceDuration(service) }}</span></p>
+          </article>
         </div>
 
-        <section class="booking-section">
-          <h2>Patient Information</h2>
-          <div class="grid two-col">
-            <el-form-item label="Last name" required>
-              <el-input v-model="form.lastName" placeholder="Last name" />
-            </el-form-item>
-            <el-form-item label="First name" required>
-              <el-input v-model="form.firstName" placeholder="First name" />
-            </el-form-item>
-            <el-form-item :label="t('publicBooking.phone')" required>
-              <el-input v-model="form.phone" :placeholder="t('publicBooking.phonePlaceholder')" />
-            </el-form-item>
-            <el-form-item :label="t('publicBooking.email')">
-              <el-input v-model="form.email" :placeholder="t('publicBooking.emailPlaceholder')" />
-            </el-form-item>
+        <section class="schedule-section" :aria-busy="scheduleLoading">
+          <p class="booking-summary">{{ t('publicBooking.bookingFor') }} <strong>{{ selectedService?.label }}</strong></p>
+          <p class="selected-date-heading" aria-live="polite">{{ selectedDateLabel || t('publicBooking.selectDateHint') }}</p>
+          <div class="schedule-columns">
+            <section class="calendar-panel" :aria-label="t('publicBooking.dateHeading')">
+              <h2 class="section-heading"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="3"/><path d="M7 2v4m10-4v4M3 10h18M7 14h1m3 0h1m3 0h1M7 18h1m3 0h1"/></svg>{{ t('publicBooking.dateHeading') }}</h2>
+              <div class="month-nav">
+                <button type="button" class="month-step" :aria-label="t('publicBooking.previousMonth')" :disabled="submitting || !canGoPrevMonth" @click="prevMonth"><span aria-hidden="true">‹</span> {{ t('publicBooking.previousMonth') }}</button>
+                <span class="month-label" aria-live="polite">{{ monthLabel }}</span>
+                <button type="button" class="month-step" :aria-label="t('publicBooking.nextMonth')" :disabled="submitting || !canGoNextMonth" @click="nextMonth">{{ t('publicBooking.nextMonth') }} <span aria-hidden="true">›</span></button>
+              </div>
+              <div class="calendar-grid">
+                <span v-for="(label, index) in weekdayLabels" :key="`weekday-${index}`" class="weekday-label" aria-hidden="true">{{ label }}</span>
+                <template v-for="day in calendarDays" :key="day.key">
+                  <span v-if="!day.date" class="calendar-blank" aria-hidden="true"></span>
+                  <button v-else type="button" class="date-card" :class="{ active: isSelectedDate(day), available: day.availableCount > 0 }" :data-date="day.date" :aria-label="fullDateLabel(day.date)" :title="day.availableCount > 0 ? t('publicBooking.dateCardAvailable', { count: day.availableCount }) : t('publicBooking.dateCardUnavailable')" :aria-pressed="isSelectedDate(day)" :disabled="submitting || scheduleLoading || scheduleError || day.availableCount < 1" @click="selectDate(day)">{{ day.number }}</button>
+                </template>
+              </div>
+              <p class="calendar-hint">{{ t('publicBooking.calendarHint') }}</p>
+            </section>
+            <section class="time-panel" :aria-label="t('publicBooking.timeHeading')">
+              <h2 class="section-heading"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 5v7h5"/></svg>{{ t('publicBooking.timeHeading') }}</h2>
+              <div v-if="scheduleLoading" class="booking-notice" role="status">{{ t('common.loading') }}</div>
+              <div v-else-if="scheduleError" class="booking-notice" role="alert">
+                <p>{{ t('publicBooking.scheduleLoadFailed') }}</p>
+                <button type="button" class="outline-button" @click="loadSchedule">{{ t('publicBooking.retry') }}</button>
+              </div>
+              <div v-else-if="!hasMonthAvailability" class="booking-notice" role="status">
+                <p>{{ t('publicBooking.noMonthSlots') }}</p>
+                <button v-if="canGoNextMonth" type="button" class="outline-button" :disabled="submitting" @click="nextMonth">{{ t('publicBooking.viewNextMonth') }}</button>
+              </div>
+              <div v-else-if="!selectedDaySlots.length" class="booking-notice">{{ t('publicBooking.selectDateHint') }}</div>
+              <div v-else class="time-block-list">
+                <button v-for="slot in selectedDaySlots" :key="getSlotKey(slot)" type="button" class="time-block-button" :disabled="submitting || scheduleLoading" :class="{ active: isSelectedSlot(slot) }" :aria-pressed="isSelectedSlot(slot)" @click="selectSlot(slot)">{{ timeLabel(slot.startTime) }}</button>
+              </div>
+            </section>
           </div>
+          <p class="timezone-note"><span aria-hidden="true">ⓘ</span> {{ t('publicBooking.easternTime') }}</p>
         </section>
 
-        <div class="actions">
-          <el-button type="primary" :loading="submitting" :disabled="scheduleLoading || !selectedSlot" @click="submitBooking">{{ t('publicBooking.submit') }}</el-button>
-        </div>
-      </el-form>
+        <section class="details-section">
+          <h2 class="section-heading"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2"/><circle cx="12" cy="9" r="2"/><path d="M8 16c0-4 8-4 8 0M8 19h8"/></svg>{{ t('publicBooking.detailsHeading') }}</h2>
+          <div class="details-fields">
+            <div class="name-fields">
+              <label for="booking-first-name">{{ t('publicBooking.firstName') }} <span class="required">*</span><input id="booking-first-name" v-model="form.firstName" name="given-name" autocomplete="given-name" :placeholder="t('publicBooking.firstName')" :disabled="submitting" required maxlength="100" /></label>
+              <label for="booking-last-name">{{ t('publicBooking.lastName') }} <span class="required">*</span><input id="booking-last-name" v-model="form.lastName" name="family-name" autocomplete="family-name" :placeholder="t('publicBooking.lastName')" :disabled="submitting" required maxlength="100" /></label>
+            </div>
+            <label for="booking-email">{{ t('publicBooking.email') }} <span class="required">*</span><input id="booking-email" v-model="form.email" name="email" type="email" autocomplete="email" inputmode="email" :placeholder="t('publicBooking.email')" :disabled="submitting" required maxlength="254" /></label>
+            <label for="booking-phone">{{ t('publicBooking.phoneNumber') }} <span class="required">*</span><input id="booking-phone" v-model="form.phone" name="tel" type="tel" autocomplete="tel" inputmode="tel" :placeholder="t('publicBooking.phoneNumber')" :disabled="submitting" required maxlength="40" /></label>
+            <p v-if="selectedSlot" class="selected-time-summary">{{ selectedDateLabel }} · {{ timeLabel(selectedSlot.startTime) }}<br>{{ t('publicBooking.easternTimeShort') }}</p>
+            <button type="submit" class="primary-button submit-button" :disabled="submitting || scheduleLoading || scheduleError || !selectedSlot">{{ submitting ? t('common.loading') : t('publicBooking.submit') }}</button>
+          </div>
+        </section>
+      </form>
     </div>
   </div>
 </template>
 
 <style scoped>
-.clinic-home-link { display: inline-block; margin: 0 0 16px; color: #2d6a4f; font-size: 14px; }
-.public-booking-page {
-  min-height: 100vh;
-  padding: 32px 16px;
-  background: linear-gradient(180deg, #f8fafc 0%, #eef6f0 100%);
+.public-booking-page { --booking-accent: #508d9b; min-height: 100vh; padding: 24px 28px 72px; background: #fff; color: #252525; font-family: 'Segoe UI', Arial, sans-serif; font-size: 18px; line-height: 1.5; }
+.public-booking-page * { box-sizing: border-box; }
+.public-booking-page.embedded { min-height: 0; }
+.service-card, .service-choice, .service-description-row, .service-name { min-width: 0; }
+.service-name { overflow-wrap: anywhere; }
+.public-card { max-width: 1128px; margin: 0 auto; }
+.page-head { display: flex; flex-direction: column; align-items: center; gap: 18px; margin: 0 0 58px; }
+.page-head h1 { margin: 0; color: #303030; font-size: 32px; font-weight: 400; line-height: 1.3; }
+.clinic-home-link { flex: none; display: inline-block; }
+.clinic-logo { display: block; width: 116px; height: auto; }
+button, input { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; }
+button:focus-visible, a:focus-visible { outline: 3px solid #245968; outline-offset: 4px; }
+.service-heading { margin-bottom: 32px; }
+.service-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 42px; }
+.service-card { position: relative; min-height: 194px; border: 1px solid #e3e3e3; border-top: 6px solid var(--booking-accent); border-radius: 5px; padding: 22px; display: flex; flex-direction: column; transition: box-shadow 160ms ease; }
+.service-card.active { border-color: var(--booking-accent); box-shadow: 0 8px 20px #00000020; }
+.service-choice { padding: 0; border: 0; background: transparent; color: inherit; display: flex; align-items: flex-start; gap: 20px; text-align: left; width: 100%; flex: 1; }
+.service-choice::after { content: ''; position: absolute; inset: 0; }
+.service-choice:disabled { opacity: .65; }
+.service-name { flex: 1; font-size: 25px; line-height: 1.35; font-weight: 400; }
+.service-indicator { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border: 2px solid var(--booking-accent); border-radius: 50%; margin-top: 5px; color: #fff; }
+.service-card.active .service-indicator { background: var(--booking-accent); }
+.service-indicator svg { width: 20px; fill: none; stroke: currentColor; stroke-width: 2.5; }
+.service-description-row { position: relative; z-index: 1; display: flex; align-items: baseline; gap: 10px; margin-top: 28px; font-size: 16px; color: #626262; }
+.service-description-row p { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.service-description-row p.expanded { white-space: normal; }
+.text-button { flex: none; border: 0; padding: 0; background: none; color: #386e7b; text-decoration: underline; }
+.service-facts { margin: 22px 0 0; font-weight: 700; line-height: 1.4; }
+.schedule-section { margin-top: 76px; }
+.booking-summary { width: fit-content; max-width: 100%; margin: 0 auto; padding: 8px 38px; border-radius: 40px; background: #f6f6f6; text-align: center; font-size: 20px; }
+.selected-date-heading { margin: 40px 0 48px; font-size: 25px; color: #4d4d4d; text-align: center; min-height: 38px; }
+.schedule-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 64px; }
+.section-heading { display: flex; align-items: center; gap: 24px; margin: 0 0 48px; font-size: 21px; font-weight: 700; letter-spacing: 1px; color: #242424; line-height: 1.4; }
+.section-heading svg { width: 28px; height: 28px; flex: none; fill: none; stroke: var(--booking-accent); stroke-width: 1.7; }
+.month-nav { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; margin-bottom: 24px; min-height: 48px; }
+.month-label { font-size: 24px; color: #444; text-align: center; }
+.month-step { display: flex; justify-content: center; align-items: center; gap: 5px; border: 1px solid #acc8cf; border-radius: 4px; background: #fff; color: #386e7b; padding: 8px 7px; font-size: 14px; line-height: 1.2; min-height: 44px; }
+.month-step span { font-size: 25px; }
+.month-step:not(:disabled):hover { background: #f0f6f7; border-color: var(--booking-accent); }
+.month-step:disabled { color: #a3a3a3; border-color: #e7e7e7; }
+.calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.weekday-label { display: grid; place-items: center; height: 40px; color: #444; font-size: 18px; }
+.date-card { display: grid; place-items: center; justify-self: center; width: 44px; height: 44px; max-width: 100%; padding: 0; border: 1px solid transparent; border-radius: 50%; background: none; color: #999; font-size: 19px; }
+.date-card.available:not(:disabled) { color: #333; font-weight: 600; }
+.date-card.available:hover:not(:disabled) { background: #edf5f6; border-color: #acc8cf; }
+.date-card.active:not(:disabled) { color: #fff; background: var(--booking-accent); }
+.date-card:disabled { color: #b1b1b1; }
+.calendar-hint { font-size: 14px; color: #626262; margin: 18px 0 0; text-align: center; }
+.time-block-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 20px; padding-top: 6px; }
+.time-block-button { min-height: 58px; padding: 10px 5px; border: 1px solid #858585; border-radius: 4px; color: #303030; background: #fff; font-size: 22px; white-space: nowrap; }
+.time-block-button:hover:not(:disabled) { background: #f0f6f7; border-color: var(--booking-accent); }
+.time-block-button.active { background: var(--booking-accent); border-color: var(--booking-accent); color: #fff; }
+.time-block-button:disabled { opacity: .6; }
+.timezone-note { margin: 42px 0 0; color: #505050; text-align: center; font-size: 19px; }
+.timezone-note span { margin-right: 7px; }
+.details-section { margin-top: 112px; }
+.details-section .section-heading { margin-bottom: 56px; }
+.details-fields { width: calc((100% - 64px) / 2); }
+.details-fields label { display: block; color: #505050; font-weight: 600; font-size: 18px; margin-bottom: 20px; }
+.required { color: #b63232; }
+.details-fields input { display: block; width: 100%; height: 48px; margin-top: 5px; border: 1px solid #808080; border-radius: 3px; background: #f7f7f7; padding: 9px 12px; color: #252525; font-size: 18px; font-weight: 400; }
+.details-fields input::placeholder { color: #737373; opacity: 1; }
+.details-fields input:focus { outline: 2px solid var(--booking-accent); outline-offset: 1px; background: #fff; }
+.details-fields input:disabled { opacity: .65; }
+.name-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.selected-time-summary { margin: 28px 0 20px; font-size: 16px; color: #505050; }
+.primary-button { min-height: 48px; padding: 12px 28px; border: 1px solid var(--booking-accent); border-radius: 3px; background: var(--booking-accent); color: #fff; font-size: 18px; font-weight: 600; }
+.primary-button:hover:not(:disabled) { background: #3e7180; }
+.primary-button:disabled { opacity: .5; }
+.submit-button { width: 100%; }
+.outline-button { min-height: 44px; border: 1px solid var(--booking-accent); border-radius: 3px; padding: 8px 18px; color: #386e7b; background: #fff; }
+.booking-notice { padding: 18px 0; color: #626262; font-size: 17px; }
+.booking-notice p { margin: 0 0 16px; }
+.success-card { text-align: center; padding-top: 60px; max-width: 720px; }
+.success-card h1 { font-size: 30px; margin-top: 28px; }
+.success-card p { margin: 18px 0; }
+.success-card .primary-button { margin-top: 16px; }
+@media (max-width: 1000px) {
+  .schedule-columns { gap: 36px; }
+  .service-list { gap: 28px; }
+  .month-nav { grid-template-columns: 1fr 1fr; }
+  .month-label { grid-column: 1 / -1; grid-row: 1; margin-bottom: 6px; }
+  .time-block-list { gap: 12px; }
+  .time-block-button { font-size: 19px; }
+  .details-fields { width: calc((100% - 36px) / 2); }
 }
-
-.public-card {
-  max-width: 1180px;
-  margin: 0 auto;
-  background: #fff;
-  border-radius: 8px;
-  padding: 24px;
-  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+@media (max-width: 700px) {
+  .public-booking-page { padding: 20px 20px 48px; font-size: 16px; }
+  .page-head { gap: 14px; margin-bottom: 38px; }
+  .page-head h1 { font-size: 28px; }
+  .clinic-logo { width: 100px; }
+  .service-list { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .service-card { min-height: 142px; padding: 18px; }
+  .service-name { font-size: 22px; }
+  .service-facts { margin-top: 22px; }
+  .schedule-section { margin-top: 40px; }
+  .booking-summary { font-size: 17px; padding: 10px 20px; }
+  .selected-date-heading { margin: 28px 0; font-size: 23px; }
+  .schedule-columns { grid-template-columns: 1fr; gap: 38px; }
+  .section-heading { font-size: 19px; gap: 18px; margin-bottom: 24px; }
+  .month-nav { margin-bottom: 18px; }
+  .month-label { font-size: 23px; }
+  .month-step { font-size: 16px; }
+  .time-block-list { padding: 0; }
+  .time-block-button { min-height: 52px; font-size: 19px; }
+  .timezone-note { margin-top: 28px; font-size: 15px; }
+  .details-section { margin-top: 52px; }
+  .details-section .section-heading { margin-bottom: 30px; }
+  .details-fields { width: 100%; }
+  .details-fields label, .details-fields input { font-size: 17px; }
 }
-
-.success-card {
-  text-align: center;
+@media (max-width: 360px) {
+  .public-booking-page { padding-right: 14px; padding-left: 14px; }
+  .name-fields { grid-template-columns: 1fr; gap: 0; }
+  .time-block-list { gap: 8px; }
+  .time-block-button { font-size: 17px; }
 }
-
-.clinic-logo {
-  display: block;
-  width: 100px;
-  max-width: 100%;
-  height: auto;
-  margin: 0;
-}
-
-.booking-brand { display: flex; align-items: center; gap: 16px; min-width: 0; }
-.booking-brand .clinic-home-link { flex: 0 0 100px; margin: 0; }
-.booking-brand h1 { font-size: clamp(20px, 3vw, 28px); line-height: 1.25; }
-
-.success-card .clinic-logo {
-  margin-left: auto;
-  margin-right: auto;
-}
-
-.page-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.page-head h1,
-.booking-section h2,
-.schedule-head h2,
-.time-blocks h2 {
-  margin: 0;
-  color: #1b4332;
-}
-
-.page-head p,
-.schedule-head p,
-.time-blocks p {
-  margin: 8px 0 0;
-  color: #64748b;
-}
-
-.public-booking-page.embedded {
-  min-height: auto;
-  padding: 0;
-  background: transparent;
-}
-
-.public-booking-page.embedded .public-card {
-  max-width: none;
-  margin: 0;
-  box-shadow: none;
-  border: 1px solid #dbe5dd;
-}
-
-.public-form {
-  margin-top: 22px;
-}
-
-.public-card > .booking-notice {
-  margin-top: 22px;
-}
-
-.booking-notice :deep(.el-button) {
-  margin-top: 12px;
-}
-
-.booking-section {
-  padding: 16px 0;
-  border-top: 1px solid #edf2ef;
-}
-
-.booking-section:first-child {
-  border-top: 0;
-  padding-top: 0;
-}
-
-.grid {
-  display: grid;
-  gap: 16px;
-}
-
-.two-col {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.auto-match-banner,
-.selected-slot-panel,
-.schedule-empty {
-  border-radius: 8px;
-  background: #f8fafc;
-  border: 1px dashed #d1d5db;
-  padding: 14px 16px;
-  color: #475569;
-}
-
-.schedule-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.week-nav {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.week-label {
-  font-weight: 700;
-  color: #1f2937;
-}
-
-.week-nav :deep(.el-button) {
-  margin-left: 0;
-}
-
-.date-strip {
-  margin-top: 14px;
-  padding: 8px 0;
-}
-
-.date-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
-  gap: 12px;
-}
-
-.date-card {
-  border: 1px solid #dbe5dd;
-  border-radius: 8px;
-  background: #fff;
-  padding: 14px;
-  text-align: left;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  cursor: pointer;
-  transition: all 0.18s ease;
-}
-
-.date-card:hover:not(:disabled) {
-  border-color: #95d5b2;
-  box-shadow: 0 8px 20px rgba(45, 106, 79, 0.08);
-}
-
-.date-card.active {
-  border-color: #2d6a4f;
-  box-shadow: 0 0 0 2px rgba(45, 106, 79, 0.12);
-  background: #f6fff7;
-}
-
-.date-card.disabled {
-  cursor: not-allowed;
-  opacity: 0.7;
-  background: #f8fafc;
-}
-
-.date-card-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
-  color: #64748b;
-}
-
-.date-day {
-  font-size: 20px;
-  font-weight: 700;
-  color: #1f2937;
-}
-
-.date-meta,
-.slot-meta {
-  font-size: 12px;
-  color: #64748b;
-  line-height: 1.5;
-}
-
-.time-block-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-}
-
-.time-block-button {
-  width: 100%;
-  border: 1px solid #dbe5dd;
-  border-radius: 8px;
-  background: #fff;
-  padding: 14px;
-  text-align: left;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  cursor: pointer;
-  transition: all 0.18s ease;
-}
-
-.time-block-button:hover:not(:disabled) {
-  border-color: #95d5b2;
-  box-shadow: 0 8px 20px rgba(45, 106, 79, 0.08);
-}
-
-.time-block-button.active {
-  border-color: #2d6a4f;
-  box-shadow: 0 0 0 2px rgba(45, 106, 79, 0.12);
-  background: #f6fff7;
-}
-
-.slot-time {
-  font-size: 15px;
-  font-weight: 700;
-  color: #1f2937;
-}
-
-.selection-grid {
-  margin-top: 4px;
-  margin-bottom: 10px;
-}
-
-.selected-slot-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.selected-slot-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: #1f2937;
-}
-
-.selected-slot-detail {
-  color: #14532d;
-  font-weight: 600;
-}
-
-.selected-slot-empty {
-  color: #64748b;
-}
-
-.optional-section {
-  padding-top: 8px;
-}
-
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 8px;
-}
-
-@media (max-width: 768px) {
-  .two-col {
-    grid-template-columns: 1fr;
-  }
-
-  .public-card {
-    padding: 18px;
-  }
-
-  .page-head,
-  .schedule-head {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .week-nav {
-    width: 100%;
-    display: grid;
-    grid-template-columns: 44px minmax(0, 1fr) 44px;
-  }
-
-  .week-today {
-    grid-column: 1 / -1;
-    justify-self: start;
-    min-height: 36px;
-  }
-
-  .week-step {
-    width: 44px;
-    height: 44px;
-  }
-
-  .week-label {
-    min-width: 0;
-    text-align: center;
-    line-height: 1.5;
-  }
-}
+@media (prefers-reduced-motion: reduce) { .service-card { transition: none; } }
 </style>
