@@ -6,6 +6,7 @@ import { useConsultationsStore } from './consultations'
 import { useAppointmentsStore } from './appointments'
 import { normalizeGender } from '../utils/gender'
 import { sortPatientsByName } from '../utils/patientName'
+import { findStaffPatientByIdentity, isLinkedStaffPatient } from '../utils/staffPatientIdentity'
 
 export const usePatientsStore = defineStore('patients', () => {
   const patients = ref([])
@@ -168,25 +169,10 @@ export const usePatientsStore = defineStore('patients', () => {
     return String(value ?? '').trim()
   }
 
-  function getPatientLinkedStaffId(patient) {
-    if (!patient) return ''
-    return normalizeId(patient.linkedUserId || patient.staffUserId || patient.staffMeta?.userId)
-  }
-
-  function hasPatientEmail(patient, email) {
-    const target = String(email || '').trim().toLowerCase()
-    if (!target || !patient || patient.deletedAt) return false
-    const emails = [
-      patient.email,
-      ...(Array.isArray(patient.emails) ? patient.emails : []),
-    ]
-    return emails.some((value) => String(value || '').trim().toLowerCase() === target)
-  }
-
   function getPatientByStaffUserId(userId) {
     const target = normalizeId(userId)
     if (!target) return null
-    return patients.value.find((p) => getPatientLinkedStaffId(p) === target && !p.deletedAt) || null
+    return patients.value.find((p) => isLinkedStaffPatient(p, target)) || null
   }
 
   /**
@@ -195,15 +181,18 @@ export const usePatientsStore = defineStore('patients', () => {
    */
   async function ensureStaffPatient(user) {
     if (!user?.id) return null
+    // User creation/update also syncs the patient on the server. Refresh before
+    // matching so a stale local list cannot create a second linked profile.
+    await refreshFromApi()
     // 已有关联档案则跳过
     const existing = getPatientByStaffUserId(user.id)
     if (existing) return existing
-    // 按 email 去重 — 避免同一邮箱创建两条病人
+    // 家庭成员可能共用邮箱，姓名和邮箱必须同时匹配。
     const email = (user.email || '').trim()
     if (email) {
-      const byEmail = patients.value.find((p) => hasPatientEmail(p, email))
+      const byEmail = findStaffPatientByIdentity(patients.value, user)
       if (byEmail) {
-        // 已有相同 email 的病人档案 — 仅补写 staffUserId 关联
+        // 仅关联唯一匹配且未关联其他员工的档案。
         const updated = await patientsApi.update(byEmail.id, {
           staffUserId: String(user.id),
           linkedUserId: String(user.id),

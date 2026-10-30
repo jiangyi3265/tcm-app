@@ -919,6 +919,7 @@ export default {
     // Documents
     uploadHint: 'Upload tongue images, scans, lab reports, etc. (max 5MB/file)',
     uploadFile: 'Upload File',
+    uploadingFile: 'Uploading file…',
     fileName: 'File Name',
     fileType: 'Type',
     fileSize: 'Size',

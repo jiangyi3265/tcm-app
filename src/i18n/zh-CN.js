@@ -920,6 +920,7 @@ export default {
     // 文档
     uploadHint: '上传舌象图片、扫描文件、化验报告等（限5MB/文件）',
     uploadFile: '上传文件',
+    uploadingFile: '正在上传文件…',
     fileName: '文件名',
     fileType: '类型',
     fileSize: '大小',

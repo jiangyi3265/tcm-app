@@ -202,6 +202,7 @@ const invoicePdfGenerating = ref(false)
 const emailSending = ref(false)
 const serverDocuments = ref([])
 const documentsLoading = ref(false)
+const documentUploading = ref(false)
 const pricingSettingsRefreshing = ref(false)
 const aiListening = ref(false)
 const aiAnalyzing = ref(false)
@@ -2774,31 +2775,37 @@ function removeTongueImage() {
 }
 
 // ============ ?============
-function handleDocUpload(file) {
+async function handleDocUpload(file) {
+  if (documentUploading.value) return false
   const rawFile = file.raw || file
   if (rawFile.size > 5 * 1024 * 1024) {
     ElMessage.warning(t('consultation.fileMaxSize'))
     return false
   }
-  filesApi.upload(rawFile, {
-    patientId,
-    consultationId: form.value.id || undefined,
-    fileType: 'document',
-  }).then(async (res) => {
+  documentUploading.value = true
+  try {
+    const res = await filesApi.upload(rawFile, {
+      patientId,
+      consultationId: form.value.id || undefined,
+      fileType: 'document',
+    })
     form.value.documents.push({
-      id: res.fileId || 'doc-' + Date.now(),
-      name: res.originalName || rawFile.name,
+      id: res.id || res.fileId,
+      name: res.fileName || res.originalName || rawFile.name,
       type: rawFile.type || 'application/octet-stream',
-      size: rawFile.size,
+      size: res.fileSize || rawFile.size,
+      filePath: res.filePath || res.resource || null,
       resource: res.resource || res.filePath || null,
       url: res.url || res.filePath || res.fileName,
       uploadedAt: new Date().toISOString(),
     })
     await loadConsultationFiles()
     ElMessage.success(t('consultation.fileUploaded'))
-  }).catch((e) => {
+  } catch (e) {
     ElMessage.error(e.message || t('consultation.uploadFailed'))
-  })
+  } finally {
+    documentUploading.value = false
+  }
   return false
 }
 
@@ -4095,10 +4102,12 @@ async function handleSendPreviewEmail() {
               :auto-upload="false"
               :show-file-list="false"
               accept="image/*,.pdf,.doc,.docx"
+              :disabled="documentUploading"
               :on-change="handleDocUpload"
             >
-              <el-button>
-                <el-icon><Upload /></el-icon> {{ t('consultation.uploadFile') }}
+              <el-button :loading="documentUploading" :disabled="documentUploading">
+                <el-icon v-if="!documentUploading"><Upload /></el-icon>
+                {{ t(documentUploading ? 'consultation.uploadingFile' : 'consultation.uploadFile') }}
               </el-button>
             </el-upload>
           </div>
