@@ -716,7 +716,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid #245968; outline-offs
   .page-head { gap: 14px; margin-bottom: 38px; }
   .page-head h1 { font-size: 28px; }
   .clinic-logo { width: 100px; }
-  .service-list { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .service-list { display: flex; flex-direction: column; gap: 18px; }
   .service-card { min-height: 142px; padding: 18px; }
   .service-name { font-size: 22px; }
   .service-facts { margin-top: 22px; }

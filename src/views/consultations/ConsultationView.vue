@@ -926,7 +926,7 @@ function normalizeDocumentRow(doc = {}) {
     resource: doc.resource || doc.filePath || null,
     url: doc.url || doc.filePath || null,
     uploadedAt: doc.uploadedAt || doc.uploadTime || doc.createTime || '',
-    serverFile: Boolean(doc.filePath || doc.fileName || doc.uploadTime),
+    serverFile: Boolean(doc.serverFile || doc.filePath || doc.fileName || doc.uploadTime),
   }
 }
 
@@ -943,21 +943,26 @@ function mergeDocumentRows(localDocs = [], apiDocs = []) {
   return rows
 }
 
+let documentsRequestSeq = 0
 async function loadConsultationFiles({ silent = true } = {}) {
+  const requestSeq = ++documentsRequestSeq
   const id = currentConsultationId.value
   if (!id) {
     serverDocuments.value = []
+    documentsLoading.value = false
     return
   }
   documentsLoading.value = true
   try {
     const files = await filesApi.listByConsultation(id)
+    if (requestSeq !== documentsRequestSeq || id !== currentConsultationId.value) return
     serverDocuments.value = Array.isArray(files) ? files.map(normalizeDocumentRow) : []
   } catch (e) {
-    serverDocuments.value = []
+    if (requestSeq !== documentsRequestSeq || id !== currentConsultationId.value) return
+    // A failed refresh must not hide files already confirmed by the server.
     if (!silent) ElMessage.error(e.message || t('consultation.uploadFailed'))
   } finally {
-    documentsLoading.value = false
+    if (requestSeq === documentsRequestSeq) documentsLoading.value = false
   }
 }
 
@@ -1109,7 +1114,9 @@ watch(() => settingsStore.activePriceLists.length, (count) => {
 
 watch(currentConsultationId, (id) => {
   if (!id) {
+    documentsRequestSeq += 1
     serverDocuments.value = []
+    documentsLoading.value = false
     return
   }
   if (activeTab.value === 'documents') {
@@ -1118,6 +1125,7 @@ watch(currentConsultationId, (id) => {
 })
 
 onBeforeUnmount(() => {
+  documentsRequestSeq += 1
   consultationViewDisposed = true
   window.removeEventListener('beforeunload', handleBeforeUnload)
   stopAiListening()
@@ -2820,18 +2828,26 @@ function removeLocalDocumentByRow(row) {
 
 async function removeDocumentByRow(row) {
   if (!row) return
-  await ElMessageBox.confirm(
-    `确定删除文件「${row.name || 'Document'}」？`,
-    t('consultation.confirmDeleteTitle'),
-    { type: 'warning' },
-  )
-  if (row.serverFile && row.id) {
-    await filesApi.remove(row.id)
-    serverDocuments.value = serverDocuments.value.filter((doc) => String(doc.id) !== String(row.id))
+  try {
+    await ElMessageBox.confirm(
+      `确定删除文件「${row.name || 'Document'}」？`,
+      t('consultation.confirmDeleteTitle'),
+      { type: 'warning' },
+    )
+    if (row.serverFile && row.id) {
+      await filesApi.remove(row.id)
+      // Older list requests may still contain this file after deletion succeeds.
+      documentsRequestSeq += 1
+      serverDocuments.value = serverDocuments.value.filter((doc) => String(doc.id) !== String(row.id))
+    }
+    removeLocalDocumentByRow(row)
+    await loadConsultationFiles()
+    ElMessage.success(t('common.deleted'))
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error(error.message || t('common.operationFailed'))
+    }
   }
-  removeLocalDocumentByRow(row)
-  await loadConsultationFiles()
-  ElMessage.success(t('common.deleted'))
 }
 
 function formatDocumentType(row) {
