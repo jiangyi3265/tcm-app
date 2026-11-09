@@ -137,6 +137,65 @@ test('switching service selects its eligible practitioner and submits that combi
   expect(requests.filter(request => request.service === 'consultation').every(request => request.practitioner === 'consult-doctor')).toBe(true)
 })
 
+test('switching from one eligible practitioner to several restores all available practitioners', async ({ page }) => {
+  const requests = []
+  let booking
+  await page.route('**/api/public-booking/options', route => route.fulfill({ json: {
+    ...options,
+    serviceTypes: [
+      { key: 'single', label: 'Single practitioner service', publicVisible: true },
+      { key: 'shared', label: 'Shared practitioner service', publicVisible: true },
+    ],
+    practitioners: [
+      { id: 'first-doctor', name: 'First Doctor', serviceKeys: ['single', 'shared'] },
+      { id: 'second-doctor', name: 'Second Doctor', serviceKeys: ['shared'] },
+    ],
+  } }))
+  await page.route('**/api/public-booking/schedule**', route => {
+    const query = new URL(route.request().url()).searchParams
+    const service = query.get('serviceType')
+    const practitioner = query.get('practitionerId')
+    requests.push({ service, practitioner })
+    const response = schedule(query.get('weekStart'), 'first-doctor')
+    if (service === 'shared' && !practitioner) {
+      for (const day of response.days) {
+        day.slots.push({
+          date: day.date, startTime: `${day.date}T14:00:00`, endTime: `${day.date}T14:30:00`,
+          status: 'available', assignedPractitionerId: 'second-doctor',
+        })
+        day.availableCount = day.slots.length
+      }
+    }
+    return route.fulfill({ json: response })
+  })
+  await page.route('**/api/public-booking', route => {
+    booking = route.request().postDataJSON()
+    return route.fulfill({ json: { appointment: booking } })
+  })
+  await page.goto('/booking')
+  await expect(page.locator('.time-block-button')).toHaveText(['9:00 AM'])
+  expect(requests.filter(request => request.service === 'single').every(request => request.practitioner === 'first-doctor')).toBe(true)
+  await expect(page.getByRole('combobox')).toHaveCount(0)
+
+  await page.getByRole('radio', { name: 'Shared practitioner service', exact: true }).click()
+  await expect(page.locator('.schedule-section')).toHaveAttribute('aria-busy', 'false')
+  const sharedRequests = requests.filter(request => request.service === 'shared')
+  expect(sharedRequests.length).toBeGreaterThan(0)
+  expect(sharedRequests.every(request => request.practitioner === null)).toBe(true)
+  await expect(page.locator('.time-block-button')).toHaveText(['9:00 AM', '2:00 PM'])
+  await page.getByRole('button', { name: '2:00 PM', exact: true }).click()
+  await page.getByPlaceholder('First name', { exact: true }).fill('QA')
+  await page.getByPlaceholder('Last name', { exact: true }).fill('Test')
+  await page.getByPlaceholder('Phone number', { exact: true }).fill('5550100')
+  await page.getByPlaceholder('Email', { exact: true }).fill('qa@example.invalid')
+  await page.getByRole('button', { name: 'Submit Booking', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Booking Submitted', exact: true })).toBeVisible()
+  expect(booking).toMatchObject({
+    serviceType: 'shared', practitionerId: 'second-doctor',
+    startTime: '2026-10-07 14:00:00', endTime: '2026-10-07 14:30:00',
+  })
+})
+
 test('late service responses cannot replace the selected service or its practitioner', async ({ page }) => {
   let release, requested
   const delayed = new Promise(resolve => { release = resolve })

@@ -367,12 +367,8 @@ async function loadOptions() {
 }
 
 watch(practitionerOptions, (items) => {
-  if (form.value.practitionerId && !items.some((item) => String(item.id) === String(form.value.practitionerId))) {
-    form.value.practitionerId = ''
-  }
-  if (!form.value.practitionerId && items.length === 1) {
-    form.value.practitionerId = items[0].id
-  }
+  // There is no practitioner picker: multiple eligible doctors must stay aggregated.
+  form.value.practitionerId = items.length === 1 ? items[0].id : ''
 }, { flush: 'sync' })
 
 watch(selectedDateValue, () => {
