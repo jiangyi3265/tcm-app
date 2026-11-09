@@ -675,7 +675,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid #245968; outline-offs
 .calendar-hint { font-size: 14px; color: #626262; margin: 18px 0 0; text-align: center; }
 .time-block-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 20px; padding-top: 6px; }
 .time-block-button { min-height: 58px; padding: 10px 5px; border: 1px solid #858585; border-radius: 4px; color: #303030; background: #fff; font-size: 14px; white-space: nowrap; }
-.time-block-button:hover:not(:disabled) { background: #f0f6f7; border-color: var(--booking-accent); }
+.time-block-button:hover:not(:disabled):not(.active) { background: #f0f6f7; border-color: var(--booking-accent); }
 .time-block-button.active { background: var(--booking-accent); border-color: var(--booking-accent); color: #fff; }
 .time-block-button:disabled { opacity: .6; }
 .timezone-note { margin: 42px 0 0; color: #505050; text-align: center; font-size: 14px; }
