@@ -6,15 +6,27 @@ import { publicBookingApi } from '../../utils/api'
 import { dayjs } from '../../utils/dateUtils'
 import { SERVICE_TYPES } from '../../utils/sampleData'
 import clinicLogo from '../../assets/otcm-logo.png'
+import englishMessages from '../../i18n/en'
 
-const { t, locale } = useI18n()
+// Public booking is English even when the clinic workspace or browser is Chinese.
+const { t } = useI18n({
+  useScope: 'local', inheritLocale: false, locale: 'en', fallbackLocale: 'en', fallbackRoot: false,
+  messages: { en: { publicBooking: englishMessages.publicBooking, appointments: englishMessages.appointments, common: englishMessages.common } },
+})
+const previousDocumentLanguage = document.documentElement.lang
+const previousDocumentTitle = document.title
 
 const DEFAULT_PUBLIC_BOOKING = {
   advanceDays: 15,
   dripWindowDays: 7,
   dripMinutes: 60,
 }
-const weekdayLabels = computed(() => locale.value.startsWith('zh') ? ['日', '一', '二', '三', '四', '五', '六'] : ['S', 'M', 'T', 'W', 'T', 'F', 'S'])
+const weekdayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+const englishServiceLabels = {
+  acupuncture_new: 'Initial Acupuncture', acupuncture_followup: 'Follow-up Acupuncture',
+  herbs_only: 'Herbal Prescription Only', acupuncture_40: 'Acupuncture 40 minutes',
+  tuina_40: 'Tuina 40 minutes', time_block: 'Time Block',
+}
 
 const loading = ref(true)
 const scheduleLoading = ref(false)
@@ -81,7 +93,7 @@ function normalizeServiceTypes(source) {
         ...fallback,
         ...item,
         key,
-        label: item?.label ?? item?.name ?? item?.displayName ?? fallback.label ?? key,
+        label: item?.label || item?.name || item?.displayName || englishServiceLabels[key] || key,
         requiredTag: item?.requiredTag ?? fallback.requiredTag ?? '',
         roomRequired: Boolean(item?.roomRequired ?? fallback.roomRequired),
         defaultPrice: item?.defaultPrice ?? item?.price ?? null,
@@ -125,9 +137,8 @@ const practitionerOptions = computed(() =>
 )
 
 const monthStart = computed(() => dayjs(currentMonth.value).startOf('month'))
-const displayLocale = computed(() => locale.value.startsWith('zh') ? 'zh-cn' : 'en')
 const selectedService = computed(() => serviceTypes.value.find((service) => service.key === form.value.serviceType))
-const monthLabel = computed(() => monthStart.value.locale(displayLocale.value).format(locale.value.startsWith('zh') ? 'YYYY年M月' : 'MMMM YYYY'))
+const monthLabel = computed(() => monthStart.value.locale('en').format('MMMM YYYY'))
 const selectedDay = computed(() => scheduleDays.value.find((day) => day.date === selectedDateValue.value) || null)
 const selectedDaySlots = computed(() => (selectedDay.value?.slots || [])
   .filter((slot) => slot.status === 'available').slice()
@@ -150,7 +161,7 @@ const calendarDays = computed(() => {
 const hasMonthAvailability = computed(() => scheduleDays.value.some((day) => day.availableCount > 0))
 
 function fullDateLabel(value) {
-  return dayjs(value).locale(displayLocale.value).format(locale.value.startsWith('zh') ? 'YYYY年M月D日' : 'MMMM D, YYYY')
+  return dayjs(value).locale('en').format('MMMM D, YYYY')
 }
 
 function timeLabel(value) {
@@ -159,7 +170,7 @@ function timeLabel(value) {
 
 function servicePrice(service) {
   if (service.pricingVisible === false || service.defaultPrice === null || service.defaultPrice === '' || !Number.isFinite(Number(service.defaultPrice))) return ''
-  return new Intl.NumberFormat(locale.value.startsWith('zh') ? 'zh-CN' : 'en-CA', { style: 'currency', currency: 'CAD', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(service.defaultPrice))
+  return new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(Number(service.defaultPrice))
 }
 
 function serviceDuration(service) {
@@ -481,7 +492,8 @@ async function submitBooking() {
     }
     selectedSlotValue.value = ''
   } catch (error) {
-    ElMessage.error(error.message || t('publicBooking.submitFailed'))
+    const message = String(error?.message || '').trim()
+    ElMessage.error(message && !/[\u3400-\u9fff]/u.test(message) ? message : t('publicBooking.submitFailed'))
   } finally {
     submitting.value = false
   }
@@ -509,11 +521,15 @@ watch(
 )
 
 onMounted(() => {
+  document.documentElement.lang = 'en'
+  document.title = 'OTCM | Online Booking'
   void loadOptions()
   setupEmbedHeightBridge()
 })
 
 onBeforeUnmount(() => {
+  document.documentElement.lang = previousDocumentLanguage
+  document.title = previousDocumentTitle
   scheduleRequestId += 1
   if (embedResizeTimer && typeof window !== 'undefined') window.clearTimeout(embedResizeTimer)
   embedResizeObserver?.disconnect()
@@ -522,7 +538,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="bookingPage" class="public-booking-page" :class="{ embedded: isEmbedded }">
+  <div ref="bookingPage" class="public-booking-page" lang="en" :class="{ embedded: isEmbedded }">
     <div v-if="successState" class="public-card success-card" role="status">
       <a class="clinic-home-link" href="https://otcm.ca/" target="_top" aria-label="OTCM home"><img :src="clinicLogo" class="clinic-logo" alt="OTCM Acupuncture" width="389" height="232" /></a>
       <h1>{{ t('publicBooking.successTitle') }}</h1>
@@ -544,7 +560,7 @@ onBeforeUnmount(() => {
         <button type="button" class="outline-button" @click="loadOptions">{{ t('publicBooking.retry') }}</button>
       </div>
       <div v-else-if="!serviceTypes.length" class="booking-notice" role="status">{{ t('publicBooking.noServicesAvailable') }}</div>
-      <form v-else class="public-form" @submit.prevent="submitBooking">
+      <form v-else class="public-form" novalidate @submit.prevent="submitBooking">
         <h2 class="section-heading service-heading"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>{{ t('publicBooking.selectService') }}</h2>
         <div class="service-list" role="radiogroup" :aria-label="t('appointments.serviceType')">
           <article v-for="service in serviceTypes" :key="service.key" class="service-card" :class="{ active: service.key === form.serviceType }">
