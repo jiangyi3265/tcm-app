@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { useAppointmentsStore } from '../../stores/appointments'
 import { usePatientsStore } from '../../stores/patients'
 import { useAuthStore } from '../../stores/auth'
@@ -21,6 +22,7 @@ import { useEmailSimulator } from '../../utils/emailSimulator'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t, te } = useI18n()
+const router = useRouter()
 
 const SLOT_MINUTES = 10
 const INTERNAL_VIEW_DAYS = 7
@@ -331,7 +333,11 @@ const availabilityState = ref({ slots: [], duration: 0, slotStepMinutes: 10 })
 const quickCreateMode = ref(false)
 const quickPatientForm = ref({ firstName: '', lastName: '', email: '' })
 const quickCreating = ref(false)
-const appointmentBusy = computed(() => appointmentSubmitting.value || quickCreating.value)
+const appointmentStatusPending = ref(false)
+const timeBlockSubmitting = ref(false)
+const appointmentBusy = computed(() =>
+  appointmentSubmitting.value || quickCreating.value || appointmentStatusPending.value || timeBlockSubmitting.value,
+)
 let availabilityRequestId = 0
 
 const newAppt = ref({
@@ -623,29 +629,51 @@ const selectedAppt = ref(null)
 const showDetailDialog = ref(false)
 
 function viewAppt(appointment) {
+  if (appointmentBusy.value) return
   selectedAppt.value = getAppointmentWithInfo(appointment)
   showDetailDialog.value = true
 }
 
+function closeDetailDialog() {
+  if (appointmentStatusPending.value) return
+  showDetailDialog.value = false
+}
+
+function viewSelectedPatient() {
+  if (appointmentBusy.value || !selectedAppt.value?.patientId) return
+  void router.push(`/patients/${selectedAppt.value.patientId}`)
+  showDetailDialog.value = false
+}
+
 async function cancelAppt(id) {
+  if (appointmentBusy.value || !id) return
+  appointmentStatusPending.value = true
   try {
     await ElMessageBox.confirm(t('appointments.cancelConfirm'), t('appointments.cancelTitle'), { type: 'warning' })
     const updated = await appointmentsStore.cancelAppointment(id)
-    selectedAppt.value = getAppointmentWithInfo(updated)
-    showDetailDialog.value = false
+    if (selectedAppt.value?.id === id) {
+      selectedAppt.value = getAppointmentWithInfo(updated)
+      showDetailDialog.value = false
+    }
     ElMessage.success(t('appointments.appointmentCancelled'))
   } catch (error) {
-    if (error !== 'cancel') ElMessage.error(error.message || t('appointments.slotUnavailable'))
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(error.message || t('appointments.slotUnavailable'))
+  } finally {
+    appointmentStatusPending.value = false
   }
 }
 
 async function confirmAppt(id) {
+  if (appointmentBusy.value || !id) return
+  appointmentStatusPending.value = true
   try {
     const updated = await appointmentsStore.confirmAppointment(id)
-    selectedAppt.value = getAppointmentWithInfo(updated)
+    if (selectedAppt.value?.id === id) selectedAppt.value = getAppointmentWithInfo(updated)
     ElMessage.success(t('appointments.appointmentConfirmed'))
   } catch (error) {
     ElMessage.error(error.message || t('appointments.slotUnavailable'))
+  } finally {
+    appointmentStatusPending.value = false
   }
 }
 
@@ -668,6 +696,7 @@ const timeBlockForm = ref({
 })
 
 function openTimeBlockDialog() {
+  if (appointmentBusy.value) return
   timeBlockForm.value = {
     practitionerId: filterPractitioner.value || '',
     date: dayjs(currentDate.value).format('YYYY-MM-DD'),
@@ -679,11 +708,17 @@ function openTimeBlockDialog() {
   showTimeBlockDialog.value = true
 }
 
+function closeTimeBlockDialog() {
+  if (timeBlockSubmitting.value) return
+  showTimeBlockDialog.value = false
+}
+
 function getBlockTypeLabel(blockType) {
   return TIME_BLOCK_TYPES.find((item) => item.value === blockType)?.label || blockType || '时间占用'
 }
 
 async function submitTimeBlock() {
+  if (appointmentBusy.value) return
   const form = timeBlockForm.value
   if (!form.practitionerId) return ElMessage.warning('请选择医师')
   if (!form.date) return ElMessage.warning('请选择日期')
@@ -693,6 +728,7 @@ async function submitTimeBlock() {
   const startTime = dayjs(form.date).format('YYYY-MM-DD') + ' ' + form.startTime + ':00'
   const endTime = dayjs(form.date).format('YYYY-MM-DD') + ' ' + form.endTime + ':00'
 
+  timeBlockSubmitting.value = true
   try {
     await appointmentsStore.createTimeBlock({
       practitionerId: form.practitionerId,
@@ -705,6 +741,8 @@ async function submitTimeBlock() {
     showTimeBlockDialog.value = false
   } catch (error) {
     ElMessage.error(error.message || '创建失败')
+  } finally {
+    timeBlockSubmitting.value = false
   }
 }
 
@@ -1112,7 +1150,8 @@ async function handleSendPreviewEmail() {
       </template>
     </el-drawer>
 
-    <el-drawer v-model="showDetailDialog" :title="isTimeBlock(selectedAppt) ? '时间占用详情' : t('appointments.appointmentDetail')" size="420px" direction="rtl">
+    <el-drawer v-model="showDetailDialog" :title="isTimeBlock(selectedAppt) ? '时间占用详情' : t('appointments.appointmentDetail')" size="420px" direction="rtl"
+      :close-on-press-escape="!appointmentStatusPending" :close-on-click-modal="!appointmentStatusPending" :show-close="!appointmentStatusPending">
       <div v-if="selectedAppt" class="detail-panel">
         <template v-if="isTimeBlock(selectedAppt)">
           <div class="detail-row"><span class="detail-label">医师</span><span class="detail-value">{{ selectedAppt.practitioner?.name || '-' }}</span></div>
@@ -1137,28 +1176,29 @@ async function handleSendPreviewEmail() {
         </template>
       </div>
       <template #footer>
-        <el-button @click="showDetailDialog = false">{{ t('common.close') }}</el-button>
+        <el-button :disabled="appointmentStatusPending" @click="closeDetailDialog">{{ t('common.close') }}</el-button>
         <template v-if="isTimeBlock(selectedAppt)">
-          <el-button v-if="canCancel" type="danger" size="small" @click="cancelAppt(selectedAppt.id)">取消占用</el-button>
+          <el-button v-if="canCancel" type="danger" size="small" :disabled="appointmentStatusPending" @click="cancelAppt(selectedAppt.id)">取消占用</el-button>
         </template>
         <template v-else>
           <el-button
             v-if="canEditAppointments && selectedAppt?.status !== 'cancelled'"
             type="warning"
             size="small"
+            :disabled="appointmentStatusPending"
             @click="openEditDialog(selectedAppt)"
           >
             {{ t('common.edit') }}
           </el-button>
-          <el-button v-if="canCreate && selectedAppt?.status === 'booked'" type="success" size="small" @click="confirmAppt(selectedAppt.id)">{{ t('appointments.confirmAppt') }}</el-button>
-          <el-button v-if="canCancel && ['booked', 'confirmed'].includes(selectedAppt?.status)" type="danger" size="small" @click="cancelAppt(selectedAppt.id)">{{ t('appointments.cancelAppt') }}</el-button>
-          <el-button v-if="selectedAppt?.patient" type="primary" size="small" @click="$router.push(`/patients/${selectedAppt.patientId}`); showDetailDialog = false">{{ t('appointments.viewPatient') }}</el-button>
+          <el-button v-if="canCreate && selectedAppt?.status === 'booked'" type="success" size="small" :disabled="appointmentStatusPending" @click="confirmAppt(selectedAppt.id)">{{ t('appointments.confirmAppt') }}</el-button>
+          <el-button v-if="canCancel && ['booked', 'confirmed'].includes(selectedAppt?.status)" type="danger" size="small" :disabled="appointmentStatusPending" @click="cancelAppt(selectedAppt.id)">{{ t('appointments.cancelAppt') }}</el-button>
+          <el-button v-if="selectedAppt?.patient" type="primary" size="small" :disabled="appointmentStatusPending" @click="viewSelectedPatient">{{ t('appointments.viewPatient') }}</el-button>
         </template>
       </template>
     </el-drawer>
 
-    <el-dialog v-model="showTimeBlockDialog" title="添加时间占用" width="480px" :close-on-click-modal="false">
-      <el-form :model="timeBlockForm" label-width="90px">
+    <el-dialog v-model="showTimeBlockDialog" title="添加时间占用" width="480px" :close-on-click-modal="false" :close-on-press-escape="!timeBlockSubmitting" :show-close="!timeBlockSubmitting">
+      <el-form :model="timeBlockForm" label-width="90px" :disabled="timeBlockSubmitting">
         <el-form-item label="医师" required>
           <el-select v-model="timeBlockForm.practitionerId" :placeholder="t('appointments.allPractitioners')" style="width:100%">
             <el-option v-for="practitioner in practitioners" :key="practitioner.id" :label="practitioner.name" :value="practitioner.id" />
@@ -1183,8 +1223,8 @@ async function handleSendPreviewEmail() {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showTimeBlockDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="submitTimeBlock">确认占用</el-button>
+        <el-button :disabled="timeBlockSubmitting" @click="closeTimeBlockDialog">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="timeBlockSubmitting" :disabled="timeBlockSubmitting" @click="submitTimeBlock">确认占用</el-button>
       </template>
     </el-dialog>
 
