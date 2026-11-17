@@ -326,6 +326,7 @@ const editingAppointmentId = ref('')
 const selectedSlotValue = ref('')
 const preferredSlotStartTime = ref('')
 const availabilityLoading = ref(false)
+const appointmentSubmitting = ref(false)
 const availabilityState = ref({ slots: [], duration: 0, slotStepMinutes: 10 })
 const quickCreateMode = ref(false)
 const quickPatientForm = ref({ firstName: '', lastName: '', email: '' })
@@ -426,6 +427,10 @@ function openEditDialog(appointment = selectedAppt.value) {
 }
 
 function closeCreateDialog() {
+  if (appointmentSubmitting.value) return
+  availabilityRequestId += 1
+  availabilityLoading.value = false
+  availabilityState.value = { slots: [], duration: 0, slotStepMinutes: 10 }
   showCreateDialog.value = false
   appointmentDialogMode.value = 'create'
   editingAppointmentId.value = ''
@@ -493,6 +498,7 @@ async function loadAvailability() {
   const requestId = availabilityRequestId
 
   if (!newAppt.value.date || !newAppt.value.serviceType) {
+    availabilityLoading.value = false
     availabilityState.value = { slots: [], duration: Number(selectedServiceConfig.value?.duration || 0) }
     selectedSlotValue.value = ''
     return
@@ -540,32 +546,8 @@ function getAvailablePractitionerNames(slot) {
   return (slot?.availablePractitionerIds || []).map((id) => authStore.getUserById(id)?.name || id).join(', ')
 }
 
-async function createAppointment() {
-  if (!newAppt.value.patientId) return ElMessage.warning(t('appointments.selectPatient'))
-  if (!newAppt.value.serviceType) return ElMessage.warning(t('appointments.selectServiceType'))
-  if (!selectedAvailabilitySlot.value) {
-    return ElMessage.warning(availabilitySlots.value.length ? t('appointments.selectStartTime') : t('appointments.noAvailableSlots'))
-  }
-
-  try {
-    const created = await appointmentsStore.createAppointment({
-      ...newAppt.value,
-      practitionerId: newAppt.value.practitionerId || selectedAvailabilitySlot.value.assignedPractitionerId || null,
-      roomId: selectedAvailabilitySlot.value.roomId || newAppt.value.roomId || null,
-      startTime: selectedAvailabilitySlot.value.startTime,
-      endTime: selectedAvailabilitySlot.value.endTime,
-      branchId: branchesStore.currentBranchId || null,
-    })
-    selectedAppt.value = getAppointmentWithInfo(created)
-    ElMessage.success(t('appointments.appointmentCreated'))
-    closeCreateDialog()
-  } catch (error) {
-    ElMessage.error(error.message || t('appointments.slotUnavailable'))
-  }
-}
-
 async function submitAppointment() {
-  if (availabilityLoading.value) return
+  if (availabilityLoading.value || appointmentSubmitting.value) return
   if (!newAppt.value.patientId) return ElMessage.warning(t('appointments.selectPatient'))
   if (!newAppt.value.serviceType) return ElMessage.warning(t('appointments.selectServiceType'))
   if (!selectedAvailabilitySlot.value) {
@@ -581,18 +563,22 @@ async function submitAppointment() {
     branchId: branchesStore.currentBranchId || null,
   }
 
+  const editing = isEditingAppointment.value
+  appointmentSubmitting.value = true
+  let saved = false
   try {
-    if (isEditingAppointment.value) {
-      const updated = await appointmentsStore.updateAppointment(editingAppointmentId.value, payload)
-      selectedAppt.value = getAppointmentWithInfo(updated)
-      closeCreateDialog()
-      ElMessage.success(t('appointments.appointmentUpdated'))
-      return
-    }
-    await createAppointment()
+    const result = editing
+      ? await appointmentsStore.updateAppointment(editingAppointmentId.value, payload)
+      : await appointmentsStore.createAppointment(payload)
+    selectedAppt.value = getAppointmentWithInfo(result)
+    saved = true
+    ElMessage.success(t(editing ? 'appointments.appointmentUpdated' : 'appointments.appointmentCreated'))
   } catch (error) {
     ElMessage.error(error.message || t('appointments.slotUnavailable'))
+  } finally {
+    appointmentSubmitting.value = false
   }
+  if (saved) closeCreateDialog()
 }
 
 const showScheduleDrawer = ref(false)
@@ -971,10 +957,12 @@ async function handleSendPreviewEmail() {
       :title="appointmentDialogTitle"
       size="640px"
       direction="rtl"
-      :close-on-press-escape="true"
+      :close-on-press-escape="!appointmentSubmitting"
+      :close-on-click-modal="!appointmentSubmitting"
+      :show-close="!appointmentSubmitting"
       @close="closeCreateDialog"
     >
-      <el-form :model="newAppt" label-width="96px">
+      <el-form :model="newAppt" label-width="96px" :disabled="appointmentSubmitting">
         <el-form-item :label="t('appointments.patient')" required>
           <template v-if="!quickCreateMode">
             <div style="display:flex;gap:8px;width:100%">
@@ -1044,6 +1032,7 @@ async function handleSendPreviewEmail() {
                 v-for="slot in availabilitySlots"
                 :key="slot.startTime"
                 type="button"
+                :disabled="appointmentSubmitting"
                 class="availability-card"
                 :class="{ active: selectedSlotValue === slot.startTime }"
                 @click="selectedSlotValue = slot.startTime"
@@ -1083,8 +1072,8 @@ async function handleSendPreviewEmail() {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="closeCreateDialog">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :disabled="availabilityLoading || !selectedAvailabilitySlot" @click="submitAppointment">
+        <el-button :disabled="appointmentSubmitting" @click="closeCreateDialog">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="appointmentSubmitting" :disabled="appointmentSubmitting || availabilityLoading || !selectedAvailabilitySlot" @click="submitAppointment">
           {{ isEditingAppointment ? t('appointments.saveAppointmentChanges') : t('appointments.confirmAppointment') }}
         </el-button>
       </template>
