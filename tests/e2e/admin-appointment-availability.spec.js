@@ -241,3 +241,111 @@ test('switching service and practitioner ignores the earlier service availabilit
   expect(state.writes[0].body).toMatchObject({ practitionerId: 'other-doctor', serviceType: 'brief', startTime: start('14:00'), endTime: start('14:30') })
   expect(state.errors).toEqual([])
 })
+
+async function beginQuickPatient(drawer) {
+  await drawer.getByRole('button', { name: '新建', exact: true }).click()
+  await drawer.getByPlaceholder('姓 Last name', { exact: true }).fill('Newfamily')
+  await drawer.getByPlaceholder('名 First name', { exact: true }).fill('Newperson')
+  await drawer.getByPlaceholder('邮箱', { exact: true }).fill('new-patient@example.invalid')
+}
+
+test('quick patient creation is single-submit and locks the appointment until the new patient is selected', async ({ page }) => {
+  let release
+  const patientResponse = new Promise(resolve => { release = resolve })
+  const state = await fixture(page, { onWrite: async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/patients') {
+      await patientResponse
+      return route.fulfill({ json: { ...route.request().postDataJSON(), id: 'quick-patient', isActive: true } })
+    }
+    return route.fulfill({ json: { ...route.request().postDataJSON(), id: 'created' } })
+  } })
+  // Deliberately keep an old patient selected before starting quick creation.
+  const drawer = await openCreate(page)
+  await beginQuickPatient(drawer)
+  const createPatient = drawer.getByRole('button', { name: '创建并选择', exact: true })
+  await createPatient.evaluate(button => { button.click(); button.click() })
+  await expect.poll(() => state.writes.filter(write => write.path === '/api/patients').length).toBe(1)
+  await expect(createPatient).toBeDisabled()
+  await expect(drawer.getByRole('button', { name: '取消', exact: true })).toBeDisabled()
+  await expect(drawer.getByRole('button', { name: 'Cancel', exact: true })).toBeDisabled()
+  await expect(drawer.locator('.el-drawer__close-btn')).toHaveCount(0)
+  for (const placeholder of ['姓 Last name', '名 First name', '邮箱', 'Special notes']) {
+    await expect(drawer.getByPlaceholder(placeholder, { exact: true })).toBeDisabled()
+  }
+  await expect(drawer.locator('.availability-card').first()).toBeDisabled()
+  const save = drawer.getByRole('button', { name: 'Confirm Appointment', exact: true })
+  await expect(save).toBeDisabled()
+  await save.evaluate(button => button.click())
+  await page.keyboard.press('Escape')
+  await expect(drawer).toBeVisible()
+  await expect(drawer.getByPlaceholder('姓 Last name', { exact: true })).toBeVisible()
+  expect(state.writes.filter(write => write.path.startsWith('/api/appointments'))).toEqual([])
+  release()
+  await expect(drawer.getByPlaceholder('姓 Last name', { exact: true })).not.toBeVisible()
+  await expect(drawer).toContainText('Newfamily Newperson (new-patient@example.invalid)')
+  await expect(save).toBeEnabled()
+  await save.click()
+  await expect.poll(() => state.writes.filter(write => write.path === '/api/appointments').length).toBe(1)
+  expect(state.writes.find(write => write.path === '/api/appointments').body.patientId).toBe('quick-patient')
+  expect(state.writes.filter(write => write.path === '/api/patients')).toHaveLength(1)
+  await expect(drawer).not.toBeVisible()
+  const edit = await openEdit(page)
+  await expect(edit).toContainText('Fixture Patient (fixture@example.invalid)')
+  await expect(edit).not.toContainText('Newfamily Newperson')
+  expect(state.errors).toEqual([])
+})
+
+test('quick patient failure retains entered details and permits a safe retry before booking', async ({ page }) => {
+  let attempts = 0
+  const state = await fixture(page, { onWrite: async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/patients') {
+      attempts++
+      if (attempts === 1) return route.fulfill({ status: 503, json: { message: 'Fixture patient creation failure' } })
+      return route.fulfill({ json: { ...route.request().postDataJSON(), id: 'quick-patient', isActive: true } })
+    }
+    return route.fulfill({ json: { ...route.request().postDataJSON(), id: 'created' } })
+  } })
+  const drawer = await openCreate(page)
+  await beginQuickPatient(drawer)
+  await drawer.getByRole('button', { name: '创建并选择', exact: true }).click()
+  await expect(page.getByText('Fixture patient creation failure', { exact: true })).toBeVisible()
+  await expect(drawer.getByRole('button', { name: '创建并选择', exact: true })).toBeEnabled()
+  await expect(drawer.getByRole('button', { name: '取消', exact: true })).toBeEnabled()
+  await expect(drawer.getByRole('button', { name: 'Cancel', exact: true })).toBeEnabled()
+  await expect(drawer.getByPlaceholder('姓 Last name', { exact: true })).toHaveValue('Newfamily')
+  await expect(drawer.getByPlaceholder('名 First name', { exact: true })).toHaveValue('Newperson')
+  await expect(drawer.getByPlaceholder('邮箱', { exact: true })).toHaveValue('new-patient@example.invalid')
+  await expect(drawer.getByPlaceholder('邮箱', { exact: true })).toBeEnabled()
+  await expect(drawer.getByRole('button', { name: 'Confirm Appointment', exact: true })).toBeDisabled()
+  expect(state.writes.filter(write => write.path.startsWith('/api/appointments'))).toEqual([])
+  await drawer.getByRole('button', { name: '创建并选择', exact: true }).click()
+  await expect(drawer).toContainText('Newfamily Newperson (new-patient@example.invalid)')
+  await drawer.getByRole('button', { name: 'Confirm Appointment', exact: true }).click()
+  await expect.poll(() => state.writes.filter(write => write.path === '/api/appointments').length).toBe(1)
+  const patients = state.writes.filter(write => write.path === '/api/patients')
+  expect(patients).toHaveLength(2)
+  expect(patients[1].body).toMatchObject({ firstName: 'Newperson', lastName: 'Newfamily', emails: ['new-patient@example.invalid'] })
+  expect(state.writes.find(write => write.path === '/api/appointments').body.patientId).toBe('quick-patient')
+  expect(state.errors).toEqual([])
+})
+
+test('quick patient editing prevents booking the previously selected patient until cancelled', async ({ page }) => {
+  const state = await fixture(page)
+  const drawer = await openCreate(page)
+  const save = drawer.getByRole('button', { name: 'Confirm Appointment', exact: true })
+  await expect(save).toBeEnabled()
+  await beginQuickPatient(drawer)
+  await expect(save).toBeDisabled()
+  await save.evaluate(button => button.click())
+  expect(state.writes).toEqual([])
+  await drawer.getByRole('button', { name: '取消', exact: true }).click()
+  await expect(drawer.getByPlaceholder('姓 Last name', { exact: true })).not.toBeVisible()
+  await expect(drawer).toContainText('Fixture Patient (fixture@example.invalid)')
+  await expect(save).toBeEnabled()
+  await save.click()
+  await expect.poll(() => state.writes.length).toBe(1)
+  expect(state.writes[0]).toMatchObject({ path: '/api/appointments', body: { patientId: 'patient' } })
+  expect(state.errors).toEqual([])
+})

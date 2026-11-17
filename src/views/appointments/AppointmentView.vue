@@ -331,6 +331,7 @@ const availabilityState = ref({ slots: [], duration: 0, slotStepMinutes: 10 })
 const quickCreateMode = ref(false)
 const quickPatientForm = ref({ firstName: '', lastName: '', email: '' })
 const quickCreating = ref(false)
+const appointmentBusy = computed(() => appointmentSubmitting.value || quickCreating.value)
 let availabilityRequestId = 0
 
 const newAppt = ref({
@@ -388,6 +389,7 @@ watch([() => newAppt.value.serviceType, practitionerOptions, filteredRooms], () 
 })
 
 function openCreateDialog({ date, practitionerId, preferredStartTime } = {}) {
+  if (appointmentBusy.value) return
   appointmentDialogMode.value = 'create'
   editingAppointmentId.value = ''
   newAppt.value = {
@@ -405,6 +407,7 @@ function openCreateDialog({ date, practitionerId, preferredStartTime } = {}) {
 }
 
 function openEditDialog(appointment = selectedAppt.value) {
+  if (appointmentBusy.value) return
   if (!appointment?.id) return
   appointmentDialogMode.value = 'edit'
   editingAppointmentId.value = appointment.id
@@ -427,7 +430,7 @@ function openEditDialog(appointment = selectedAppt.value) {
 }
 
 function closeCreateDialog() {
-  if (appointmentSubmitting.value) return
+  if (appointmentBusy.value) return
   availabilityRequestId += 1
   availabilityLoading.value = false
   availabilityState.value = { slots: [], duration: 0, slotStepMinutes: 10 }
@@ -440,13 +443,20 @@ function closeCreateDialog() {
   quickPatientForm.value = { firstName: '', lastName: '', email: '' }
 }
 
+function setQuickCreateMode(enabled) {
+  if (appointmentBusy.value) return
+  quickCreateMode.value = enabled
+}
+
 async function quickCreatePatient() {
+  if (appointmentBusy.value || !showCreateDialog.value || !quickCreateMode.value || isEditingAppointment.value) return
   const firstName = quickPatientForm.value.firstName?.trim()
   const lastName = quickPatientForm.value.lastName?.trim()
   const email = quickPatientForm.value.email?.trim()
   if (!lastName || !firstName) return ElMessage.warning('请输入病人姓和名')
   if (!email) return ElMessage.warning('请输入病人邮箱')
   const name = `${lastName} ${firstName}`.trim()
+  const draft = newAppt.value
   quickCreating.value = true
   try {
     const patient = await patientsStore.addPatient({
@@ -455,7 +465,9 @@ async function quickCreatePatient() {
       lastName,
       emails: [email],
     })
-    newAppt.value.patientId = patient.id
+    // A delayed patient response must never select a patient in another appointment.
+    if (newAppt.value !== draft || !showCreateDialog.value || !quickCreateMode.value) return
+    draft.patientId = patient.id
     quickCreateMode.value = false
     quickPatientForm.value = { firstName: '', lastName: '', email: '' }
     ElMessage.success(`病人「${patient.name}」已创建`)
@@ -547,7 +559,7 @@ function getAvailablePractitionerNames(slot) {
 }
 
 async function submitAppointment() {
-  if (availabilityLoading.value || appointmentSubmitting.value) return
+  if (availabilityLoading.value || appointmentBusy.value || quickCreateMode.value) return
   if (!newAppt.value.patientId) return ElMessage.warning(t('appointments.selectPatient'))
   if (!newAppt.value.serviceType) return ElMessage.warning(t('appointments.selectServiceType'))
   if (!selectedAvailabilitySlot.value) {
@@ -957,12 +969,12 @@ async function handleSendPreviewEmail() {
       :title="appointmentDialogTitle"
       size="640px"
       direction="rtl"
-      :close-on-press-escape="!appointmentSubmitting"
-      :close-on-click-modal="!appointmentSubmitting"
-      :show-close="!appointmentSubmitting"
+      :close-on-press-escape="!appointmentBusy"
+      :close-on-click-modal="!appointmentBusy"
+      :show-close="!appointmentBusy"
       @close="closeCreateDialog"
     >
-      <el-form :model="newAppt" label-width="96px" :disabled="appointmentSubmitting">
+      <el-form :model="newAppt" label-width="96px" :disabled="appointmentBusy">
         <el-form-item :label="t('appointments.patient')" required>
           <template v-if="!quickCreateMode">
             <div style="display:flex;gap:8px;width:100%">
@@ -974,7 +986,7 @@ async function handleSendPreviewEmail() {
                   :value="patient.id"
                 />
               </el-select>
-              <el-button v-if="!isEditingAppointment" size="small" @click="quickCreateMode = true">新建</el-button>
+              <el-button v-if="!isEditingAppointment" size="small" @click="setQuickCreateMode(true)">新建</el-button>
             </div>
           </template>
           <template v-else>
@@ -986,7 +998,7 @@ async function handleSendPreviewEmail() {
               </div>
               <div style="display:flex;gap:8px">
                 <el-button type="primary" size="small" :loading="quickCreating" @click="quickCreatePatient">创建并选择</el-button>
-                <el-button size="small" @click="quickCreateMode = false">取消</el-button>
+                <el-button size="small" @click="setQuickCreateMode(false)">取消</el-button>
               </div>
             </div>
           </template>
@@ -1032,7 +1044,7 @@ async function handleSendPreviewEmail() {
                 v-for="slot in availabilitySlots"
                 :key="slot.startTime"
                 type="button"
-                :disabled="appointmentSubmitting"
+                :disabled="appointmentBusy"
                 class="availability-card"
                 :class="{ active: selectedSlotValue === slot.startTime }"
                 @click="selectedSlotValue = slot.startTime"
@@ -1072,8 +1084,8 @@ async function handleSendPreviewEmail() {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button :disabled="appointmentSubmitting" @click="closeCreateDialog">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="appointmentSubmitting" :disabled="appointmentSubmitting || availabilityLoading || !selectedAvailabilitySlot" @click="submitAppointment">
+        <el-button :disabled="appointmentBusy" @click="closeCreateDialog">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="appointmentSubmitting" :disabled="appointmentBusy || quickCreateMode || availabilityLoading || !selectedAvailabilitySlot" @click="submitAppointment">
           {{ isEditingAppointment ? t('appointments.saveAppointmentChanges') : t('appointments.confirmAppointment') }}
         </el-button>
       </template>
