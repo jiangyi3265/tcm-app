@@ -185,21 +185,67 @@ function resetForm() {
 // 合并档案
 const mergeFrom = ref('')
 const mergeTo = ref('')
+const confirmingMerge = ref(false)
+const mergeBusy = computed(() => confirmingMerge.value
+  || ['submitting', 'refreshing'].includes(patientsStore.mergeState?.phase))
+const mergeNotice = computed(() => {
+  const state = patientsStore.mergeState
+  if (state?.phase === 'submitting') return t('patients.mergeSubmitting')
+  if (state?.phase === 'refreshing') return t('patients.mergeRefreshing')
+  return t(state?.outcome === 'confirmed' ? 'patients.mergeSavedRefreshRequired' : 'patients.mergeUnknownRefreshRequired')
+})
+
+function openMergeDialog() {
+  if (mergeBusy.value) return
+  showMergeDialog.value = true
+}
+
+function closeMergeDialog() {
+  if (mergeBusy.value) return
+  showMergeDialog.value = false
+}
+
+function finishMergeDialog() {
+  showMergeDialog.value = false
+  mergeFrom.value = ''
+  mergeTo.value = ''
+}
+
+async function handleMergeRefresh() {
+  if (mergeBusy.value) return
+  const result = await patientsStore.retryMergeRefresh()
+  if (!result) return
+  if (!result.refreshed) return ElMessage.warning(mergeNotice.value)
+  finishMergeDialog()
+  if (result.confirmed) ElMessage.success(t('patients.mergeSuccess'))
+  else ElMessage.warning(t('patients.mergeRefreshedReview'))
+}
 
 async function handleMerge() {
+  if (mergeBusy.value || patientsStore.mergeState) return
   if (!mergeFrom.value || !mergeTo.value) return ElMessage.warning(t('patients.selectMerge'))
   if (mergeFrom.value === mergeTo.value) return ElMessage.warning(t('patients.cannotMergeSame'))
-  await ElMessageBox.confirm(
-    t('patients.mergeConfirmMsg'),
-    t('patients.mergeConfirmTitle'),
-    { type: 'warning' },
-  )
-  const result = await patientsStore.mergePatients(mergeTo.value, mergeFrom.value)
-  if (result) {
-    ElMessage.success(t('patients.mergeSuccess'))
-    showMergeDialog.value = false
-    mergeFrom.value = ''
-    mergeTo.value = ''
+  const keepId = mergeTo.value
+  const mergeId = mergeFrom.value
+  confirmingMerge.value = true
+  try {
+    await ElMessageBox.confirm(
+      t('patients.mergeConfirmMsg'),
+      t('patients.mergeConfirmTitle'),
+      { type: 'warning' },
+    )
+    const result = await patientsStore.mergePatients(keepId, mergeId)
+    if (!result) return
+    if (patientsStore.mergeState) ElMessage.warning(mergeNotice.value)
+    else {
+      finishMergeDialog()
+      ElMessage.success(t('patients.mergeSuccess'))
+    }
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error(patientsStore.mergeState ? mergeNotice.value : t('common.operationFailed'))
+  } finally {
+    confirmingMerge.value = false
   }
 }
 
@@ -231,7 +277,7 @@ function displayPhone(patient) {
         :prefix-icon="'Search'"
       />
       <div class="toolbar-actions">
-        <el-button v-if="canMerge" @click="showMergeDialog = true">
+        <el-button v-if="canMerge" :disabled="mergeBusy" @click="openMergeDialog">
           <el-icon><Merge /></el-icon> {{ t('patients.mergeRecords') }}
         </el-button>
         <el-button v-if="canCreate" type="primary" @click="openAddPatientDialog">
@@ -239,6 +285,10 @@ function displayPhone(patient) {
         </el-button>
       </div>
     </div>
+
+    <el-alert v-if="patientsStore.mergeState && !showMergeDialog" :title="mergeNotice" type="warning" :closable="false" show-icon style="margin-bottom: 16px">
+      <el-button v-if="canMerge && patientsStore.mergeState.phase === 'refresh-required'" @click="handleMergeRefresh">{{ t('patients.refreshMergeRecords') }}</el-button>
+    </el-alert>
 
     <el-alert
       v-if="isApprenticeReadonly"
@@ -496,11 +546,12 @@ function displayPhone(patient) {
     </el-drawer>
 
     <!-- 合并档案对话框 -->
-    <el-drawer v-model="showMergeDialog" :title="t('patients.mergeDialog')" size="min(500px, 100vw)" direction="rtl">
+    <el-drawer v-model="showMergeDialog" :title="t('patients.mergeDialog')" size="min(500px, 100vw)" direction="rtl" :close-on-press-escape="!mergeBusy" :close-on-click-modal="!mergeBusy" :show-close="!mergeBusy">
       <el-alert type="warning" show-icon :closable="false" style="margin-bottom: 16px">
         {{ t('patients.mergeWarning') }}
       </el-alert>
-      <el-form label-width="90px">
+      <el-alert v-if="patientsStore.mergeState" :title="mergeNotice" type="warning" :closable="false" show-icon style="margin-bottom: 16px" />
+      <el-form v-if="!patientsStore.mergeState" label-width="90px" :disabled="mergeBusy">
         <el-form-item :label="t('patients.keepRecord')">
           <el-select v-model="mergeTo" filterable :placeholder="t('patients.selectKeep')" style="width: 100%">
             <el-option v-for="p in patientsStore.activePatients" :key="p.id" :label="patientOptionLabel(p)" :value="p.id" />
@@ -513,8 +564,9 @@ function displayPhone(patient) {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showMergeDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="danger" @click="handleMerge">{{ t('patients.confirmMerge') }}</el-button>
+        <el-button :disabled="mergeBusy" @click="closeMergeDialog">{{ t('common.cancel') }}</el-button>
+        <el-button v-if="patientsStore.mergeState" :loading="mergeBusy" :disabled="mergeBusy || patientsStore.mergeState.phase !== 'refresh-required'" @click="handleMergeRefresh">{{ t('patients.refreshMergeRecords') }}</el-button>
+        <el-button v-else type="danger" :loading="mergeBusy" @click="handleMerge">{{ t('patients.confirmMerge') }}</el-button>
       </template>
     </el-drawer>
   </div>

@@ -286,6 +286,12 @@ export default {
     selectMerge: 'Please select records to merge',
     cannotMergeSame: 'Cannot merge the same record',
     mergeSuccess: 'Records merged successfully',
+    mergeSubmitting: 'Merging the selected records. Please wait.',
+    mergeRefreshing: 'Refreshing patient, consultation and appointment records. Please wait.',
+    mergeSavedRefreshRequired: 'The merge succeeded, but some records could not be refreshed. Refresh records before continuing. The merge will not be submitted again.',
+    mergeUnknownRefreshRequired: 'The merge result could not be confirmed. Refresh records to check the current records before making another merge decision.',
+    refreshMergeRecords: 'Refresh Records',
+    mergeRefreshedReview: 'Records refreshed. Review the current patients before deciding whether to merge again.',
   },
 
   // ── Patient Detail ──

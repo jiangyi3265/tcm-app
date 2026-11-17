@@ -221,9 +221,17 @@ const hasAccess = computed(() => {
 
 // ── 编辑模式 ──
 const editing = ref(false)
+const editSubmitting = ref(false)
+const deactivating = ref(false)
+const consentSubmitting = ref(false)
+const sendingConsentEmail = ref(false)
+const sendingIntakeEmail = ref(false)
+const patientMutationBusy = computed(() => editSubmitting.value || deactivating.value
+  || consentSubmitting.value || sendingConsentEmail.value || sendingIntakeEmail.value)
 const editForm = ref({})
 
 function startEdit() {
+  if (patientMutationBusy.value || !patient.value) return
   const addressCountry = normalizeCountryCode(patient.value?.addressCountry, DEFAULT_COUNTRY)
   editForm.value = {
     ...patient.value,
@@ -236,13 +244,20 @@ function startEdit() {
 }
 
 function cancelEdit() {
+  if (patientMutationBusy.value) return
   editing.value = false
 }
 
 async function saveEdit() {
+  if (patientMutationBusy.value || !editing.value) return
+  editSubmitting.value = true
   try {
     const updates = { ...editForm.value }
     updates.gender = normalizeGender(updates.gender)
+    // Lifecycle changes belong to the dedicated deactivate, restore and merge actions.
+    delete updates.isActive
+    delete updates.deletedAt
+    delete updates.mergedInto
     if (hasConsultationDrivenHistory.value) {
       delete updates.historyAndMedication
       delete updates.historySourceConsultId
@@ -256,6 +271,8 @@ async function saveEdit() {
     ElMessage.success(t('patientDetail.patientSaved'))
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    editSubmitting.value = false
   }
 }
 
@@ -271,6 +288,7 @@ const allConsentAgreed = computed(() =>
 )
 
 function openConsentDialog() {
+  if (patientMutationBusy.value) return
   consentForm.value = {
     agreements: Object.fromEntries(consentSections.value.map((section) => [section.key, false])),
     signatureName: '',
@@ -278,18 +296,27 @@ function openConsentDialog() {
   showConsentDialog.value = true
 }
 
+function closeConsentDialog() {
+  if (consentSubmitting.value) return
+  showConsentDialog.value = false
+}
+
 async function confirmConsent() {
+  if (patientMutationBusy.value) return
   if (!allConsentAgreed.value) return ElMessage.warning(t('patientDetail.pleaseAgree'))
   if (!consentForm.value.signatureName.trim()) return ElMessage.warning(t('patientDetail.pleaseSignName'))
+  consentSubmitting.value = true
   try {
     await patientsStore.signConsent(patientId, {
       signatureName: consentForm.value.signatureName.trim(),
-      sectionAcknowledgements: consentForm.value.agreements,
+      sectionAcknowledgements: { ...consentForm.value.agreements },
     })
     showConsentDialog.value = false
     ElMessage.success(t('patientDetail.consentSigned'))
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    consentSubmitting.value = false
   }
 }
 
@@ -300,6 +327,8 @@ function sendConsent() {
 
 // ── 停用病人 ──
 async function deletePatient() {
+  if (patientMutationBusy.value) return
+  deactivating.value = true
   try {
     await ElMessageBox.confirm(
       t('patientDetail.deactivateConfirm'),
@@ -310,7 +339,9 @@ async function deletePatient() {
     ElMessage.success(t('patientDetail.deactivated'))
     router.push('/patients')
   } catch (e) {
-    if (e !== 'cancel') ElMessage.error(e.message)
+    if (e !== 'cancel' && e !== 'close') ElMessage.error(e.message)
+  } finally {
+    deactivating.value = false
   }
 }
 
@@ -444,9 +475,8 @@ function displayProvince(patientRecord = patient.value) {
 }
 
 // ── 邮件签署同意书 ──
-const sendingConsentEmail = ref(false)
-
 async function sendConsentByEmail() {
+  if (patientMutationBusy.value) return
   sendingConsentEmail.value = true
   try {
     const res = await patientsApi.sendConsentEmail(patientId, {
@@ -470,9 +500,8 @@ async function sendConsentByEmail() {
 }
 
 // ── 发送问诊单 ──
-const sendingIntakeEmail = ref(false)
-
 async function sendIntakeByEmail() {
+  if (patientMutationBusy.value) return
   sendingIntakeEmail.value = true
   try {
     const res = await patientsApi.sendIntakeEmail(patientId, {
@@ -696,10 +725,10 @@ const fileTree = computed(() => {
         </div>
       </div>
       <div class="patient-actions">
-        <el-button v-if="!isApprenticeReadonly && !patient.consentSigned" size="small" @click="sendConsent">
+        <el-button v-if="!isApprenticeReadonly && !patient.consentSigned" size="small" :disabled="patientMutationBusy" @click="sendConsent">
           <el-icon><Document /></el-icon> {{ t('patientDetail.signConsent') }}
         </el-button>
-        <el-button v-if="canEdit && !editing" size="small" @click="startEdit">
+        <el-button v-if="canEdit && !editing" size="small" :disabled="patientMutationBusy" @click="startEdit">
           <el-icon><Edit /></el-icon> {{ t('patientDetail.editButton') }}
         </el-button>
         <el-button
@@ -710,7 +739,7 @@ const fileTree = computed(() => {
         >
           <el-icon><Plus /></el-icon> {{ t('patientDetail.newConsultation') }}
         </el-button>
-        <el-button v-if="canDelete" size="small" type="danger" text @click="deletePatient">{{ t('patientDetail.deactivate') }}</el-button>
+        <el-button v-if="canDelete" size="small" type="danger" text :loading="deactivating" :disabled="patientMutationBusy" @click="deletePatient">{{ t('patientDetail.deactivate') }}</el-button>
       </div>
     </div>
 
@@ -855,13 +884,13 @@ const fileTree = computed(() => {
                     {{ t('patientDetail.signedTime') }}{{ formatDateTime(patient.consentSignedAt) }}
                   </div>
                   <div style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap">
-                    <el-button v-if="!patient.consentSigned" size="small" type="primary" plain @click="sendConsent">
+                    <el-button v-if="!patient.consentSigned" size="small" type="primary" plain :disabled="patientMutationBusy" @click="sendConsent">
                       <el-icon><Document /></el-icon> {{ t('patientDetail.markAsSigned') }}
                     </el-button>
-                    <el-button v-if="!patient.consentSigned" size="small" type="success" plain :loading="sendingConsentEmail" @click="sendConsentByEmail">
+                    <el-button v-if="!patient.consentSigned" size="small" type="success" plain :loading="sendingConsentEmail" :disabled="patientMutationBusy" @click="sendConsentByEmail">
                       <el-icon><Message /></el-icon> {{ t('patientDetail.sendConsentEmail') }}
                     </el-button>
-                    <el-button size="small" type="warning" plain :loading="sendingIntakeEmail" @click="sendIntakeByEmail">
+                    <el-button size="small" type="warning" plain :loading="sendingIntakeEmail" :disabled="patientMutationBusy" @click="sendIntakeByEmail">
                       <el-icon><EditPen /></el-icon> Send Initial Intake
                     </el-button>
                   </div>
@@ -896,7 +925,7 @@ const fileTree = computed(() => {
             <el-row :gutter="24">
               <el-col :span="14">
                 <div class="section-title">{{ t('patientDetail.contactInfo') }}</div>
-                <el-form :model="editForm" label-width="110px" size="small">
+                <el-form :model="editForm" label-width="110px" size="small" :disabled="patientMutationBusy">
                   <el-row :gutter="12">
                     <el-col :span="12">
                       <el-form-item :label="t('patientDetail.lastName')">
@@ -1069,10 +1098,10 @@ const fileTree = computed(() => {
               </el-col>
               <el-col :span="10">
                 <div class="edit-save-panel">
-                  <el-button type="primary" @click="saveEdit">
+                  <el-button type="primary" :loading="editSubmitting" :disabled="patientMutationBusy" @click="saveEdit">
                     <el-icon><Check /></el-icon> {{ t('patientDetail.saveChanges') }}
                   </el-button>
-                  <el-button @click="cancelEdit">{{ t('common.cancel') }}</el-button>
+                  <el-button :disabled="patientMutationBusy" @click="cancelEdit">{{ t('common.cancel') }}</el-button>
                 </div>
               </el-col>
             </el-row>
@@ -1288,11 +1317,11 @@ const fileTree = computed(() => {
                         {{ t('patientDetail.consentRequired') }}
                       </p>
                       <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center">
-                        <el-button type="primary" @click="openConsentDialog">
+                        <el-button type="primary" :disabled="patientMutationBusy" @click="openConsentDialog">
                           <el-icon><Document /></el-icon>
                           {{ t('patientDetail.signConsentButton') }}
                         </el-button>
-                        <el-button type="success" :loading="sendingConsentEmail" @click="sendConsentByEmail">
+                        <el-button type="success" :loading="sendingConsentEmail" :disabled="patientMutationBusy" @click="sendConsentByEmail">
                           <el-icon><Message /></el-icon>
                           {{ t('patientDetail.sendConsentEmail') }}
                         </el-button>
@@ -1490,7 +1519,7 @@ const fileTree = computed(() => {
   </div>
 
   <!-- 知情同意书签署对话框 -->
-  <el-drawer v-model="showConsentDialog" :title="t('patientDetail.signConsentDialog')" size="600px" direction="rtl" :close-on-press-escape="true">
+  <el-drawer v-model="showConsentDialog" :title="t('patientDetail.signConsentDialog')" size="600px" direction="rtl" :close-on-press-escape="!consentSubmitting" :close-on-click-modal="!consentSubmitting" :show-close="!consentSubmitting">
     <div style="max-height: 300px; overflow-y: auto; padding: 16px; background: #f9f9f9; border-radius: 8px; margin-bottom: 16px; font-size: 14px; line-height: 1.8; color: #555">
       <h3 style="color:#1b4332; margin-bottom: 4px">{{ consentTemplate.title }}</h3>
       <p v-if="consentTemplate.version" style="margin-top:0;color:#888;font-size:12px">Version: {{ consentTemplate.version }}</p>
@@ -1501,7 +1530,7 @@ const fileTree = computed(() => {
         </p>
       </div>
     </div>
-    <el-form :model="consentForm" label-width="80px">
+    <el-form :model="consentForm" label-width="80px" :disabled="patientMutationBusy">
       <el-form-item v-for="section in consentSections" :key="`agree-${section.key}`">
         <el-checkbox v-model="consentForm.agreements[section.key]">
           {{ section.title }} · {{ t('patientDetail.consentAgree') }}
@@ -1512,8 +1541,8 @@ const fileTree = computed(() => {
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="showConsentDialog = false">{{ t('common.cancel') }}</el-button>
-      <el-button type="primary" :disabled="!allConsentAgreed || !consentForm.signatureName.trim()" @click="confirmConsent">{{ t('patientDetail.confirmSign') }}</el-button>
+      <el-button :disabled="consentSubmitting" @click="closeConsentDialog">{{ t('common.cancel') }}</el-button>
+      <el-button type="primary" :loading="consentSubmitting" :disabled="patientMutationBusy || !allConsentAgreed || !consentForm.signatureName.trim()" @click="confirmConsent">{{ t('patientDetail.confirmSign') }}</el-button>
     </template>
   </el-drawer>
 </template>

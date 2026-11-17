@@ -23,6 +23,8 @@ export const useConsultationsStore = defineStore('consultations', () => {
   const deletedPrescriptions = ref([])
   const inventoryStore = useInventoryStore()
   let revision = 0
+  let listRequestId = 0
+  let latestListPromise = null
 
   function upsertConsultation(record, fallback = {}) {
     const normalized = normalizeConsultation({ ...fallback, ...record })
@@ -58,19 +60,39 @@ export const useConsultationsStore = defineStore('consultations', () => {
     writeStoredJson('tcm_consultations', consultations.value)
   }
 
-  async function refreshFromApi() {
+  function readLatestList(retryCount = 0) {
+    const requestId = ++listRequestId
     const startedAtRevision = revision
-    const list = await consultationsApi.list()
-    if (startedAtRevision !== revision) return consultations.value
-    consultations.value = (Array.isArray(list) ? list : []).map(normalizeConsultation)
-    saveState()
-    return consultations.value
+    const pending = (async () => {
+      const list = await consultationsApi.list()
+      if (requestId !== listRequestId) return latestListPromise
+      if (startedAtRevision !== revision) {
+        // A skipped read is not a successful post-merge refresh. Read once more
+        // after the write; continued changes require an explicit later retry.
+        if (retryCount >= 1) throw new Error('Consultations changed while refreshing. Please refresh again.')
+        return readLatestList(retryCount + 1)
+      }
+      consultations.value = (Array.isArray(list) ? list : []).map(normalizeConsultation)
+      saveState()
+      return consultations.value
+    })()
+    latestListPromise = pending
+    return pending
+  }
+
+  function refreshFromApi() {
+    return readLatestList()
   }
 
   async function refreshConsultationFromApi(id) {
     if (!id) return null
+    const startedAtListRequest = listRequestId
     const startedAtRevision = revision
     const record = await consultationsApi.get(id)
+    if (startedAtListRequest !== listRequestId) {
+      await latestListPromise
+      return getConsultation(id)
+    }
     if (!record) return null
     if (startedAtRevision !== revision) return getConsultation(record.id) || record
     return upsertConsultation(record)

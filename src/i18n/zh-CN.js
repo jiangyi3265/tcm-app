@@ -286,6 +286,12 @@ export default {
     selectMerge: '请选择要合并的档案',
     cannotMergeSame: '不能合并同一个档案',
     mergeSuccess: '档案合并成功',
+    mergeSubmitting: '正在合并已选择的档案，请稍候。',
+    mergeRefreshing: '正在刷新患者、诊疗和预约记录，请稍候。',
+    mergeSavedRefreshRequired: '合并已成功，但部分记录刷新失败。请先刷新记录再继续；不会重复提交合并。',
+    mergeUnknownRefreshRequired: '暂时无法确认合并结果。请刷新并核对当前档案后，再决定是否需要合并。',
+    refreshMergeRecords: '刷新记录',
+    mergeRefreshedReview: '记录已刷新。请核对当前患者档案，再决定是否需要重新合并。',
   },
 
   // ── 病人详情 ──

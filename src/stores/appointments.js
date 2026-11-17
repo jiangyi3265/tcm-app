@@ -7,6 +7,7 @@ import { readStoredJson, writeStoredJson } from '../utils/storage'
 export const useAppointmentsStore = defineStore('appointments', () => {
   const appointments = ref([])
   let refreshRequestId = 0
+  let latestRefreshPromise = null
   let mutationRevision = 0
   const changedAtRevision = new Map()
 
@@ -18,23 +19,27 @@ export const useAppointmentsStore = defineStore('appointments', () => {
     writeStoredJson('tcm_appointments', appointments.value)
   }
 
-  async function refreshFromApi() {
+  function refreshFromApi() {
     const requestId = ++refreshRequestId
     const startedAtRevision = mutationRevision
-    const list = await appointmentsApi.list()
-    if (requestId !== refreshRequestId) return appointments.value
-    const merged = new Map((Array.isArray(list) ? list : []).map(record => [record.id, record]))
-    // Keep writes completed after this read began, while still loading other
-    // server records that were not present in the initial browser cache.
-    for (const appointment of appointments.value) {
-      if ((changedAtRevision.get(appointment.id) || 0) > startedAtRevision) {
-        merged.set(appointment.id, appointment)
+    const pending = (async () => {
+      const list = await appointmentsApi.list()
+      if (requestId !== refreshRequestId) return latestRefreshPromise
+      const merged = new Map((Array.isArray(list) ? list : []).map(record => [record.id, record]))
+      // Keep writes completed after this read began, while still loading other
+      // server records that were not present in the initial browser cache.
+      for (const appointment of appointments.value) {
+        if ((changedAtRevision.get(appointment.id) || 0) > startedAtRevision) {
+          merged.set(appointment.id, appointment)
+        }
       }
-    }
-    appointments.value = [...merged.values()]
-    changedAtRevision.clear()
-    saveState()
-    return appointments.value
+      appointments.value = [...merged.values()]
+      changedAtRevision.clear()
+      saveState()
+      return appointments.value
+    })()
+    latestRefreshPromise = pending
+    return pending
   }
 
   function upsertAppointment(appointment) {

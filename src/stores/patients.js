@@ -10,6 +10,7 @@ import { findStaffPatientByIdentity, isLinkedStaffPatient } from '../utils/staff
 
 export const usePatientsStore = defineStore('patients', () => {
   const patients = ref([])
+  const mergeState = ref(null)
   let refreshRequestId = 0
   let latestRefreshPromise = null
   let mutationRevision = 0
@@ -166,11 +167,48 @@ export const usePatientsStore = defineStore('patients', () => {
 
   const deletedPatients = computed(() => patients.value.filter((p) => p.deletedAt))
 
+  async function refreshMergeRecords(operation) {
+    operation.phase = 'refreshing'
+    const results = await Promise.allSettled([
+      Promise.resolve().then(() => refreshFromApi()),
+      Promise.resolve().then(() => useConsultationsStore().refreshFromApi()),
+      Promise.resolve().then(() => useAppointmentsStore().refreshFromApi()),
+    ])
+    if (results.some(result => result.status === 'rejected')) {
+      operation.phase = 'refresh-required'
+      return { refreshed: false, confirmed: operation.outcome === 'confirmed' }
+    }
+    const confirmed = operation.outcome === 'confirmed'
+      || getPatient(operation.mergeId)?.mergedInto === operation.keepId
+    mergeState.value = null
+    return { refreshed: true, confirmed }
+  }
+
+  async function retryMergeRefresh() {
+    const operation = mergeState.value
+    if (!operation || operation.phase !== 'refresh-required') return null
+    return refreshMergeRecords(operation)
+  }
+
   async function mergePatients(keepId, mergeId) {
-    await patientsApi.merge(keepId, mergeId)
-    await refreshFromApi()
-    await useConsultationsStore().refreshFromApi()
-    await useAppointmentsStore().refreshFromApi()
+    if (mergeState.value) return false
+    if (!keepId || !mergeId || keepId === mergeId) throw new Error('Select two different patient records.')
+    mergeState.value = { keepId, mergeId, phase: 'submitting', outcome: 'unknown' }
+    const operation = mergeState.value
+    try {
+      const result = await patientsApi.merge(keepId, mergeId)
+      if (result?.ok !== true) throw new Error('Merge confirmation was not received.')
+    } catch (error) {
+      // A transport failure does not prove that the server did not commit.
+      operation.phase = 'refresh-required'
+      throw error
+    }
+    operation.outcome = 'confirmed'
+    const source = getPatient(mergeId)
+    if (source) upsertPatient({ ...source, isActive: false, mergedInto: keepId })
+    await refreshMergeRecords(operation)
+    // Preserve the existing success return for a confirmed merge even when a
+    // read failed. Callers use mergeState to offer GET-only recovery.
     return true
   }
 
@@ -238,10 +276,10 @@ export const usePatientsStore = defineStore('patients', () => {
   init()
 
   return {
-    patients, activePatients, deletedPatients,
+    patients, activePatients, deletedPatients, mergeState,
     getPatient, searchPatients, addPatient, updatePatient,
     deletePatient, restorePatient, physicalDeletePatient,
-    refreshFromApi, mergePatients, signConsent, getPatientsByPractitioner,
+    refreshFromApi, mergePatients, retryMergeRefresh, signConsent, getPatientsByPractitioner,
     getPatientByStaffUserId, ensureStaffPatient,
   }
 })
