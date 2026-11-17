@@ -36,6 +36,7 @@ onMounted(async () => {
 })
 
 async function handleCancel() {
+  if (cancelling.value || cancelled.value || !appointmentInfo.value?.canCancel) return
   cancelling.value = true
   error.value = ''
   try {

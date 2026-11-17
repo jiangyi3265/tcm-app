@@ -10,6 +10,10 @@ import { findStaffPatientByIdentity, isLinkedStaffPatient } from '../utils/staff
 
 export const usePatientsStore = defineStore('patients', () => {
   const patients = ref([])
+  let refreshRequestId = 0
+  let latestRefreshPromise = null
+  let mutationRevision = 0
+  const changesDuringRefresh = new Map()
 
   function init() {
     patients.value = readStoredJson('tcm_patients', []) || []
@@ -19,13 +23,42 @@ export const usePatientsStore = defineStore('patients', () => {
     writeStoredJson('tcm_patients', patients.value)
   }
 
-  async function refreshFromApi() {
-    const list = await patientsApi.list()
-    patients.value = Array.isArray(list)
-      ? list.map((patient) => ({ ...patient, gender: normalizeGender(patient?.gender) }))
-      : []
+  function upsertPatient(patient) {
+    if (!patient?.id) return patient
+    const normalized = { ...patient, gender: normalizeGender(patient.gender) }
+    // Resolve the index after the API returns; a list refresh may have reordered it.
+    const idx = patients.value.findIndex((item) => item.id === normalized.id)
+    if (idx === -1) patients.value.push(normalized)
+    else patients.value[idx] = normalized
+    changesDuringRefresh.set(normalized.id, { revision: ++mutationRevision, patient: normalized })
     saveState()
-    return patients.value
+    return normalized
+  }
+
+  function refreshFromApi() {
+    const requestId = ++refreshRequestId
+    const startedAtRevision = mutationRevision
+    const pending = (async () => {
+      const list = await patientsApi.list()
+      // Callers such as ensureStaffPatient need the authoritative read (or its
+      // error), never old cache when their request is superseded.
+      if (requestId !== refreshRequestId) return latestRefreshPromise
+      const merged = new Map((Array.isArray(list) ? list : []).map(patient =>
+        [patient.id, { ...patient, gender: normalizeGender(patient.gender) }],
+      ))
+      // Keep newer writes without hiding other patients returned by this list.
+      for (const [id, change] of changesDuringRefresh) {
+        if (change.revision <= startedAtRevision) continue
+        if (change.patient) merged.set(id, change.patient)
+        else merged.delete(id)
+      }
+      patients.value = [...merged.values()]
+      changesDuringRefresh.clear()
+      saveState()
+      return patients.value
+    })()
+    latestRefreshPromise = pending
+    return pending
   }
 
   const activePatients = computed(() => sortPatientsByName(patients.value.filter((p) => p.isActive && !p.deletedAt)))
@@ -86,10 +119,7 @@ export const usePatientsStore = defineStore('patients', () => {
       isStaffProfile: Boolean(data.isStaffProfile),
     }
     const created = await patientsApi.create(newPatient)
-    const normalized = { ...created, gender: normalizeGender(created?.gender) }
-    patients.value.push(normalized)
-    saveState()
-    return normalized
+    return upsertPatient(created)
   }
 
   async function updatePatient(id, updates) {
@@ -111,31 +141,25 @@ export const usePatientsStore = defineStore('patients', () => {
         updates.name = `${ln} ${fn}`.trim() || p.name
       }
       const updated = await patientsApi.update(id, updates)
-      const normalized = { ...updated, gender: normalizeGender(updated?.gender) }
-      patients.value[idx] = normalized
-      saveState()
-      return normalized
+      return upsertPatient(updated)
     }
     return null
   }
 
   async function deletePatient(id) {
     const updated = await patientsApi.softDelete(id)
-    const idx = patients.value.findIndex((p) => p.id === id)
-    if (idx !== -1) patients.value[idx] = { ...updated, gender: normalizeGender(updated?.gender) }
-    saveState()
+    upsertPatient(updated)
   }
 
   async function restorePatient(id) {
     const updated = await patientsApi.restore(id)
-    const idx = patients.value.findIndex((p) => p.id === id)
-    if (idx !== -1) patients.value[idx] = { ...updated, gender: normalizeGender(updated?.gender) }
-    saveState()
+    upsertPatient(updated)
   }
 
   async function physicalDeletePatient(id) {
     const result = await patientsApi.hardDelete(id)
     patients.value = patients.value.filter((p) => p.id !== id)
+    changesDuringRefresh.set(id, { revision: ++mutationRevision, patient: null })
     saveState()
     return result
   }
@@ -152,10 +176,7 @@ export const usePatientsStore = defineStore('patients', () => {
 
   async function signConsent(id, data = {}) {
     const updated = await patientsApi.signConsent(id, data)
-    const idx = patients.value.findIndex((p) => p.id === id)
-    if (idx !== -1) patients.value[idx] = updated
-    saveState()
-    return updated
+    return upsertPatient(updated)
   }
 
   function getPatientsByPractitioner(practitionerId) {
@@ -198,10 +219,7 @@ export const usePatientsStore = defineStore('patients', () => {
           linkedUserId: String(user.id),
           isStaffProfile: true,
         })
-        const idx = patients.value.findIndex((p) => p.id === byEmail.id)
-        if (idx !== -1) patients.value[idx] = updated
-        saveState()
-        return updated
+        return upsertPatient(updated)
       }
     }
     // 创建新病人
