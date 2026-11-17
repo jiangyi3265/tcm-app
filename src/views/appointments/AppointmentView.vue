@@ -565,6 +565,7 @@ async function createAppointment() {
 }
 
 async function submitAppointment() {
+  if (availabilityLoading.value) return
   if (!newAppt.value.patientId) return ElMessage.warning(t('appointments.selectPatient'))
   if (!newAppt.value.serviceType) return ElMessage.warning(t('appointments.selectServiceType'))
   if (!selectedAvailabilitySlot.value) {
@@ -1083,7 +1084,7 @@ async function handleSendPreviewEmail() {
       </el-form>
       <template #footer>
         <el-button @click="closeCreateDialog">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="submitAppointment">
+        <el-button type="primary" :disabled="availabilityLoading || !selectedAvailabilitySlot" @click="submitAppointment">
           {{ isEditingAppointment ? t('appointments.saveAppointmentChanges') : t('appointments.confirmAppointment') }}
         </el-button>
       </template>
